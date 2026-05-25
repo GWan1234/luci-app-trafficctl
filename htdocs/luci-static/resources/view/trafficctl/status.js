@@ -418,9 +418,10 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		{ key:'mac',              label:'MAC',          num:false, tip: _('Hardware MAC address'), hide:true },
 		{ key:'_speed',           label: _('DL Speed'), num:true,  tip: _('Current download speed (bytes/sec from router to device)') },
 		{ key:'_spark',           label: '',            num:false, tip: _('Speed history graph (shared scale)') },
-		{ key:'total',            label: _('Conns'),    num:true,  tip: _('Total active connections in conntrack') },
-		{ key:'tcp',              label:'TCP',          num:true,  tip: _('Active TCP connections'), hide:true },
-		{ key:'udp',              label:'UDP',          num:true,  tip: _('Active UDP connections'), hide:true },
+		{ key:'conns',            label: _('Conns'),    num:true,  tip: _('Active connections in conntrack') },
+		{ key:'total',            label: _('Bytes'),    num:true,  tip: _('Total bytes transferred (conntrack)'), hide:true },
+		{ key:'tcp',              label:'TCP',          num:true,  tip: _('TCP bytes transferred'), hide:true },
+		{ key:'udp',              label:'UDP',          num:true,  tip: _('UDP bytes transferred'), hide:true },
 		{ key:'blocked',          label: _('Inet'),     num:false, tip: _('Internet access status (paused = traffic blocked)') },
 		{ key:'conn_type',        label: _('Link'),     num:false, tip: _('Connection type: WiFi or Ethernet') },
 		{ key:'_throttle_kbit',   label: _('Throttle'), num:true,  tip: _('Speed limit: shaper (queue) or limiter (drop)') },
@@ -508,9 +509,10 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		var sparkSvg = renderSparkline(speedHistory[r.ip], globalSpeedMax, 60, 20);
 		if (sparkSvg) cellMap._spark.appendChild(sparkSvg);
 
-		cellMap.total = E('td', { 'style': td+';text-align:right;font-weight:600' }, String(r.total));
-		cellMap.tcp = E('td', { 'style': td+';text-align:right;color:'+C.proto }, String(r.tcp));
-		cellMap.udp = E('td', { 'style': td+';text-align:right;color:'+C.stateClose }, String(r.udp));
+		cellMap.conns = E('td', { 'style': td+';text-align:right;font-weight:600' }, String(r.conns||0));
+		cellMap.total = E('td', { 'style': td+';text-align:right;font-family:monospace;font-size:11px' }, fmtBytes(r.total||0));
+		cellMap.tcp = E('td', { 'style': td+';text-align:right;font-family:monospace;font-size:11px;color:'+C.proto }, fmtBytes(r.tcp||0));
+		cellMap.udp = E('td', { 'style': td+';text-align:right;font-family:monospace;font-size:11px;color:'+C.stateClose }, fmtBytes(r.udp||0));
 
 		var inetBadge = r.blocked
 			? E('span', { 'style': 'color:'+C.rateFg+';font-weight:600' }, '⏸️ ' + _('paused'))
@@ -729,19 +731,20 @@ function buildExtendedStatsLegend(shapeMap, dropMap) {
 
 function buildSearchSelect(devices, placeholder, onSelect) {
 	var selectedValue = '__all__';
+	var recentIps = [];
+	var MAX_RECENT = 5;
 	var wrapper = E('div', { 'style': 'position:relative;display:inline-block;width:100%;max-width:480px' });
 	var input = E('input', {
 		'type': 'text',
-		'class': 'cbi-input-text',
 		'placeholder': placeholder,
 		'autocomplete': 'off',
-		'style': 'width:100%;padding:8px 32px 8px 12px;font-size:14px;border:2px solid var(--tm-border);border-radius:6px'
+		'style': 'width:100%;padding:8px 32px 8px 12px;font-size:14px;border:2px solid var(--tm-border);border-radius:6px;cursor:pointer;background:var(--tm-bg);color:var(--tm-text)'
 	});
 	var clearBtn = E('span', {
 		'style': 'position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;color:var(--tm-text-mute);font-size:16px;display:none;line-height:1'
 	}, '×');
 	var dropdown = E('div', {
-		'style': 'position:absolute;top:100%;left:0;right:0;max-height:240px;overflow-y:auto;' +
+		'style': 'position:absolute;top:100%;left:0;right:0;max-height:280px;overflow-y:auto;' +
 				 'background:var(--tm-bg);border:1px solid var(--tm-border);border-top:none;border-radius:0 0 4px 4px;' +
 				 'box-shadow:0 4px 8px rgba(0,0,0,.15);z-index:100;display:none'
 	});
@@ -750,36 +753,88 @@ function buildSearchSelect(devices, placeholder, onSelect) {
 	wrapper.appendChild(dropdown);
 
 	var highlightIdx = -1;
+	var ITEM_STYLE = 'padding:6px 10px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--tm-border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+
+	function addToRecent(ip) {
+		recentIps = recentIps.filter(function(r) { return r !== ip; });
+		recentIps.unshift(ip);
+		if (recentIps.length > MAX_RECENT) recentIps.length = MAX_RECENT;
+	}
+
+	function highlightMatch(text, q) {
+		if (!q) return escHtml(text);
+		var lower = text.toLowerCase();
+		var idx = lower.indexOf(q);
+		if (idx === -1) return escHtml(text);
+		return escHtml(text.substring(0, idx)) + '<b>' + escHtml(text.substring(idx, idx + q.length)) + '</b>' + escHtml(text.substring(idx + q.length));
+	}
+
+	function deviceLabel(d) {
+		return d.name + '  —  ' + d.ip + (d.mac ? '  (' + d.mac + ')' : '');
+	}
+
+	function mkItem(it, idx, q) {
+		var item = E('div', { 'style': ITEM_STYLE, 'data-value': it.value });
+		if (q && it.value !== '__all__') {
+			item.innerHTML = highlightMatch(it.label, q);
+		} else {
+			item.textContent = it.label;
+		}
+		if (it.section) {
+			item.style.cssText = 'padding:3px 10px;font-size:11px;color:var(--tm-text-mute);font-weight:600;text-transform:uppercase;letter-spacing:.3px;cursor:default;border-bottom:1px solid var(--tm-border)';
+			return item;
+		}
+		if (it.value === '__all__') {
+			item.style.cssText = ITEM_STYLE + ';font-weight:600;color:var(--tm-proto)';
+		}
+		item.addEventListener('mousedown', function(ev) {
+			ev.preventDefault();
+			selectItem(it.value, it.label);
+		});
+		item.addEventListener('mouseenter', function() {
+			highlightIdx = idx;
+			updateHighlight(dropdown);
+		});
+		return item;
+	}
 
 	function renderItems(filter) {
 		while (dropdown.firstChild) dropdown.removeChild(dropdown.firstChild);
 		var q = (filter || '').toLowerCase();
-		var items = [{ value: '__all__', label: '— ' + _('All active devices') + ' —', searchText: '' }];
+		var items = [];
+		items.push({ value: '__all__', label: '— ' + _('All active devices') + ' —', searchText: '' });
+
+		if (!q && recentIps.length > 0) {
+			items.push({ section: true, label: _('Recent'), value: '_hdr_recent' });
+			recentIps.forEach(function(ip) {
+				var d = devices.filter(function(dev) { return dev.ip === ip; })[0];
+				if (d) items.push({ value: d.ip, label: deviceLabel(d), searchText: '' });
+			});
+			items.push({ section: true, label: _('All'), value: '_hdr_all' });
+		}
+
 		devices.forEach(function(d) {
-			items.push({ value: d.ip, label: d.name + '  —  ' + d.ip + (d.mac ? '  (' + d.mac + ')' : ''), searchText: (d.name + ' ' + d.ip + ' ' + (d.mac||'')).toLowerCase() });
+			var st = (d.name + ' ' + d.ip + ' ' + (d.mac||'')).toLowerCase();
+			if (!q || st.indexOf(q) !== -1) {
+				items.push({ value: d.ip, label: deviceLabel(d), searchText: st });
+			}
 		});
-		var filtered = items.filter(function(it) {
-			return it.value === '__all__' || !q || it.searchText.indexOf(q) !== -1;
-		});
+
 		highlightIdx = -1;
-		filtered.forEach(function(it, idx) {
-			var style = 'padding:6px 10px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--tm-border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
-			var item = E('div', { 'style': style, 'data-value': it.value }, it.label);
-			item.addEventListener('mousedown', function(ev) {
-				ev.preventDefault();
-				selectItem(it.value, it.label);
-			});
-			item.addEventListener('mouseenter', function() {
-				highlightIdx = idx;
-				updateHighlight(dropdown);
-			});
+		var actionIdx = 0;
+		items.forEach(function(it) {
+			var item = mkItem(it, actionIdx, q);
 			dropdown.appendChild(item);
+			if (!it.section) actionIdx++;
 		});
 	}
 
 	function updateHighlight(dd) {
-		Array.prototype.forEach.call(dd.children, function(el, i) {
-			el.style.background = i === highlightIdx ? 'var(--tm-hover)' : '';
+		var actionIdx = 0;
+		Array.prototype.forEach.call(dd.children, function(el) {
+			if (el.getAttribute('data-value') && el.getAttribute('data-value').indexOf('_hdr_') === 0) return;
+			el.style.background = actionIdx === highlightIdx ? 'var(--tm-hover)' : '';
+			actionIdx++;
 		});
 	}
 
@@ -789,6 +844,7 @@ function buildSearchSelect(devices, placeholder, onSelect) {
 			input.value = '';
 			clearBtn.style.display = 'none';
 		} else {
+			addToRecent(value);
 			input.value = label.replace(/\s+\(.*\)$/, '');
 			clearBtn.style.display = '';
 		}
@@ -797,21 +853,27 @@ function buildSearchSelect(devices, placeholder, onSelect) {
 	}
 
 	input.addEventListener('focus', function() {
+		this.style.cursor = 'text';
 		renderItems(input.value);
 		dropdown.style.display = '';
+	});
+	input.addEventListener('blur', function() {
+		this.style.cursor = 'pointer';
+		setTimeout(function() { dropdown.style.display = 'none'; }, 150);
 	});
 	input.addEventListener('input', function() {
 		renderItems(input.value);
 		dropdown.style.display = '';
 	});
-	input.addEventListener('blur', function() {
-		setTimeout(function() { dropdown.style.display = 'none'; }, 150);
-	});
 	input.addEventListener('keydown', function(ev) {
-		var items = dropdown.children;
+		var actionItems = [];
+		Array.prototype.forEach.call(dropdown.children, function(el) {
+			var v = el.getAttribute('data-value');
+			if (v && v.indexOf('_hdr_') !== 0) actionItems.push(el);
+		});
 		if (ev.key === 'ArrowDown') {
 			ev.preventDefault();
-			highlightIdx = Math.min(highlightIdx + 1, items.length - 1);
+			highlightIdx = Math.min(highlightIdx + 1, actionItems.length - 1);
 			updateHighlight(dropdown);
 		} else if (ev.key === 'ArrowUp') {
 			ev.preventDefault();
@@ -819,8 +881,8 @@ function buildSearchSelect(devices, placeholder, onSelect) {
 			updateHighlight(dropdown);
 		} else if (ev.key === 'Enter') {
 			ev.preventDefault();
-			if (highlightIdx >= 0 && highlightIdx < items.length) {
-				var el = items[highlightIdx];
+			if (highlightIdx >= 0 && highlightIdx < actionItems.length) {
+				var el = actionItems[highlightIdx];
 				selectItem(el.getAttribute('data-value'), el.textContent);
 			}
 		} else if (ev.key === 'Escape') {
@@ -903,6 +965,61 @@ return view.extend({
 			return E('span', { 'style': 'color:'+C.textMute+';font-size:12px;margin-right:4px;white-space:nowrap' }, t);
 		}
 
+		function mkInlinePick(options, currentValue, onChange) {
+			var wrapper = E('span', {'style':'position:relative;display:inline-block'});
+			var display = E('span', {
+				'style': 'color:var(--tm-text);font-size:12px;font-weight:500;cursor:pointer;' +
+					'border-bottom:1px dashed var(--tm-text-mute);padding-bottom:1px;white-space:nowrap'
+			});
+			var popup = E('div', {
+				'style': 'display:none;position:absolute;top:calc(100% + 4px);left:50%;transform:translateX(-50%);' +
+					'background:var(--tm-bg);border:1px solid var(--tm-border);border-radius:6px;' +
+					'box-shadow:0 4px 12px rgba(0,0,0,.15);z-index:200;padding:4px 0;white-space:nowrap'
+			});
+			var selectedValue = currentValue;
+
+			function updateDisplay() {
+				var label = selectedValue;
+				for (var i = 0; i < options.length; i++) {
+					if (options[i].v === selectedValue) { label = options[i].l; break; }
+				}
+				display.textContent = label;
+			}
+
+			function buildPopup() {
+				while (popup.firstChild) popup.removeChild(popup.firstChild);
+				options.forEach(function(opt) {
+					var active = opt.v === selectedValue;
+					var item = E('div', {
+						'style': 'padding:4px 14px;cursor:pointer;font-size:12px;' +
+							(active ? 'color:var(--tm-proto);font-weight:600;background:var(--tm-hover)' : 'color:var(--tm-text)')
+					}, opt.l);
+					item.addEventListener('mousedown', function(ev) {
+						ev.preventDefault();
+						selectedValue = opt.v;
+						updateDisplay();
+						popup.style.display = 'none';
+						onChange(opt.v);
+					});
+					item.addEventListener('mouseenter', function() { this.style.background = 'var(--tm-hover)'; });
+					item.addEventListener('mouseleave', function() { this.style.background = active ? 'var(--tm-hover)' : ''; });
+					popup.appendChild(item);
+				});
+			}
+
+			display.addEventListener('click', function(ev) {
+				ev.stopPropagation();
+				buildPopup();
+				popup.style.display = popup.style.display === 'none' ? '' : 'none';
+			});
+			document.addEventListener('click', function() { popup.style.display = 'none'; });
+
+			wrapper.appendChild(display);
+			wrapper.appendChild(popup);
+			updateDisplay();
+			return { el: wrapper, getValue: function() { return selectedValue; }, setValue: function(v) { selectedValue = v; updateDisplay(); } };
+		}
+
 		var showStats = mkToggle('tm-stats', _('Stats'), opts.showStats !== false, function() {
 			var o = loadOpts(); o.showStats = this.checked; saveOpts(o); updateUrlParams(o);
 			statsDiv.style.display = this.checked ? '' : 'none';
@@ -922,73 +1039,40 @@ return view.extend({
 
 		var extStatsDiv = E('div', { 'style': opts.extendedStats ? '' : 'display:none' });
 
-		var refreshSel = E('select', { 'class': 'cbi-input-select', 'style': 'width:60px' }, [
-			E('option',{'value':'0'}, _('Off')), E('option',{'value':'5'},'5s'),
-			E('option',{'value':'10'},'10s'), E('option',{'value':'30'},'30s'),
-			E('option',{'value':'60'},'60s')
-		]);
-		Array.prototype.forEach.call(refreshSel.options, function(o) {
-			if (o.value === String(opts.refresh||0)) o.selected = true;
-		});
-		refreshSel.addEventListener('change', function() {
-			var o = loadOpts(); o.refresh = parseInt(this.value); saveOpts(o); updateUrlParams(o); self._setupTimer();
+		var refreshPick = mkInlinePick([
+			{v:'0',l:_('Off')},{v:'5',l:'5s'},{v:'10',l:'10s'},{v:'30',l:'30s'},{v:'60',l:'60s'}
+		], String(opts.refresh||0), function(v) {
+			var o = loadOpts(); o.refresh = parseInt(v); saveOpts(o); updateUrlParams(o); self._setupTimer();
 		});
 
-		var pollIntervalSel = E('select', { 'class': 'cbi-input-select', 'style': 'width:52px' }, [
-			E('option',{'value':'1'},'1s'),
-			E('option',{'value':'2'},'2s'),
-			E('option',{'value':'5'},'5s')
-		]);
-		Array.prototype.forEach.call(pollIntervalSel.options, function(o) {
-			if (o.value === String(opts.pollInterval || 2)) o.selected = true;
-		});
-		pollIntervalSel.addEventListener('change', function() {
-			var o = loadOpts(); o.pollInterval = parseInt(this.value); saveOpts(o); updateUrlParams(o);
+		var pollIntervalPick = mkInlinePick([
+			{v:'1',l:'1s'},{v:'2',l:'2s'},{v:'5',l:'5s'}
+		], String(opts.pollInterval||2), function(v) {
+			var o = loadOpts(); o.pollInterval = parseInt(v); saveOpts(o); updateUrlParams(o);
 			self._restartBytesPoll();
 		});
 
-		var avgWindowSel = E('select', { 'class': 'cbi-input-select', 'style': 'width:56px' }, [
-			E('option',{'value':'5'},'5s'),
-			E('option',{'value':'15'},'15s'),
-			E('option',{'value':'30'},'30s'),
-			E('option',{'value':'60'},'60s')
-		]);
-		Array.prototype.forEach.call(avgWindowSel.options, function(o) {
-			if (o.value === String(opts.avgWindow || 15)) o.selected = true;
-		});
-		avgWindowSel.addEventListener('change', function() {
-			var o = loadOpts(); o.avgWindow = parseInt(this.value); saveOpts(o); updateUrlParams(o);
+		var avgWindowPick = mkInlinePick([
+			{v:'5',l:'5s'},{v:'15',l:'15s'},{v:'30',l:'30s'},{v:'60',l:'60s'}
+		], String(opts.avgWindow||15), function(v) {
+			var o = loadOpts(); o.avgWindow = parseInt(v); saveOpts(o); updateUrlParams(o);
 		});
 
-		var avgMethodSel = E('select', { 'class': 'cbi-input-select', 'style': 'width:76px' }, [
-			E('option',{'value':'simple'}, _('Simple')),
-			E('option',{'value':'ewma'}, _('EWMA'))
-		]);
-		Array.prototype.forEach.call(avgMethodSel.options, function(o) {
-			if (o.value === (opts.avgMethod || 'simple')) o.selected = true;
-		});
-		avgMethodSel.addEventListener('change', function() {
-			var o = loadOpts(); o.avgMethod = this.value; saveOpts(o); updateUrlParams(o);
+		var avgMethodPick = mkInlinePick([
+			{v:'simple',l:_('Simple')},{v:'ewma',l:_('EWMA')}
+		], opts.avgMethod||'simple', function(v) {
+			var o = loadOpts(); o.avgMethod = v; saveOpts(o); updateUrlParams(o);
 		});
 
-		var protoSel = E('select', { 'class': 'cbi-input-select' }, [
-			E('option',{'value':'all'}, _('All')), E('option',{'value':'tcp'},'TCP'), E('option',{'value':'udp'},'UDP')
-		]);
-		Array.prototype.forEach.call(protoSel.options, function(o) {
-			if (o.value === (opts.proto||'all')) o.selected = true;
-		});
-		protoSel.addEventListener('change', function() {
-			var o = loadOpts(); o.proto = this.value; saveOpts(o);
+		var protoPick = mkInlinePick([
+			{v:'all',l:_('All')},{v:'tcp',l:'TCP'},{v:'udp',l:'UDP'}
+		], opts.proto||'all', function(v) {
+			var o = loadOpts(); o.proto = v; saveOpts(o);
 		});
 
-		var groupSel = E('select', { 'class': 'cbi-input-select' },
-			GROUP_OPTS.map(function(g){ return E('option', {'value': g.v}, g.l); })
-		);
-		Array.prototype.forEach.call(groupSel.options, function(o) {
-			if (o.value === (opts.groupBy||'none')) o.selected = true;
-		});
-		groupSel.addEventListener('change', function() {
-			var o = loadOpts(); o.groupBy = this.value; saveOpts(o); runQuery();
+		var groupPick = mkInlinePick(
+			GROUP_OPTS, opts.groupBy||'none', function(v) {
+			var o = loadOpts(); o.groupBy = v; saveOpts(o); runQuery();
 		});
 
 		var statusDiv = E('div', { 'style': 'display:none' });
@@ -1004,11 +1088,11 @@ return view.extend({
 
 		function updateInetBtn(blocked) {
 			if (blocked) {
-				inetBtn.textContent = '▶️ ' + _('Resume Internet');
+				inetBtn.textContent = '▶️ ' + _('Unblock Internet');
 				inetBtn.style.cssText = BTN_GREEN;
 				inetBtn._action = 'unblock';
 			} else {
-				inetBtn.textContent = '⏸️ ' + _('Pause Internet');
+				inetBtn.textContent = '⏸️ ' + _('Block Internet');
 				inetBtn.style.cssText = BTN_ORANGE;
 				inetBtn._action = 'block';
 			}
@@ -1020,56 +1104,56 @@ return view.extend({
 			wifiBtn.style.display = '';
 			wifiBtn.disabled = false;
 			if (wifiBlocked) {
-				wifiBtn.textContent = '📡✓ ' + _('Enable WiFi');
+				wifiBtn.textContent = '📡✓ ' + _('Unblock WiFi');
 				wifiBtn.style.cssText = BTN_GREEN;
 				wifiBtn._wifiAction = 'unblock';
 			} else {
-				wifiBtn.textContent = '📡❌ ' + _('Disable WiFi');
+				wifiBtn.textContent = '📡❌ ' + _('Block WiFi');
 				wifiBtn.style.cssText = BTN_ORANGE;
 				wifiBtn._wifiAction = 'block';
 			}
 		}
 
-		var rateSel = E('select', { 'class': 'cbi-input-select' },
-			RATE_PRESETS.map(function(p) { return E('option', { 'value': p.v }, p.l); })
-		);
-		var customInput = E('input', { 'type':'number', 'min':'1', 'step':'1', 'placeholder': _('value'),
-			'class':'cbi-input-text', 'style':'width:90px;display:none' });
-		var customUnit = E('select', { 'class':'cbi-input-select', 'style':'display:none' }, [
-			E('option', {'value':'mbit'}, 'Mbit/s'),
-			E('option', {'value':'kbit'}, 'kbit/s')
-		]);
-		var modeSel = E('select', { 'class': 'cbi-input-select' }, [
-			E('option', { 'value': 'limiter' }, _('Limiter (drop)')),
-			E('option', { 'value': 'shaper'  }, _('Shaper (queue)'))
-		]);
-		var rateBtn = E('button', { 'class': 'cbi-button cbi-button-action' }, _('Apply'));
-
-		rateSel.addEventListener('change', function() {
-			var isCustom = this.value === 'custom';
+		var ratePick = mkInlinePick(RATE_PRESETS, '0', function(v) {
+			var isCustom = v === 'custom';
 			customInput.style.display = isCustom ? '' : 'none';
-			customUnit.style.display  = isCustom ? '' : 'none';
+			customUnitPick.el.style.display = isCustom ? '' : 'none';
 		});
+		var customInput = E('input', { 'type':'number', 'min':'1', 'step':'1', 'placeholder': _('value'),
+			'class':'cbi-input-text', 'style':'width:80px;display:none;font-size:12px;padding:2px 6px' });
+		var customUnitPick = mkInlinePick([
+			{v:'mbit',l:'Mbit/s'},{v:'kbit',l:'kbit/s'}
+		], 'mbit', function() {});
+		customUnitPick.el.style.display = 'none';
+		var modePick = mkInlinePick([
+			{v:'limiter',l:_('Limiter (drop)')},{v:'shaper',l:_('Shaper (queue)')}
+		], 'limiter', function() {});
+		var rateBtn = E('button', { 'class': 'cbi-button cbi-button-action', 'style': 'font-size:12px;padding:3px 12px' }, _('Apply'));
 
 		var rateLimitRow = E('div', {
-			'style': 'display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap'
-		}, [mkLabel(_('Speed Limit') + ':'), rateSel, customInput, customUnit, mkLabel(_('Mode') + ':'), modeSel, rateBtn]);
+			'style': 'display:none;padding:10px 14px;border-radius:4px;margin-bottom:8px;' +
+				'border:1px solid var(--tm-border);background:var(--tm-opts-bg)'
+		}, [
+			E('div', {'style':'font-size:11px;font-weight:600;color:var(--tm-text-mute);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px'}, _('Speed Limit')),
+			E('div', {'style':'display:flex;align-items:center;gap:8px;flex-wrap:wrap'}, [
+				mkLabel(_('Rate') + ':'), ratePick.el, customInput, customUnitPick.el,
+				E('span',{'style':'border-left:1px solid var(--tm-border);height:18px;margin:0 4px'}),
+				mkLabel(_('Mode') + ':'), modePick.el,
+				rateBtn
+			])
+		]);
 
 		function getRateKbit() {
-			var v = rateSel.value;
+			var v = ratePick.getValue();
 			if (v !== 'custom') return v;
 			var n = parseFloat(customInput.value);
 			if (!n || n <= 0) return '0';
-			if (customUnit.value === 'mbit') return String(Math.round(n * 1000));
+			if (customUnitPick.getValue() === 'mbit') return String(Math.round(n * 1000));
 			return String(Math.round(n));
 		}
 
-		var actionRow = E('div', { 'style': 'display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:6px' },
+		var actionRow = E('div', { 'style': 'display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px;margin-bottom:6px;margin-top:8px' },
 			[inetBtn, wifiBtn]);
-		var perDeviceOpts = E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:6px'}, [
-			mkLabel(_('Proto') + ':'), protoSel,
-			mkLabel(_('Group by') + ':'), groupSel
-		]);
 
 		function isAllMode() { return searchSelect.getValue() === '__all__'; }
 
@@ -1077,7 +1161,6 @@ return view.extend({
 			var all = isAllMode();
 			actionRow.style.display     = all ? 'none' : '';
 			rateLimitRow.style.display  = all ? 'none' : '';
-			perDeviceOpts.style.display = all ? 'none' : '';
 		}
 
 		function updateSpeedCells() {
@@ -1273,8 +1356,7 @@ return view.extend({
 						             : 'background:'+C.infoBg   +';border:1px solid '+C.infoBorder+';color:'+C.infoFg);
 					statsDiv.innerHTML = (data.blocked
 						? '<b>⛔ ' + _('BLOCKED') + '</b> — '+data.block_packets+' pkts, '+fmtBytes(data.block_bytes)+' ' + _('dropped') + ' &nbsp;|&nbsp; '
-						: '') + parts.join(' &nbsp;|&nbsp; ') + wifiPart +
-						' &nbsp;<span style="color:'+C.textFaint+';font-size:11px">'+new Date(data.timestamp * 1000).toLocaleTimeString()+'</span>';
+						: '') + parts.join(' &nbsp;|&nbsp; ') + wifiPart;
 				}
 
 				updateInetBtn(data.blocked);
@@ -1283,28 +1365,24 @@ return view.extend({
 				var curShapeRate = data.shape_kbit || 0;
 				var curLimitRate = data.rate_limit_kbit || 0;
 				var curRate = curShapeRate > 0 ? curShapeRate : curLimitRate;
-				modeSel.value = curShapeRate > 0 ? 'shaper' : 'limiter';
+				modePick.setValue(curShapeRate > 0 ? 'shaper' : 'limiter');
 
 				var curRateStr = String(curRate);
-				var matched = false;
-				Array.prototype.forEach.call(rateSel.options, function(o) {
-					if (o.value === curRateStr) { o.selected = true; matched = true; }
-				});
-				if (!matched && curRate > 0) {
-					Array.prototype.forEach.call(rateSel.options, function(o) {
-						if (o.value === 'custom') o.selected = true;
-					});
+				var matched = RATE_PRESETS.some(function(p) { return p.v === curRateStr; });
+				if (matched) {
+					ratePick.setValue(curRateStr);
+					customInput.style.display = 'none';
+					customUnitPick.el.style.display = 'none';
+				} else if (curRate > 0) {
+					ratePick.setValue('custom');
 					customInput.value = curRate;
-					customUnit.value = 'kbit';
+					customUnitPick.setValue('kbit');
 					customInput.style.display = '';
-					customUnit.style.display = '';
-				} else if (matched) {
-					customInput.style.display = 'none';
-					customUnit.style.display = 'none';
+					customUnitPick.el.style.display = '';
 				} else {
-					rateSel.options[0].selected = true;
+					ratePick.setValue('0');
 					customInput.style.display = 'none';
-					customUnit.style.display = 'none';
+					customUnitPick.el.style.display = 'none';
 				}
 
 				while (connsDiv.firstChild) connsDiv.removeChild(connsDiv.firstChild);
@@ -1379,7 +1457,7 @@ return view.extend({
 						}
 					}
 				}
-				setStatus(statusDiv, 'ok', '✓ '+new Date().toLocaleTimeString());
+				setStatus(statusDiv, 'ok', '✓ ' + _('Done'));
 			})
 			.catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); });
 		}
@@ -1400,8 +1478,7 @@ return view.extend({
 					+ rows.filter(function(r){return r.wifi_blocked;}).length+'</b>'
 					+ (limited > 0 ? ' &nbsp;|&nbsp; ' + _('Limited') + ': <b style="color:'+C.rateFg+'">⚡ '+limited+'</b>' : '')
 					+ (shaped > 0 ? ' &nbsp;|&nbsp; ' + _('Shaped') + ': <b style="color:'+C.shapeFg+'">🌊 '+shaped+'</b>' : '')
-					+ (totalDropPkts > 0 ? ' &nbsp;|&nbsp; ' + _('Dropped') + ': <b style="color:'+C.dropFg+'">🚫 '+totalDropPkts+' pkts</b>' : '')
-					+ ' &nbsp;<span style="color:'+C.textFaint+';font-size:11px">'+new Date().toLocaleTimeString()+'</span>';
+					+ (totalDropPkts > 0 ? ' &nbsp;|&nbsp; ' + _('Dropped') + ': <b style="color:'+C.dropFg+'">🚫 '+totalDropPkts+' pkts</b>' : '');
 
 				while (connsDiv.firstChild) connsDiv.removeChild(connsDiv.firstChild);
 				if (rows.length === 0) {
@@ -1421,7 +1498,9 @@ return view.extend({
 							runAll();
 						},
 						function(ip) {
-							searchSelect.setValue(ip, '');
+							var dev = rows.filter(function(r) { return r.ip === ip; })[0];
+							var lbl = dev && dev.name && dev.name !== '*' ? dev.name + '  —  ' + ip : ip;
+							searchSelect.setValue(ip, lbl);
 							var o = loadOpts(); o.lastIp = ip; saveOpts(o); updateUrlParams(o);
 							updateModeUI();
 							runQuery();
@@ -1436,7 +1515,7 @@ return view.extend({
 					connsDiv.appendChild(E('p',{'style':'color:'+C.textFaint+';font-size:11px;margin-top:6px'},
 						_('Click a row to inspect that device. Download speed updates every 2 seconds.')));
 				}
-				setStatus(statusDiv, 'ok', '✓ '+new Date().toLocaleTimeString());
+				setStatus(statusDiv, 'ok', '✓ ' + _('Done'));
 				self._startBytesPoll();
 			})
 			.catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); });
@@ -1473,7 +1552,7 @@ return view.extend({
 			var ip   = searchSelect.getValue();
 			var name = '';
 			var kbit = getRateKbit();
-			var mode = modeSel.value;
+			var mode = modePick.getValue();
 			rateBtn.disabled = true;
 
 			if (kbit === '0') {
@@ -1578,7 +1657,8 @@ return view.extend({
 		var colChipDefs = [
 			{key:'name', label:_('Device')}, {key:'ip', label:'IP'}, {key:'mac', label:'MAC'},
 			{key:'_speed', label:_('Speed')}, {key:'_spark', label:_('Graph')},
-			{key:'total', label:_('Conns')}, {key:'tcp', label:'TCP'}, {key:'udp', label:'UDP'},
+			{key:'conns', label:_('Conns')}, {key:'total', label:_('Bytes')},
+			{key:'tcp', label:'TCP'}, {key:'udp', label:'UDP'},
 			{key:'blocked', label:_('Inet')}, {key:'conn_type', label:_('Link')},
 			{key:'_throttle_kbit', label:_('Throttle')},
 			{key:'_drop_packets', label:_('Drops')}, {key:'_backlog', label:_('Queue')}
@@ -1587,9 +1667,7 @@ return view.extend({
 		var chipOn = chipBase + ';background:var(--tm-proto);color:#fff;border:1px solid var(--tm-proto)';
 		var chipOff = chipBase + ';background:var(--tm-bg);color:var(--tm-text-mute);border:1px solid var(--tm-border)';
 
-		var colChipsContainer = E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:0;margin-bottom:8px'}, [
-			E('span', {'style':'color:var(--tm-text-mute);font-size:11px;margin-right:6px'}, _('Columns') + ':')
-		]);
+		var colChipsContainer = E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:0'});
 		colChipDefs.forEach(function(ct) {
 			var chip = E('span', {
 				'style': savedHidden[ct.key] ? chipOff : chipOn,
@@ -1606,14 +1684,56 @@ return view.extend({
 
 		var ob = 'border:1px solid '+C.optsBorder+';background:'+C.optsBg;
 		var sep = function() { return E('span',{'style':'border-left:1px solid '+C.border+';height:18px;margin:0 4px'}); };
-		var optRow1 = E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:6px'}, [
-			showStats, showConns, extStatsCheck, rdnsCheck
-		]);
-		var optRow2 = E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:6px'}, [
-			mkLabel(_('Refresh')+':'), refreshSel, sep(),
-			mkLabel(_('Poll')+':'), pollIntervalSel, sep(),
-			mkLabel(_('Avg')+':'), avgWindowSel,
-			mkLabel(_('Method')+':'), avgMethodSel
+		var sectionLabel = function(t) { return E('div', {'style':'font-size:11px;font-weight:600;color:var(--tm-text-mute);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;margin-top:8px'}, t); };
+
+		var settingsBody = E('div', {'style':'padding:0 14px 10px'});
+		var settingsCollapsed = false;
+		var settingsToggle = E('div', {
+			'style': 'padding:8px 14px;cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--tm-text-mute)'
+		}, [E('span', {'class':'tm-settings-arrow'}, '▾'), E('span', {}, _('Settings'))]);
+
+		settingsToggle.addEventListener('click', function() {
+			settingsCollapsed = !settingsCollapsed;
+			settingsBody.style.display = settingsCollapsed ? 'none' : '';
+			settingsToggle.firstChild.textContent = settingsCollapsed ? '▸' : '▾';
+		});
+
+		settingsBody.appendChild(E('div', {}, [
+			sectionLabel(_('Display')),
+			E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:6px'}, [
+				showStats, showConns, extStatsCheck, rdnsCheck
+			])
+		]));
+
+		settingsBody.appendChild(E('div', {}, [
+			sectionLabel(_('Speed Monitoring')),
+			E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:6px'}, [
+				E('span', {'title':_('Auto-refresh interval for summary table')}, [mkLabel(_('Refresh')+':'), refreshPick.el]),
+				sep(),
+				E('span', {'title':_('Polling interval for speed measurements')}, [mkLabel(_('Poll')+':'), pollIntervalPick.el]),
+				sep(),
+				E('span', {'title':_('Time window for speed averaging')}, [mkLabel(_('Window')+':'), avgWindowPick.el]),
+				sep(),
+				E('span', {'title':_('Simple = arithmetic mean, EWMA = exponential weighted moving average')}, [mkLabel(_('Method')+':'), avgMethodPick.el])
+			])
+		]));
+
+		settingsBody.appendChild(E('div', {}, [
+			sectionLabel(_('Table Filters')),
+			E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:6px'}, [
+				E('span', {'title':_('Filter connections by protocol')}, [mkLabel(_('Proto')+':'), protoPick.el]),
+				sep(),
+				E('span', {'title':_('Group connections table rows')}, [mkLabel(_('Group')+':'), groupPick.el])
+			])
+		]));
+
+		settingsBody.appendChild(E('div', {}, [
+			sectionLabel(_('Table Columns')),
+			colChipsContainer
+		]));
+
+		var settingsPanel = E('div', {'style':'border-radius:4px;margin-bottom:10px;'+ob}, [
+			settingsToggle, settingsBody
 		]);
 
 		return E('div', {'class':'cbi-map', 'style':'color:'+C.hostname}, [
@@ -1623,13 +1743,9 @@ return view.extend({
 				actionRow,
 				rateLimitRow,
 				statusDiv,
-				E('div', {'style':'padding:8px 12px;border-radius:4px;margin-bottom:10px;'+ob}, [
-					optRow1, optRow2
-				]),
-				perDeviceOpts,
 				statsDiv,
 				extStatsDiv,
-				colChipsContainer,
+				settingsPanel,
 				connsDiv
 			])
 		]);

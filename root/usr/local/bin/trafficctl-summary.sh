@@ -37,23 +37,27 @@ get_mac() {
     echo "$mac" | tr 'A-F' 'a-f'
 }
 
-# Get traffic totals from conntrack
+# Get traffic totals and connection count from conntrack
 get_traffic() {
     local ip="$1"
     cat /proc/net/nf_conntrack 2>/dev/null | grep "src=$ip " | awk -v ip="$ip" '
-    BEGIN { total=0; tcp=0; udp=0 }
+    BEGIN { total=0; tcp=0; udp=0; conns=0 }
     {
         proto=""
         for (i=1; i<=NF; i++) {
             if ($i == "tcp") proto="tcp"
             else if ($i == "udp") proto="udp"
         }
-        # Take the first bytes= field after src=<ip> (original direction)
         src_key = "src=" ip
-        seen_src=0
+        seen_src=0; got_dst=0
         for (i=1; i<=NF; i++) {
-            if ($i == src_key) { seen_src=1; continue }
-            if (seen_src && index($i, "bytes=") == 1) {
+            if ($i == src_key && !seen_src) { seen_src=1; continue }
+            if (seen_src && !got_dst && index($i, "dst=") == 1) {
+                dst=substr($i, 5)
+                if (dst != ip) { got_dst=1; conns++ }
+                else next
+            }
+            if (seen_src && got_dst && index($i, "bytes=") == 1) {
                 b = substr($i, 7) + 0
                 total += b
                 if (proto == "tcp") tcp += b
@@ -62,7 +66,7 @@ get_traffic() {
             }
         }
     }
-    END { printf "%d %d %d", total, tcp, udp }
+    END { printf "%d %d %d %d", total, tcp, udp, conns }
     '
 }
 
@@ -162,6 +166,7 @@ for ip in $ACTIVE_IPS; do
     TOTAL=$(echo "$TRAFFIC" | awk '{print $1}')
     TCP=$(echo "$TRAFFIC" | awk '{print $2}')
     UDP=$(echo "$TRAFFIC" | awk '{print $3}')
+    CONNS=$(echo "$TRAFFIC" | awk '{print $4}')
     BLOCKED=$(check_blocked "$ip")
     BLOCK_BYTES=$(get_block_bytes "$ip")
     [ -z "$BLOCK_BYTES" ] && BLOCK_BYTES=0
@@ -181,8 +186,8 @@ for ip in $ACTIVE_IPS; do
     else
         printf ","
     fi
-    printf '{"ip":"%s","name":"%s","mac":"%s","conn_type":"%s","total":%d,"tcp":%d,"udp":%d,"blocked":%s,"block_bytes":%d,"wifi_blocked":%s,"rate_limit_kbit":%d,"shape_kbit":%d}' \
-        "$ip" "$NAME" "$MAC" "$CONN_TYPE" "$TOTAL" "$TCP" "$UDP" \
+    printf '{"ip":"%s","name":"%s","mac":"%s","conn_type":"%s","conns":%d,"total":%d,"tcp":%d,"udp":%d,"blocked":%s,"block_bytes":%d,"wifi_blocked":%s,"rate_limit_kbit":%d,"shape_kbit":%d}' \
+        "$ip" "$NAME" "$MAC" "$CONN_TYPE" "$CONNS" "$TOTAL" "$TCP" "$UDP" \
         "$([ "$BLOCKED" = "1" ] && echo true || echo false)" \
         "$BLOCK_BYTES" \
         "$([ "$WIFI_BLK" = "1" ] && echo true || echo false)" \
