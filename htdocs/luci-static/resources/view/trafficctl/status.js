@@ -454,7 +454,11 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 
 	var sorted = rows.slice().sort(function(a, b) {
 		var av = a[sortCol], bv = b[sortCol];
-		if (typeof av === 'number') return sortDir === 'asc' ? av - bv : bv - av;
+		if (typeof av === 'number') {
+			var diff = sortDir === 'asc' ? av - bv : bv - av;
+			if (diff !== 0) return diff;
+			return String(a.name || '').localeCompare(String(b.name || ''));
+		}
 		if (typeof av === 'boolean') return sortDir === 'asc' ? (av?1:0)-(bv?1:0) : (bv?1:0)-(av?1:0);
 		if (sortCol === 'ip') {
 			var d = ipToInt(av) - ipToInt(bv);
@@ -1092,7 +1096,11 @@ return view.extend({
 						time: now
 					};
 				});
-				updateSpeedCells();
+				if (self._sumCol === '_speed') {
+					runAll();
+				} else {
+					updateSpeedCells();
+				}
 			}).catch(function(){});
 		}
 
