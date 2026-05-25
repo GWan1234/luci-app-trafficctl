@@ -424,7 +424,7 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		{ key:'udp',              label:'UDP',          num:true,  tip: _('UDP bytes transferred'), hide:true },
 		{ key:'blocked',          label: _('Inet'),     num:false, tip: _('Internet access status (paused = traffic blocked)') },
 		{ key:'conn_type',        label: _('Link'),     num:false, tip: _('Connection type: WiFi or Ethernet') },
-		{ key:'_throttle_kbit',   label: _('Throttle'), num:true,  tip: _('Speed limit: shaper (queue) or limiter (drop)') },
+		{ key:'_throttle_kbit',   label: _('Speed Limit'), num:true,  tip: _('Active speed limit: shaper (queue) or limiter (drop)') },
 		{ key:'_drop_packets',    label: _('Dropped'),  num:true,  tip: _('Packets dropped by rate limiter'), hide:true },
 		{ key:'_backlog',         label: _('Queued'),   num:true,  tip: _('Bytes queued in traffic shaper'), hide:true }
 	];
@@ -570,7 +570,7 @@ function updateUrlParams(opts) {
 	var params = new URLSearchParams();
 	if (opts.lastIp && opts.lastIp !== '__all__') params.set('ip', opts.lastIp);
 	if (opts.refresh && opts.refresh > 0) params.set('refresh', String(opts.refresh));
-	if (opts.pollInterval && opts.pollInterval !== 2) params.set('poll', String(opts.pollInterval));
+	if (opts.pollInterval) params.set('poll', String(opts.pollInterval));
 	if (opts.avgWindow && opts.avgWindow !== 15) params.set('avg', String(opts.avgWindow));
 	if (opts.avgMethod && opts.avgMethod !== 'simple') params.set('method', opts.avgMethod);
 	if (opts.extendedStats) params.set('extended', '1');
@@ -591,7 +591,7 @@ function applyUrlParams(opts) {
 
 	if (paramIp) opts.lastIp = paramIp;
 	if (paramRefresh) opts.refresh = parseInt(paramRefresh) || 0;
-	if (paramPoll) opts.pollInterval = parseInt(paramPoll) || 2;
+	if (paramPoll) opts.pollInterval = parseInt(paramPoll) || 0;
 	if (paramAvg) opts.avgWindow = parseInt(paramAvg) || 15;
 	if (paramMethod && (paramMethod === 'ewma' || paramMethod === 'simple')) opts.avgMethod = paramMethod;
 	if (paramExtended === '1') opts.extendedStats = true;
@@ -1047,8 +1047,8 @@ return view.extend({
 		});
 
 		var pollIntervalPick = mkInlinePick([
-			{v:'1',l:'1s'},{v:'2',l:'2s'},{v:'5',l:'5s'}
-		], String(opts.pollInterval||2), function(v) {
+			{v:'0',l:_('Off')},{v:'1',l:'1s'},{v:'2',l:'2s'},{v:'5',l:'5s'}
+		], String(opts.pollInterval||0), function(v) {
 			var o = loadOpts(); o.pollInterval = parseInt(v); saveOpts(o); updateUrlParams(o);
 			self._restartBytesPoll();
 		});
@@ -1162,6 +1162,8 @@ return view.extend({
 			var all = isAllMode();
 			actionRow.style.display     = all ? 'none' : '';
 			rateLimitRow.style.display  = all ? 'none' : '';
+			rdnsCheck.style.display     = all ? 'none' : '';
+			extStatsCheck.style.display = all ? 'none' : '';
 		}
 
 		function updateSpeedCells() {
@@ -1260,7 +1262,7 @@ return view.extend({
 				var pollInterval = o.pollInterval || 2;
 				var avgWindow = o.avgWindow || 15;
 				var avgMethod = o.avgMethod || 'simple';
-				var maxSamples = Math.max(2, Math.round(avgWindow / pollInterval));
+				var maxSamples = Math.max(2, Math.round(avgWindow / (pollInterval || 2)));
 
 				var activeIps = {};
 				data.forEach(function(d) { activeIps[d.ip] = true; });
@@ -1478,59 +1480,113 @@ return view.extend({
 			.catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); });
 		}
 
+		self._tableFilter = null;
+		self._lastRows = [];
+
+		function applyTableFilter(rows) {
+			var f = self._tableFilter;
+			if (!f) return rows;
+			if (f === 'blocked') return rows.filter(function(r) { return r.blocked; });
+			if (f === 'wifi_blocked') return rows.filter(function(r) { return r.wifi_blocked; });
+			if (f === 'limited') return rows.filter(function(r) { return (r.rate_limit_kbit||0) > 0; });
+			if (f === 'shaped') return rows.filter(function(r) { return (r.shape_kbit||0) > 0; });
+			return rows;
+		}
+
+		function setTableFilter(f) {
+			self._tableFilter = (self._tableFilter === f) ? null : f;
+			renderSummary(self._lastRows);
+		}
+
+		function renderSummary(rows) {
+			self._lastRows = rows;
+			var limited = rows.filter(function(r){return (r.rate_limit_kbit||0) > 0;}).length;
+			var shaped  = rows.filter(function(r){return (r.shape_kbit||0) > 0;}).length;
+			var blocked = rows.filter(function(r){return r.blocked;}).length;
+			var wifiBlk = rows.filter(function(r){return r.wifi_blocked;}).length;
+			var totalDropPkts = Object.keys(self._dropMap).reduce(function(s, ip) { return s + (self._dropMap[ip].packets||0); }, 0);
+
+			var lnk = 'cursor:pointer;text-decoration:underline;text-decoration-style:dashed';
+			var activeFilter = self._tableFilter;
+
+			statsDiv.style.cssText = 'padding:8px 14px;border-radius:4px;font-size:13px;margin-bottom:8px;background:'+C.infoBg+';border:1px solid '+C.infoBorder+';color:'+C.infoFg;
+			while (statsDiv.firstChild) statsDiv.removeChild(statsDiv.firstChild);
+
+			var parts = [];
+			parts.push(E('span', {}, [document.createTextNode(_('Active devices') + ': '), E('b', {}, String(rows.length))]));
+			parts.push(E('span', {'style':lnk+(activeFilter==='blocked'?';font-weight:700':''),'data-filter':'blocked'}, [
+				document.createTextNode(_('Blocked') + ': '), E('b', {'style':'color:'+C.blockedFg}, String(blocked))
+			]));
+			parts.push(E('span', {'style':lnk+(activeFilter==='wifi_blocked'?';font-weight:700':''),'data-filter':'wifi_blocked'}, [
+				document.createTextNode(_('WiFi blocked') + ': '), E('b', {'style':'color:'+C.stateWait}, String(wifiBlk))
+			]));
+			if (limited > 0) parts.push(E('span', {'style':lnk+(activeFilter==='limited'?';font-weight:700':''),'data-filter':'limited'}, [
+				document.createTextNode(_('Limited') + ': '), E('b', {'style':'color:'+C.rateFg}, '⚡ ' + limited)
+			]));
+			if (shaped > 0) parts.push(E('span', {'style':lnk+(activeFilter==='shaped'?';font-weight:700':''),'data-filter':'shaped'}, [
+				document.createTextNode(_('Shaped') + ': '), E('b', {'style':'color:'+C.shapeFg}, '🌊 ' + shaped)
+			]));
+			if (totalDropPkts > 0) parts.push(E('span', {}, [
+				document.createTextNode(_('Dropped') + ': '), E('b', {'style':'color:'+C.dropFg}, '🚫 ' + totalDropPkts + ' pkts')
+			]));
+
+			parts.forEach(function(el, i) {
+				if (i > 0) statsDiv.appendChild(E('span', {'style':'margin:0 6px;color:'+C.textFaint}, '|'));
+				statsDiv.appendChild(el);
+				if (el.getAttribute('data-filter')) {
+					el.addEventListener('click', function() { setTableFilter(el.getAttribute('data-filter')); });
+				}
+			});
+
+			if (activeFilter) {
+				statsDiv.appendChild(E('span', {'style':'margin-left:10px;cursor:pointer;color:'+C.textMute+';font-size:11px'}, '✕ ' + _('clear filter')));
+				statsDiv.lastChild.addEventListener('click', function() { self._tableFilter = null; renderSummary(rows); });
+			}
+
+			var filtered = applyTableFilter(rows);
+			while (connsDiv.firstChild) connsDiv.removeChild(connsDiv.firstChild);
+			if (filtered.length === 0) {
+				connsDiv.appendChild(E('p',{'style':'color:'+C.textMute+';padding:12px 0'}, _('No devices match filter.')));
+			} else {
+				var tbl = buildSummaryTable(
+					filtered,
+					self._sumCol,
+					self._sumDir,
+					function(key, isNum) {
+						if (self._sumCol === key) {
+							self._sumDir = self._sumDir === 'asc' ? 'desc' : 'asc';
+						} else {
+							self._sumCol = key;
+							self._sumDir = isNum ? 'desc' : 'asc';
+						}
+						renderSummary(rows);
+					},
+					function(ip) {
+						var dev = rows.filter(function(r) { return r.ip === ip; })[0];
+						var lbl = dev && dev.name && dev.name !== '*' ? dev.name + '  —  ' + ip : ip;
+						searchSelect.setValue(ip, lbl);
+						var o = loadOpts(); o.lastIp = ip; saveOpts(o); updateUrlParams(o);
+						updateModeUI();
+						runQuery();
+					},
+					self._speedMap,
+					self._dropMap,
+					self._shapeMap,
+					self._speedHistory,
+					self._hiddenCols
+				);
+				connsDiv.appendChild(E('div',{'style':'overflow-x:auto'},[tbl]));
+				connsDiv.appendChild(E('p',{'style':'color:'+C.textFaint+';font-size:11px;margin-top:6px'},
+					_('Click a row to inspect that device. Download speed updates every 2 seconds.')));
+			}
+		}
+
 		function runAll() {
 			setStatus(statusDiv, 'loading', _('Scanning all devices…'));
 
 			callTrafficctl().then(function(rows) {
 				if (!Array.isArray(rows)) rows = [];
-				var limited = rows.filter(function(r){return (r.rate_limit_kbit||0) > 0;}).length;
-				var shaped  = rows.filter(function(r){return (r.shape_kbit||0) > 0;}).length;
-				var totalDropPkts = Object.keys(self._dropMap).reduce(function(s, ip) { return s + (self._dropMap[ip].packets||0); }, 0);
-				statsDiv.style.cssText = 'padding:8px 14px;border-radius:4px;font-size:13px;margin-bottom:8px;background:'+C.infoBg+';border:1px solid '+C.infoBorder+';color:'+C.infoFg;
-				statsDiv.innerHTML = _('Active devices') + ': <b>'+rows.length+'</b>'
-					+ ' &nbsp;|&nbsp; ' + _('Blocked') + ': <b style="color:'+C.blockedFg+'">'
-					+ rows.filter(function(r){return r.blocked;}).length+'</b>'
-					+ ' &nbsp;|&nbsp; ' + _('WiFi blocked') + ': <b style="color:'+C.stateWait+'">'
-					+ rows.filter(function(r){return r.wifi_blocked;}).length+'</b>'
-					+ (limited > 0 ? ' &nbsp;|&nbsp; ' + _('Limited') + ': <b style="color:'+C.rateFg+'">⚡ '+limited+'</b>' : '')
-					+ (shaped > 0 ? ' &nbsp;|&nbsp; ' + _('Shaped') + ': <b style="color:'+C.shapeFg+'">🌊 '+shaped+'</b>' : '')
-					+ (totalDropPkts > 0 ? ' &nbsp;|&nbsp; ' + _('Dropped') + ': <b style="color:'+C.dropFg+'">🚫 '+totalDropPkts+' pkts</b>' : '');
-
-				while (connsDiv.firstChild) connsDiv.removeChild(connsDiv.firstChild);
-				if (rows.length === 0) {
-					connsDiv.appendChild(E('p',{'style':'color:'+C.textMute+';padding:12px 0'}, _('No active devices.')));
-				} else {
-					var tbl = buildSummaryTable(
-						rows,
-						self._sumCol,
-						self._sumDir,
-						function(key, isNum) {
-							if (self._sumCol === key) {
-								self._sumDir = self._sumDir === 'asc' ? 'desc' : 'asc';
-							} else {
-								self._sumCol = key;
-								self._sumDir = isNum ? 'desc' : 'asc';
-							}
-							runAll();
-						},
-						function(ip) {
-							var dev = rows.filter(function(r) { return r.ip === ip; })[0];
-							var lbl = dev && dev.name && dev.name !== '*' ? dev.name + '  —  ' + ip : ip;
-							searchSelect.setValue(ip, lbl);
-							var o = loadOpts(); o.lastIp = ip; saveOpts(o); updateUrlParams(o);
-							updateModeUI();
-							runQuery();
-						},
-						self._speedMap,
-						self._dropMap,
-						self._shapeMap,
-						self._speedHistory,
-						self._hiddenCols
-					);
-					connsDiv.appendChild(E('div',{'style':'overflow-x:auto'},[tbl]));
-					connsDiv.appendChild(E('p',{'style':'color:'+C.textFaint+';font-size:11px;margin-top:6px'},
-						_('Click a row to inspect that device. Download speed updates every 2 seconds.')));
-				}
+				renderSummary(rows);
 				setStatus(statusDiv, 'ok', '✓ ' + _('Done'));
 				self._startBytesPoll();
 			})
@@ -1646,7 +1702,8 @@ return view.extend({
 		this._startBytesPoll = function() {
 			if (self._bytesTimer) return;
 			var o = loadOpts();
-			var pollMs = (o.pollInterval || 2) * 1000;
+			var pollMs = (o.pollInterval || 0) * 1000;
+			if (pollMs <= 0) return;
 			pollBytes();
 			self._bytesTimer = setInterval(pollBytes, pollMs);
 			pollDrops();
@@ -1676,7 +1733,7 @@ return view.extend({
 			{key:'conns', label:_('Conns')}, {key:'total', label:_('Bytes')},
 			{key:'tcp', label:'TCP'}, {key:'udp', label:'UDP'},
 			{key:'blocked', label:_('Inet')}, {key:'conn_type', label:_('Link')},
-			{key:'_throttle_kbit', label:_('Throttle')},
+			{key:'_throttle_kbit', label:_('Speed Limit')},
 			{key:'_drop_packets', label:_('Drops')}, {key:'_backlog', label:_('Queue')}
 		];
 		var chipBase = 'display:inline-block;padding:3px 10px;border-radius:12px;font-size:11px;cursor:pointer;user-select:none;margin:2px;transition:all .15s;font-weight:500';
