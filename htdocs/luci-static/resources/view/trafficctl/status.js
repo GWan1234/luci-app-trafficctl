@@ -796,7 +796,7 @@ function buildSearchSelect(devices, placeholder, onSelect) {
 		});
 	}
 
-	function selectItem(value, label) {
+	function selectItem(value, label, silent) {
 		selectedValue = value;
 		if (value === '__all__') {
 			input.value = '';
@@ -806,7 +806,7 @@ function buildSearchSelect(devices, placeholder, onSelect) {
 			clearBtn.style.display = '';
 		}
 		dropdown.style.display = 'none';
-		onSelect(value);
+		if (!silent) onSelect(value);
 	}
 
 	input.addEventListener('focus', function() {
@@ -849,7 +849,7 @@ function buildSearchSelect(devices, placeholder, onSelect) {
 	return {
 		el: wrapper,
 		getValue: function() { return selectedValue; },
-		setValue: function(val, label) { selectItem(val, label || val); },
+		setValue: function(val, label) { selectItem(val, label || val, true); },
 		updateDevices: function(newDevices) { devices = newDevices; }
 	};
 }
