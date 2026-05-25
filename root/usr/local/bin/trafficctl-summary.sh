@@ -137,11 +137,21 @@ get_shape_kbit() {
         }'
 }
 
+# Get all WiFi-connected MACs (called once, used for each device)
+get_wifi_macs() {
+    local ifaces
+    ifaces=$(iw dev 2>/dev/null | awk '/Interface/{print $2}')
+    for iface in $ifaces; do
+        iw dev "$iface" station dump 2>/dev/null
+    done | awk '/Station/{print tolower($2)}'
+}
+
 # Filter to only LAN IPs, exclude the router itself
 LAN_PREFIX=$(echo "$LAN_SUBNET" | cut -d. -f1-3)
 LAN_IP=$(echo "$LAN_SUBNET" | cut -d/ -f1)
 
 ACTIVE_IPS=$(get_active_ips | grep "^${LAN_PREFIX}\." | grep -v "^${LAN_IP}$")
+WIFI_MACS=$(get_wifi_macs)
 
 printf "["
 FIRST=1
@@ -161,14 +171,18 @@ for ip in $ACTIVE_IPS; do
     SHAPE=$(get_shape_kbit "$ip")
     [ -z "$SHAPE" ] && SHAPE=0
     [ -z "$NAME" ] && NAME="*"
+    CONN_TYPE="ethernet"
+    if [ -n "$MAC" ] && echo "$WIFI_MACS" | grep -qi "$MAC"; then
+        CONN_TYPE="wifi"
+    fi
 
     if [ "$FIRST" = "1" ]; then
         FIRST=0
     else
         printf ","
     fi
-    printf '{"ip":"%s","name":"%s","mac":"%s","total":%d,"tcp":%d,"udp":%d,"blocked":%s,"block_bytes":%d,"wifi_blocked":%s,"rate_limit_kbit":%d,"shape_kbit":%d}' \
-        "$ip" "$NAME" "$MAC" "$TOTAL" "$TCP" "$UDP" \
+    printf '{"ip":"%s","name":"%s","mac":"%s","conn_type":"%s","total":%d,"tcp":%d,"udp":%d,"blocked":%s,"block_bytes":%d,"wifi_blocked":%s,"rate_limit_kbit":%d,"shape_kbit":%d}' \
+        "$ip" "$NAME" "$MAC" "$CONN_TYPE" "$TOTAL" "$TCP" "$UDP" \
         "$([ "$BLOCKED" = "1" ] && echo true || echo false)" \
         "$BLOCK_BYTES" \
         "$([ "$WIFI_BLK" = "1" ] && echo true || echo false)" \

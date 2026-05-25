@@ -44,6 +44,17 @@ fi
 MAC=$(echo "$MAC" | tr 'A-F' 'a-f')
 [ -z "$NAME" ] && NAME="*"
 
+# Detect connection type (wifi vs ethernet)
+CONN_TYPE="ethernet"
+if [ -n "$MAC" ]; then
+    WIFI_MACS=$(iw dev 2>/dev/null | awk '/Interface/{print $2}' | while read -r iface; do
+        iw dev "$iface" station dump 2>/dev/null
+    done | awk '/Station/{print tolower($2)}')
+    if echo "$WIFI_MACS" | grep -qi "$MAC"; then
+        CONN_TYPE="wifi"
+    fi
+fi
+
 # Check blocked status
 BLOCKED=false
 BLOCK_PACKETS=0
@@ -238,7 +249,7 @@ if [ "$DO_RDNS" = "1" ] && command -v dig >/dev/null 2>&1; then
 fi
 
 # Output final JSON
-printf '{"ip":"%s","name":"%s","mac":"%s","timestamp":%d,"blocked":%s,"block_packets":%d,"block_bytes":%d,"wifi_blocked":%s,"total":%d,"protocols":{"tcp":%d,"udp":%d,"other":%d},"tcp_states":{"established":%d,"time_wait":%d,"syn_sent":%d,"close_wait":%d},"connections":[%s],"rate_limit_kbit":%d,"shape_kbit":%d}\n' \
-    "$IP" "$NAME" "$MAC" "$TIMESTAMP" "$BLOCKED" "$BLOCK_PACKETS" "$BLOCK_BYTES" \
+printf '{"ip":"%s","name":"%s","mac":"%s","conn_type":"%s","timestamp":%d,"blocked":%s,"block_packets":%d,"block_bytes":%d,"wifi_blocked":%s,"total":%d,"protocols":{"tcp":%d,"udp":%d,"other":%d},"tcp_states":{"established":%d,"time_wait":%d,"syn_sent":%d,"close_wait":%d},"connections":[%s],"rate_limit_kbit":%d,"shape_kbit":%d}\n' \
+    "$IP" "$NAME" "$MAC" "$CONN_TYPE" "$TIMESTAMP" "$BLOCKED" "$BLOCK_PACKETS" "$BLOCK_BYTES" \
     "$WIFI_BLOCKED" "$TOTAL" "$N_TCP" "$N_UDP" "$N_OTHER" \
     "$EST" "$TW" "$SS" "$CW" "$CONNS_OUT" "$RATE_LIM" "$SHAPE_KBIT"

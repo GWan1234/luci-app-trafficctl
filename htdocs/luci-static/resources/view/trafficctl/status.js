@@ -415,7 +415,7 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		{ key:'tcp',              label:'TCP',          num:true  },
 		{ key:'udp',              label:'UDP',          num:true  },
 		{ key:'blocked',          label: _('Inet'),     num:false },
-		{ key:'wifi_blocked',     label: _('WiFi'),     num:false },
+		{ key:'wifi_blocked',     label: _('Link'),     num:false },
 		{ key:'_throttle_kbit',   label: _('Throttle'), num:true  },
 		{ key:'_drop_packets',    label: _('Dropped'),  num:true  },
 		{ key:'_backlog',         label: _('Queued'),   num:true  }
@@ -480,11 +480,16 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		var bg = i%2===0 ? C.rowEven : C.rowOdd;
 		var td = 'padding:6px 12px;border-bottom:1px solid '+C.border+';color:'+C.hostname+';font-size:12px;background:'+bg;
 		var inetBadge = r.blocked
-			? E('span', { 'style': 'color:'+C.blockedFg+';font-weight:600' }, '⛔ ' + _('blocked'))
-			: E('span', { 'style': 'color:'+C.stateOk }, '✓ ' + _('ok'));
-		var wifiBadge = r.wifi_blocked
-			? E('span', { 'style': 'color:'+C.stateWait+';font-weight:600' }, '📵 ' + _('blocked'))
-			: E('span', { 'style': 'color:'+C.textFaint }, '—');
+			? E('span', { 'style': 'color:'+C.rateFg+';font-weight:600' }, '⏸️ ' + _('paused'))
+			: E('span', { 'style': 'color:'+C.proto }, '▶️ ' + _('ok'));
+		var linkBadge;
+		if (r.conn_type === 'wifi') {
+			linkBadge = r.wifi_blocked
+				? E('span', { 'style': 'color:'+C.rateFg+';font-weight:600;text-decoration:line-through' }, '📶 WiFi')
+				: E('span', { 'style': 'color:'+C.proto }, '📶 WiFi');
+		} else {
+			linkBadge = E('span', { 'style': 'color:'+C.textMute }, '🔌 LAN');
+		}
 		var throttleBadge;
 		if (r._throttle_mode === 'shaper') {
 			throttleBadge = E('span', { 'style': 'color:'+C.shapeFg+';font-weight:600', 'title': _('Shaper (tc/HTB queue)') }, '🌊 ' + fmtRate(r._throttle_kbit));
@@ -546,7 +551,7 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 			E('td', { 'style': td+';text-align:right;color:'+C.proto }, String(r.tcp)),
 			E('td', { 'style': td+';text-align:right;color:'+C.stateClose }, String(r.udp)),
 			E('td', { 'style': td+';text-align:center'               }, inetBadge),
-			E('td', { 'style': td+';text-align:center'               }, wifiBadge),
+			E('td', { 'style': td+';text-align:center'               }, linkBadge),
 			E('td', { 'style': td+';text-align:center'               }, throttleBadge),
 			E('td', { 'style': td+';text-align:center', 'data-drop-ip': r.ip }, dropBadge),
 			E('td', { 'style': td+';text-align:center', 'data-backlog-ip': r.ip }, backlogBadge)
@@ -735,6 +740,120 @@ function buildExtendedStatsLegend(shapeMap, dropMap) {
 	]);
 }
 
+function buildSearchSelect(devices, placeholder, onSelect) {
+	var selectedValue = '__all__';
+	var wrapper = E('div', { 'style': 'position:relative;display:inline-block;min-width:320px' });
+	var input = E('input', {
+		'type': 'text',
+		'class': 'cbi-input-text',
+		'placeholder': placeholder,
+		'autocomplete': 'off',
+		'style': 'width:100%;padding:5px 28px 5px 8px;font-size:13px'
+	});
+	var clearBtn = E('span', {
+		'style': 'position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;color:var(--tm-text-mute);font-size:16px;display:none;line-height:1'
+	}, '×');
+	var dropdown = E('div', {
+		'style': 'position:absolute;top:100%;left:0;right:0;max-height:240px;overflow-y:auto;' +
+				 'background:var(--tm-bg);border:1px solid var(--tm-border);border-top:none;border-radius:0 0 4px 4px;' +
+				 'box-shadow:0 4px 8px rgba(0,0,0,.15);z-index:100;display:none'
+	});
+	wrapper.appendChild(input);
+	wrapper.appendChild(clearBtn);
+	wrapper.appendChild(dropdown);
+
+	var highlightIdx = -1;
+
+	function renderItems(filter) {
+		while (dropdown.firstChild) dropdown.removeChild(dropdown.firstChild);
+		var q = (filter || '').toLowerCase();
+		var items = [{ value: '__all__', label: '— ' + _('All active devices') + ' —', searchText: '' }];
+		devices.forEach(function(d) {
+			items.push({ value: d.ip, label: d.name + '  —  ' + d.ip + (d.mac ? '  (' + d.mac + ')' : ''), searchText: (d.name + ' ' + d.ip + ' ' + (d.mac||'')).toLowerCase() });
+		});
+		var filtered = items.filter(function(it) {
+			return it.value === '__all__' || !q || it.searchText.indexOf(q) !== -1;
+		});
+		highlightIdx = -1;
+		filtered.forEach(function(it, idx) {
+			var style = 'padding:6px 10px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--tm-border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+			var item = E('div', { 'style': style, 'data-value': it.value }, it.label);
+			item.addEventListener('mousedown', function(ev) {
+				ev.preventDefault();
+				selectItem(it.value, it.label);
+			});
+			item.addEventListener('mouseenter', function() {
+				highlightIdx = idx;
+				updateHighlight(dropdown);
+			});
+			dropdown.appendChild(item);
+		});
+	}
+
+	function updateHighlight(dd) {
+		Array.prototype.forEach.call(dd.children, function(el, i) {
+			el.style.background = i === highlightIdx ? 'var(--tm-hover)' : '';
+		});
+	}
+
+	function selectItem(value, label) {
+		selectedValue = value;
+		if (value === '__all__') {
+			input.value = '';
+			clearBtn.style.display = 'none';
+		} else {
+			input.value = label.replace(/\s+\(.*\)$/, '');
+			clearBtn.style.display = '';
+		}
+		dropdown.style.display = 'none';
+		onSelect(value);
+	}
+
+	input.addEventListener('focus', function() {
+		renderItems(input.value);
+		dropdown.style.display = '';
+	});
+	input.addEventListener('input', function() {
+		renderItems(input.value);
+		dropdown.style.display = '';
+	});
+	input.addEventListener('blur', function() {
+		setTimeout(function() { dropdown.style.display = 'none'; }, 150);
+	});
+	input.addEventListener('keydown', function(ev) {
+		var items = dropdown.children;
+		if (ev.key === 'ArrowDown') {
+			ev.preventDefault();
+			highlightIdx = Math.min(highlightIdx + 1, items.length - 1);
+			updateHighlight(dropdown);
+		} else if (ev.key === 'ArrowUp') {
+			ev.preventDefault();
+			highlightIdx = Math.max(highlightIdx - 1, 0);
+			updateHighlight(dropdown);
+		} else if (ev.key === 'Enter') {
+			ev.preventDefault();
+			if (highlightIdx >= 0 && highlightIdx < items.length) {
+				var el = items[highlightIdx];
+				selectItem(el.getAttribute('data-value'), el.textContent);
+			}
+		} else if (ev.key === 'Escape') {
+			dropdown.style.display = 'none';
+			input.blur();
+		}
+	});
+	clearBtn.addEventListener('click', function() {
+		selectItem('__all__', '');
+		input.focus();
+	});
+
+	return {
+		el: wrapper,
+		getValue: function() { return selectedValue; },
+		setValue: function(val, label) { selectItem(val, label || val); },
+		updateDevices: function(newDevices) { devices = newDevices; }
+	};
+}
+
 return view.extend({
 	_timer:        null,
 	_bytesTimer:   null,
@@ -766,21 +885,21 @@ return view.extend({
 		(leasesRaw || '').split('\n').forEach(function(line) {
 			var p = line.trim().split(/\s+/);
 			if (p.length >= 4 && p[2] && p[3] && p[3] !== '*') {
-				devices.push({ ip: p[2], name: p[3] });
+				devices.push({ ip: p[2], name: p[3], mac: p[1] || '' });
 			}
 		});
 		devices.sort(function(a, b) { return a.name.localeCompare(b.name); });
 
-		var select = E('select', { 'class': 'cbi-input-select', 'style': 'min-width:280px' },
-			[E('option', { 'value': '__all__' }, '— ' + _('All active devices') + ' —')]
-			.concat(devices.map(function(d) {
-				return E('option', { 'value': d.ip }, d.name + '  —  ' + d.ip);
-			}))
-		);
 		var savedIp = opts.lastIp || '__all__';
-		Array.prototype.forEach.call(select.options, function(o) {
-			if (o.value === savedIp) o.selected = true;
+		var searchSelect = buildSearchSelect(devices, _('Search device (name, IP, MAC)…'), function(value) {
+			var o = loadOpts(); o.lastIp = value; saveOpts(o); updateUrlParams(o);
+			updateModeUI();
+			runQuery();
 		});
+		if (savedIp && savedIp !== '__all__') {
+			var matchDev = devices.filter(function(d) { return d.ip === savedIp; })[0];
+			searchSelect.setValue(savedIp, matchDev ? matchDev.name + '  —  ' + matchDev.ip : savedIp);
+		}
 
 		function mkCheck(id, label, checked, onChange) {
 			var cb = E('input', { 'type': 'checkbox', 'id': id, 'style': 'margin-right:4px' });
@@ -884,21 +1003,37 @@ return view.extend({
 		var statsDiv  = E('div', { 'style': 'margin:8px 0' + (opts.showStats===false?';display:none':'') });
 		var connsDiv  = E('div', { 'style': opts.showConns===false?'display:none':'' });
 
-		var blockBtn   = E('button', { 'class': 'cbi-button cbi-button-negative' }, '⛔ ' + _('Block'));
-		var unblockBtn = E('button', { 'class': 'cbi-button cbi-button-action'   }, '✅ ' + _('Unblock'));
+		var BTN_BASE = 'padding:5px 14px;border-radius:3px;cursor:pointer;font-size:13px;min-width:140px;text-align:center;font-weight:500';
+		var BTN_ORANGE = BTN_BASE + ';background:#c05621;color:#fff;border:1px solid #9c4221';
+		var BTN_GREEN  = BTN_BASE + ';background:#276749;color:#fff;border:1px solid #22543d';
+
+		var inetBtn = E('button', { 'class': 'cbi-button' }, '');
 		var wifiBtn = E('button', { 'class': 'cbi-button', 'style': 'display:none' }, '');
+
+		function updateInetBtn(blocked) {
+			if (blocked) {
+				inetBtn.textContent = '▶️ ' + _('Resume Internet');
+				inetBtn.style.cssText = BTN_GREEN;
+				inetBtn._action = 'unblock';
+			} else {
+				inetBtn.textContent = '⏸️ ' + _('Pause Internet');
+				inetBtn.style.cssText = BTN_ORANGE;
+				inetBtn._action = 'block';
+			}
+		}
+		updateInetBtn(false);
 
 		function updateWifiBtn(wifiBlocked, hasMac) {
 			if (!hasMac) { wifiBtn.style.display = 'none'; return; }
 			wifiBtn.style.display = '';
 			wifiBtn.disabled = false;
 			if (wifiBlocked) {
-				wifiBtn.textContent = '📶 ' + _('WiFi Unblock');
-				wifiBtn.style.cssText = 'background:#22c55e;color:#fff;border:1px solid #16a34a;padding:4px 10px;border-radius:3px;cursor:pointer;font-size:13px';
+				wifiBtn.textContent = '📡✓ ' + _('Enable WiFi');
+				wifiBtn.style.cssText = BTN_GREEN;
 				wifiBtn._wifiAction = 'unblock';
 			} else {
-				wifiBtn.textContent = '📵 ' + _('WiFi Block');
-				wifiBtn.style.cssText = 'background:#f97316;color:#fff;border:1px solid #ea580c;padding:4px 10px;border-radius:3px;cursor:pointer;font-size:13px';
+				wifiBtn.textContent = '📡❌ ' + _('Disable WiFi');
+				wifiBtn.style.cssText = BTN_ORANGE;
 				wifiBtn._wifiAction = 'block';
 			}
 		}
@@ -938,14 +1073,14 @@ return view.extend({
 		}
 
 		var actionRow = E('div', { 'style': 'display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:6px' },
-			[blockBtn, unblockBtn, wifiBtn]);
+			[inetBtn, wifiBtn]);
 		var perDeviceOpts = E('span', {}, [mkLabel(_('Proto') + ':'), protoSel,
 			E('span',{'style':'display:inline-block;width:8px'}),
 			mkLabel(_('Group by') + ':'), groupSel,
 			E('span',{'style':'display:inline-block;width:8px'}),
 			rdnsCheck]);
 
-		function isAllMode() { return select.value === '__all__'; }
+		function isAllMode() { return searchSelect.getValue() === '__all__'; }
 
 		function updateModeUI() {
 			var all = isAllMode();
@@ -1108,7 +1243,6 @@ return view.extend({
 			var o = loadOpts();
 			var proto = (o.proto && o.proto !== 'all') ? o.proto : '';
 
-			runBtn.disabled = true;
 			setStatus(statusDiv, 'loading', _('Running…'));
 
 			callDevice(ip, proto).then(function(data) {
@@ -1130,12 +1264,12 @@ return view.extend({
 					}
 					if ((data.shape_kbit || 0) > 0) {
 						parts.push(_('Shaped') + ': <b style="color:'+C.shapeFg+'">🌊 '+fmtRate(data.shape_kbit)+'</b>');
-						var sm = self._shapeMap[data.ip || select.value] || {};
+						var sm = self._shapeMap[data.ip || searchSelect.getValue()] || {};
 						if ((sm.backlog||0) > 0) parts.push(_('Queued') + ': <b style="color:'+C.shapeFg+'">'+fmtBytes(sm.backlog)+'</b>');
 						if ((sm.bytes||0) > 0) parts.push(_('Passed') + ': <b>'+fmtBytes(sm.bytes)+'</b>');
 					} else if ((data.rate_limit_kbit || 0) > 0) {
 						parts.push(_('Speed limit') + ': <b style="color:'+C.rateFg+'">⚡ '+fmtRate(data.rate_limit_kbit)+'</b>');
-						var dm = self._dropMap[data.ip || select.value] || {};
+						var dm = self._dropMap[data.ip || searchSelect.getValue()] || {};
 						if ((dm.packets||0) > 0) {
 							parts.push(_('Dropped') + ': <b style="color:'+C.dropFg+'">🚫 '+dm.packets+' pkts / '+fmtBytes(dm.bytes||0)+'</b>');
 						}
@@ -1152,8 +1286,7 @@ return view.extend({
 						' &nbsp;<span style="color:'+C.textFaint+';font-size:11px">'+new Date(data.timestamp * 1000).toLocaleTimeString()+'</span>';
 				}
 
-				blockBtn.disabled   = data.blocked;
-				unblockBtn.disabled = !data.blocked;
+				updateInetBtn(data.blocked);
 				updateWifiBtn(data.wifi_blocked, !!data.mac);
 
 				var curShapeRate = data.shape_kbit || 0;
@@ -1257,12 +1390,10 @@ return view.extend({
 				}
 				setStatus(statusDiv, 'ok', '✓ '+new Date().toLocaleTimeString());
 			})
-			.catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); })
-			.then(function() { runBtn.disabled = false; });
+			.catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); });
 		}
 
 		function runAll() {
-			runBtn.disabled = true;
 			setStatus(statusDiv, 'loading', _('Scanning all devices…'));
 
 			callTrafficctl().then(function(rows) {
@@ -1299,9 +1430,7 @@ return view.extend({
 							runAll();
 						},
 						function(ip) {
-							Array.prototype.forEach.call(select.options, function(o) {
-								if (o.value === ip) { o.selected = true; }
-							});
+							searchSelect.setValue(ip, '');
 							var o = loadOpts(); o.lastIp = ip; saveOpts(o); updateUrlParams(o);
 							updateModeUI();
 							runQuery();
@@ -1318,15 +1447,14 @@ return view.extend({
 				setStatus(statusDiv, 'ok', '✓ '+new Date().toLocaleTimeString());
 				self._startBytesPoll();
 			})
-			.catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); })
-			.then(function() { runBtn.disabled = false; });
+			.catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); });
 		}
 
 		function updateExtendedStats() {
 			var o = loadOpts();
 			if (!o.extendedStats) return;
 			while (extStatsDiv.firstChild) extStatsDiv.removeChild(extStatsDiv.firstChild);
-			var ip = select.value;
+			var ip = searchSelect.getValue();
 			if (ip === '__all__') {
 				extStatsDiv.appendChild(buildExtendedStatsLegend(self._shapeMap, self._dropMap));
 			} else {
@@ -1335,7 +1463,7 @@ return view.extend({
 		}
 
 		function runQuery() {
-			var ip = select.value;
+			var ip = searchSelect.getValue();
 			var o = loadOpts(); o.lastIp = ip; saveOpts(o);
 			updateUrlParams(o);
 			updateModeUI();
@@ -1350,8 +1478,8 @@ return view.extend({
 		}
 
 		rateBtn.addEventListener('click', function() {
-			var ip   = select.value;
-			var name = select.options[select.selectedIndex].text.split('  —  ')[0].trim();
+			var ip   = searchSelect.getValue();
+			var name = '';
 			var kbit = getRateKbit();
 			var mode = modeSel.value;
 			rateBtn.disabled = true;
@@ -1395,10 +1523,10 @@ return view.extend({
 		});
 
 		wifiBtn.addEventListener('click', function() {
-			var ip   = select.value;
+			var ip   = searchSelect.getValue();
 			var action = wifiBtn._wifiAction;
 			wifiBtn.disabled = true;
-			var name = select.options[select.selectedIndex].text.split('  —  ')[0].trim();
+			var name = '';
 			setStatus(statusDiv, 'loading', (action==='block' ? _('Adding to') : _('Removing from')) + ' ' + _('WiFi deny list') + ': ' + name + '…');
 			var fn = action === 'block' ? callMacfilterAdd : callMacfilterRemove;
 			fn(ip).then(function(res) {
@@ -1407,31 +1535,20 @@ return view.extend({
 			});
 		});
 
-		blockBtn.addEventListener('click', function() {
-			var ip   = select.value;
-			var name = select.options[select.selectedIndex].text.split('  —  ')[0].trim();
-			blockBtn.disabled = true;
-			setStatus(statusDiv, 'loading', _('Blocking') + ' ' + name + '…');
-			callBlock(ip, name).then(function(res) {
-				setStatus(statusDiv, (res && res.ok) ? 'action' : 'error', (res && res.msg) || '?');
+		inetBtn.addEventListener('click', function() {
+			var ip = searchSelect.getValue();
+			if (!ip || ip === '__all__') return;
+			inetBtn.disabled = true;
+			var action = inetBtn._action;
+			var fn = action === 'block' ? callBlock : callUnblock;
+			fn(ip, '').then(function() {
 				runQuery();
+			}).catch(function(e) {
+				setStatus(statusDiv, 'error', e.message);
+			}).then(function() {
+				inetBtn.disabled = false;
 			});
 		});
-		unblockBtn.addEventListener('click', function() {
-			var ip   = select.value;
-			var name = select.options[select.selectedIndex].text.split('  —  ')[0].trim();
-			unblockBtn.disabled = true;
-			setStatus(statusDiv, 'loading', _('Unblocking') + ' ' + name + '…');
-			callUnblock(ip, name).then(function(res) {
-				setStatus(statusDiv, (res && res.ok) ? 'ok' : 'error', (res && res.msg) || '?');
-				runQuery();
-			});
-		});
-
-		var runBtn = E('button', {
-			'class': 'cbi-button cbi-button-action important',
-			'click': function() { runQuery(); }
-		}, '▶ ' + _('Run'));
 
 		this._setupTimer = function() {
 			if (self._timer) { clearInterval(self._timer); self._timer = null; }
@@ -1461,7 +1578,6 @@ return view.extend({
 		};
 
 		this._setupTimer();
-		select.addEventListener('change', function() { runQuery(); });
 		setTimeout(function() { runQuery(); }, 0);
 
 		var ob = 'border:1px solid '+C.optsBorder+';background:'+C.optsBg;
@@ -1469,7 +1585,7 @@ return view.extend({
 			E('h2', {'style':'color:'+C.hostname}, _('Traffic Control')),
 			E('div', {'class':'cbi-section'}, [
 				E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:6px'},
-					[select, runBtn]),
+					[searchSelect.el]),
 				actionRow,
 				rateLimitRow,
 				statusDiv,
