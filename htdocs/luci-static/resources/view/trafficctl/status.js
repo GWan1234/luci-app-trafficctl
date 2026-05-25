@@ -556,57 +556,68 @@ function buildExtendedStatsPanel(ip, shapeMap, dropMap, speedMap) {
 	var dm = dropMap[ip];
 	var spd = speedMap[ip];
 
-	var panelStyle = 'background:var(--tm-bg-subtle);border:1px solid var(--tm-border);border-radius:4px;padding:10px 14px;font-size:12px;font-family:monospace;margin:8px 0';
-	var lines = [];
+	var panelStyle = 'background:var(--tm-bg-subtle);border:1px solid var(--tm-border);border-radius:4px;padding:12px 16px;font-size:13px;margin:8px 0';
+	var rowStyle = 'display:flex;justify-content:space-between;align-items:baseline;padding:4px 0;border-bottom:1px dotted var(--tm-border)';
+	var labelStyle = 'color:var(--tm-text-mute);font-size:12px';
+	var valueStyle = 'font-family:monospace;font-weight:600;color:var(--tm-text);font-size:13px';
+	var rows = [];
+
+	function addRow(label, value, color) {
+		var vs = color ? valueStyle + ';color:' + color : valueStyle;
+		rows.push(E('div', { 'style': rowStyle }, [
+			E('span', { 'style': labelStyle }, label),
+			E('span', { 'style': vs }, value)
+		]));
+	}
 
 	if (sm && sm.rate_kbit > 0) {
-		if (sm.drops != null) lines.push(_('Drops') + ': ' + sm.drops);
-		if (sm.overlimits != null) lines.push(_('Overlimits') + ': ' + sm.overlimits);
-		if (sm.ecn_mark != null) lines.push(_('ECN marks') + ': ' + sm.ecn_mark);
+		if (sm.drops != null) addRow(_('Drops'), String(sm.drops), sm.drops > 0 ? 'var(--tm-drop-fg)' : null);
+		if (sm.overlimits != null) addRow(_('Overlimits'), String(sm.overlimits), sm.overlimits > 0 ? 'var(--tm-rate-fg)' : null);
+		if (sm.ecn_mark != null) addRow(_('ECN marks'), String(sm.ecn_mark), sm.ecn_mark > 0 ? 'var(--tm-rate-fg)' : null);
 		if (sm.new_flows != null || sm.old_flows != null) {
-			lines.push(_('Flows') + ': ' + (sm.new_flows || 0) + ' ' + _('new') + ' / ' + (sm.old_flows || 0) + ' ' + _('old'));
+			addRow(_('Flows'), (sm.new_flows || 0) + ' ' + _('new') + ' / ' + (sm.old_flows || 0) + ' ' + _('old'));
 		}
-		if (sm.memory_used != null) lines.push(_('Queue memory') + ': ' + fmtBytes(sm.memory_used));
+		if (sm.memory_used != null) addRow(_('Queue memory'), fmtBytes(sm.memory_used));
 		if (sm.lended != null || sm.borrowed != null) {
-			lines.push(_('Lended') + ': ' + (sm.lended || 0) + ' / ' + _('Borrowed') + ': ' + (sm.borrowed || 0));
+			addRow(_('Lended') + ' / ' + _('Borrowed'), (sm.lended || 0) + ' / ' + (sm.borrowed || 0));
 		}
 		if (spd && sm.rate_kbit > 0) {
 			var currentBps = spd.current || 0;
 			var rateBytes = (sm.rate_kbit * 1000) / 8;
 			var util = rateBytes > 0 ? ((currentBps / rateBytes) * 100) : 0;
-			lines.push(_('Utilization') + ': ' + util.toFixed(1) + '%');
+			var utilColor = util > 95 ? 'var(--tm-drop-fg)' : util > 70 ? 'var(--tm-rate-fg)' : 'var(--tm-state-ok)';
+			addRow(_('Utilization'), util.toFixed(1) + '%', utilColor);
 		}
 	} else if (dm && dm.rate_kbit > 0) {
-		lines.push(_('Packets dropped') + ': ' + (dm.packets || 0));
-		lines.push(_('Bytes dropped') + ': ' + fmtBytes(dm.bytes || 0));
+		addRow(_('Packets dropped'), String(dm.packets || 0), (dm.packets || 0) > 0 ? 'var(--tm-drop-fg)' : null);
+		addRow(_('Bytes dropped'), fmtBytes(dm.bytes || 0), (dm.bytes || 0) > 0 ? 'var(--tm-drop-fg)' : null);
 		var dropBytes = dm.bytes || 0;
 		var passBytes = dm.pass_bytes || 0;
 		var totalBytes = dropBytes + passBytes;
 		var dropRatio = totalBytes > 0 ? ((dropBytes / totalBytes) * 100) : 0;
-		lines.push(_('Drop ratio') + ': ' + dropRatio.toFixed(1) + '%');
+		var drColor = dropRatio > 10 ? 'var(--tm-drop-fg)' : dropRatio > 2 ? 'var(--tm-rate-fg)' : null;
+		addRow(_('Drop ratio'), dropRatio.toFixed(1) + '%', drColor);
 	}
 
-	if (lines.length === 0) {
-		lines.push(_('No extended stats available for this device.'));
+	if (rows.length === 0) {
+		rows.push(E('div', { 'style': 'padding:4px 0;color:var(--tm-text-mute)' }, _('No extended stats available for this device.')));
 	}
 
 	var content = E('div', { 'style': panelStyle }, [
-		E('div', { 'style': 'margin-bottom:6px;font-weight:600;font-family:sans-serif' }, _('Extended Statistics')),
-		E('div', {}, lines.map(function(l) {
-			return E('div', { 'style': 'padding:2px 0' }, l);
-		})),
-		E('details', { 'style': 'margin-top:8px;font-family:sans-serif;font-size:11px;color:var(--tm-text-mute)' }, [
-			E('summary', { 'style': 'cursor:pointer;font-weight:500' }, _('What do these stats mean?')),
-			E('div', { 'style': 'padding:6px 0 2px 0;line-height:1.6' }, [
-				E('div', {}, _('Drops') + ': ' + _('packets dropped by queue overflow')),
-				E('div', {}, _('Overlimits') + ': ' + _('rate exceeded events')),
-				E('div', {}, _('ECN marks') + ': ' + _('congestion signals without drop')),
-				E('div', {}, _('Flows') + ': ' + _('active concurrent connections in queue')),
-				E('div', {}, _('Queue memory') + ': ' + _('bytes allocated by the queue discipline')),
-				E('div', {}, _('Lended') + '/' + _('Borrowed') + ': ' + _('own-rate vs parent-rate packets')),
-				E('div', {}, _('Utilization') + ': ' + _('current speed as percentage of rate limit')),
-				E('div', {}, _('Packets dropped') + '/' + _('Bytes dropped') + ': ' + _('traffic discarded by nft policer')),
-				E('div', {}, _('Drop ratio') + ': ' + _('percentage of total traffic that was dropped'))
+		E('div', { 'style': 'margin-bottom:8px;font-weight:600;font-size:14px;color:var(--tm-text)' }, _('Extended Statistics')),
+		E('div', { 'style': 'display:flex;flex-direction:column' }, rows),
+		E('details', { 'style': 'margin-top:10px;font-size:13px;color:var(--tm-text-mute)' }, [
+			E('summary', { 'style': 'cursor:pointer;font-weight:600;font-size:13px;color:var(--tm-text)' }, _('What do these stats mean?')),
+			E('div', { 'style': 'padding:8px 0 2px 0;line-height:1.8' }, [
+				E('div', {}, [E('b', {}, _('Drops')), ' — ' + _('packets dropped by queue overflow')]),
+				E('div', {}, [E('b', {}, _('Overlimits')), ' — ' + _('rate exceeded events')]),
+				E('div', {}, [E('b', {}, _('ECN marks')), ' — ' + _('congestion signals without drop')]),
+				E('div', {}, [E('b', {}, _('Flows')), ' — ' + _('active concurrent connections in queue')]),
+				E('div', {}, [E('b', {}, _('Queue memory')), ' — ' + _('bytes allocated by the queue discipline')]),
+				E('div', {}, [E('b', {}, _('Lended') + '/' + _('Borrowed')), ' — ' + _('own-rate vs parent-rate packets')]),
+				E('div', {}, [E('b', {}, _('Utilization')), ' — ' + _('current speed as percentage of rate limit')]),
+				E('div', {}, [E('b', {}, _('Packets dropped') + '/' + _('Bytes dropped')), ' — ' + _('traffic discarded by nft policer')]),
+				E('div', {}, [E('b', {}, _('Drop ratio')), ' — ' + _('percentage of total traffic that was dropped')])
 			])
 		])
 	]);
@@ -614,8 +625,11 @@ function buildExtendedStatsPanel(ip, shapeMap, dropMap, speedMap) {
 	return content;
 }
 
-function buildExtendedStatsLegend(shapeMap, dropMap, speedMap) {
-	var panelStyle = 'position:sticky;top:0;background:var(--tm-bg-subtle);border:1px solid var(--tm-border);border-radius:4px;padding:10px 14px;font-size:12px;font-family:monospace;margin:8px 0';
+function buildExtendedStatsLegend(shapeMap, dropMap) {
+	var panelStyle = 'position:sticky;top:0;background:var(--tm-bg-subtle);border:1px solid var(--tm-border);border-radius:4px;padding:12px 16px;font-size:13px;margin:8px 0';
+	var rowStyle = 'display:flex;justify-content:space-between;align-items:baseline;padding:4px 0;border-bottom:1px dotted var(--tm-border)';
+	var labelStyle = 'color:var(--tm-text-mute);font-size:12px';
+	var valueStyle = 'font-family:monospace;font-weight:600;color:var(--tm-text);font-size:13px';
 	var totalDrops = 0, totalOverlimits = 0, totalEcn = 0, totalMemory = 0;
 	var totalDropPkts = 0, totalDropBytes = 0;
 	var shapedCount = 0, limitedCount = 0;
@@ -639,25 +653,33 @@ function buildExtendedStatsLegend(shapeMap, dropMap, speedMap) {
 		}
 	});
 
-	var lines = [];
+	var rows = [];
+	function addRow(label, value, color) {
+		var vs = color ? valueStyle + ';color:' + color : valueStyle;
+		rows.push(E('div', { 'style': rowStyle }, [
+			E('span', { 'style': labelStyle }, label),
+			E('span', { 'style': vs }, value)
+		]));
+	}
+
 	if (shapedCount > 0) {
-		lines.push(_('Shaped devices') + ': ' + shapedCount);
-		lines.push(_('Total drops') + ': ' + totalDrops + ' | ' + _('Overlimits') + ': ' + totalOverlimits + ' | ' + _('ECN marks') + ': ' + totalEcn);
-		lines.push(_('Total queue memory') + ': ' + fmtBytes(totalMemory));
+		addRow(_('Shaped devices'), String(shapedCount), 'var(--tm-shape-fg)');
+		addRow(_('Total drops'), String(totalDrops), totalDrops > 0 ? 'var(--tm-drop-fg)' : null);
+		addRow(_('Overlimits'), String(totalOverlimits), totalOverlimits > 0 ? 'var(--tm-rate-fg)' : null);
+		addRow(_('ECN marks'), String(totalEcn));
+		addRow(_('Total queue memory'), fmtBytes(totalMemory));
 	}
 	if (limitedCount > 0) {
-		lines.push(_('Limited devices') + ': ' + limitedCount);
-		lines.push(_('Total dropped') + ': ' + totalDropPkts + ' ' + _('pkts') + ' / ' + fmtBytes(totalDropBytes));
+		addRow(_('Limited devices'), String(limitedCount), 'var(--tm-rate-fg)');
+		addRow(_('Total dropped'), totalDropPkts + ' ' + _('pkts') + ' / ' + fmtBytes(totalDropBytes), totalDropPkts > 0 ? 'var(--tm-drop-fg)' : null);
 	}
-	if (lines.length === 0) {
-		lines.push(_('No extended stats available.'));
+	if (rows.length === 0) {
+		rows.push(E('div', { 'style': 'padding:4px 0;color:var(--tm-text-mute)' }, _('No extended stats available.')));
 	}
 
 	return E('div', { 'style': panelStyle }, [
-		E('div', { 'style': 'margin-bottom:6px;font-weight:600;font-family:sans-serif' }, _('Extended Statistics') + ' (' + _('all devices') + ')'),
-		E('div', {}, lines.map(function(l) {
-			return E('div', { 'style': 'padding:2px 0' }, l);
-		}))
+		E('div', { 'style': 'margin-bottom:8px;font-weight:600;font-size:14px;color:var(--tm-text)' }, _('Extended Statistics') + ' (' + _('all devices') + ')'),
+		E('div', { 'style': 'display:flex;flex-direction:column' }, rows)
 	]);
 }
 
@@ -1236,7 +1258,7 @@ return view.extend({
 			while (extStatsDiv.firstChild) extStatsDiv.removeChild(extStatsDiv.firstChild);
 			var ip = select.value;
 			if (ip === '__all__') {
-				extStatsDiv.appendChild(buildExtendedStatsLegend(self._shapeMap, self._dropMap, self._speedMap));
+				extStatsDiv.appendChild(buildExtendedStatsLegend(self._shapeMap, self._dropMap));
 			} else {
 				extStatsDiv.appendChild(buildExtendedStatsPanel(ip, self._shapeMap, self._dropMap, self._speedMap));
 			}
