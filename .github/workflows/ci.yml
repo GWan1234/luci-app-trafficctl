@@ -31,22 +31,12 @@ jobs:
       - run: npm ci
       - run: npx eslint htdocs/
 
-  build:
-    name: OpenWrt SDK Build
+  test:
+    name: Tests
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        target:
-          - x86-64
-          - ath79-generic
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Build with OpenWrt SDK
-        uses: openwrt/gh-action-sdk@v7
-        env:
-          ARCH: ${{ matrix.target }}
-          FEEDNAME: trafficctl
-          PACKAGES: luci-app-trafficctl
-          NO_REFRESH_CHECK: 1
+      - name: Shell unit tests
+        run: sh tests/test_fw.sh
+      - name: IPK build test
+        run: sh tests/test_build_ipk.sh
