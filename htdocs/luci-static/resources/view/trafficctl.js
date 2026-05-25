@@ -473,8 +473,9 @@ return view.extend({
 		var devices = [];
 		(leasesRaw || '').split('\n').forEach(function(line) {
 			var p = line.trim().split(/\s+/);
-			if (p.length >= 4 && p[2] && p[3] && p[3] !== '*')
+			if (p.length >= 4 && p[2] && p[3] && p[3] !== '*') {
 				devices.push({ ip: p[2], name: p[3] });
+			}
 		});
 		devices.sort(function(a, b) { return a.name.localeCompare(b.name); });
 
@@ -748,9 +749,11 @@ return view.extend({
 						if (data.total > 0) {
 							parts.push('TCP: <b>'+(data.protocols.tcp||0)+'</b>');
 							parts.push('UDP: <b>'+(data.protocols.udp||0)+'</b>');
-							if (data.tcp_states) Object.keys(data.tcp_states).forEach(function(s) {
-								parts.push(escHtml(s)+': <b>'+data.tcp_states[s]+'</b>');
-							});
+							if (data.tcp_states) {
+								Object.keys(data.tcp_states).forEach(function(s) {
+									parts.push(escHtml(s)+': <b>'+data.tcp_states[s]+'</b>');
+								});
+							}
 						}
 						if ((data.shape_kbit || 0) > 0) {
 							parts.push('Shaped: <b style="color:'+C.shapeFg+'">🌊 '+fmtRate(data.shape_kbit)+'</b>');

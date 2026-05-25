@@ -1,4 +1,5 @@
 #!/bin/sh
+# shellcheck shell=dash
 # Rate-limit a device's download bandwidth (policer).
 # Usage: trafficctl-ratelimit.sh <ip> <rate_kbit> [label]
 # rate_kbit=0 removes the limit.
@@ -22,18 +23,15 @@ fi
 COMMENT="rl_ratelimit_${LABEL}"
 
 if [ "$RATE" = "0" ]; then
-    tctl_ratelimit_remove "$IP" "$COMMENT"
-    if [ $? -eq 0 ]; then
+    if tctl_ratelimit_remove "$IP" "$COMMENT"; then
         echo "{\"ok\":true,\"msg\":\"rate limit removed for $IP\"}"
     else
         echo "{\"ok\":false,\"msg\":\"failed to remove rate limit for $IP\"}"
         exit 1
     fi
 else
-    # Remove any existing limit first
     tctl_ratelimit_remove "$IP" "$COMMENT" 2>/dev/null
-    tctl_ratelimit_add "$IP" "$RATE" "$COMMENT"
-    if [ $? -eq 0 ]; then
+    if tctl_ratelimit_add "$IP" "$RATE" "$COMMENT"; then
         echo "{\"ok\":true,\"msg\":\"rate limit set to ${RATE} kbit/s for $IP\"}"
     else
         echo "{\"ok\":false,\"msg\":\"failed to set rate limit for $IP\"}"

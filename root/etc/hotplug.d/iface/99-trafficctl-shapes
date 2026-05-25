@@ -1,4 +1,5 @@
 #!/bin/sh
+# shellcheck shell=dash
 # Restore tc/HTB shaping rules after LAN interface comes up
 [ "$ACTION" = "ifup" ] && [ "$INTERFACE" = "lan" ] || exit 0
 

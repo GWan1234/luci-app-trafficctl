@@ -1,4 +1,5 @@
 #!/bin/sh
+# shellcheck shell=dash
 # Block device WiFi access by adding its MAC to deny maclist on all interfaces.
 # Usage: trafficctl-macfilter-add.sh <ip>
 

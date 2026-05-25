@@ -1,4 +1,5 @@
 #!/bin/sh
+# shellcheck shell=dash
 # Detailed device info with connections.
 # Usage: trafficctl-device.sh <ip> [--rdns] [--proto tcp|udp|all]
 

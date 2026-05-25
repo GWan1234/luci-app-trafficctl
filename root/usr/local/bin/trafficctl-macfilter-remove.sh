@@ -1,4 +1,5 @@
 #!/bin/sh
+# shellcheck shell=dash
 # Remove device WiFi MAC filter (unblock from wifi deny list).
 # Usage: trafficctl-macfilter-remove.sh <ip>
 

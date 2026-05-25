@@ -1,4 +1,5 @@
 #!/bin/sh
+# shellcheck shell=dash
 # Show active rate-limit statistics.
 # Output: JSON array [{"ip":"...","rate_kbit":N,"packets":N,"bytes":N}]
 

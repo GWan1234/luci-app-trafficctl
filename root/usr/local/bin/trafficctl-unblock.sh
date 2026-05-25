@@ -1,4 +1,5 @@
 #!/bin/sh
+# shellcheck shell=dash
 # Unblock internet access for a device.
 # Usage: trafficctl-unblock.sh <ip> [label]
 
@@ -19,8 +20,7 @@ fi
 
 COMMENT="tctl_block_${LABEL}"
 
-tctl_block_remove "$IP" "$COMMENT"
-if [ $? -eq 0 ]; then
+if tctl_block_remove "$IP" "$COMMENT"; then
     echo "{\"ok\":true,\"msg\":\"internet unblocked for $IP\"}"
 else
     echo "{\"ok\":false,\"msg\":\"failed to unblock $IP\"}"

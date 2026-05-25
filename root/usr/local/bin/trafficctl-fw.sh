@@ -1,4 +1,5 @@
 #!/bin/sh
+# shellcheck shell=dash
 # Firewall abstraction layer for trafficctl.
 # Detects nft vs iptables and provides unified functions.
 # Source this file: . /usr/local/bin/trafficctl-fw.sh
@@ -18,7 +19,8 @@ tctl_ratelimit_add() {
 
     if [ "$TCTL_FW" = "nft" ]; then
         nft add table netdev tm_ratelimit 2>/dev/null
-        local wan_dev=$(tctl_get_wan_device)
+        local wan_dev
+        wan_dev=$(tctl_get_wan_device)
         nft add chain netdev tm_ratelimit dl \
             "{ type filter hook ingress device $wan_dev priority -200; policy accept; }" 2>/dev/null
         nft add rule netdev tm_ratelimit dl \

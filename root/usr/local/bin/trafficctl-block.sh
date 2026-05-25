@@ -1,4 +1,5 @@
 #!/bin/sh
+# shellcheck shell=dash
 # Block internet access for a device.
 # Usage: trafficctl-block.sh <ip> [label]
 
@@ -24,8 +25,7 @@ if tctl_is_blocked "$IP"; then
     exit 0
 fi
 
-tctl_block_add "$IP" "$COMMENT"
-if [ $? -eq 0 ]; then
+if tctl_block_add "$IP" "$COMMENT"; then
     echo "{\"ok\":true,\"msg\":\"internet blocked for $IP\"}"
 else
     echo "{\"ok\":false,\"msg\":\"failed to block $IP\"}"

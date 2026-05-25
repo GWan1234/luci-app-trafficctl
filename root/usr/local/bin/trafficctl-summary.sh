@@ -1,4 +1,5 @@
 #!/bin/sh
+# shellcheck shell=dash
 # Summary of all active LAN devices with traffic control status.
 # Output: JSON array with per-device info.
 
@@ -89,9 +90,11 @@ get_block_bytes() {
 check_wifi_blocked() {
     local mac="$1"
     [ -z "$mac" ] && echo "0" && return
-    local ifaces=$(tctl_get_wifi_interfaces)
+    local ifaces
+    ifaces=$(tctl_get_wifi_interfaces)
     for iface in $ifaces; do
-        local maclist=$(uci -q get "wireless.${iface}.maclist")
+        local maclist
+        maclist=$(uci -q get "wireless.${iface}.maclist")
         if echo "$maclist" | grep -qi "$mac"; then
             echo "1"
             return
@@ -115,11 +118,12 @@ get_rate_limit() {
 # Get shape rate for IP from tc
 get_shape_kbit() {
     local ip="$1"
-    local o3=$(echo "$ip" | cut -d. -f3)
-    local o4=$(echo "$ip" | cut -d. -f4)
-    local dec=$((o3 * 256 + o4))
-    local hex=$(printf "%x" "$dec")
-    local classid="1:$hex"
+    local o3 o4 dec hex classid
+    o3=$(echo "$ip" | cut -d. -f3)
+    o4=$(echo "$ip" | cut -d. -f4)
+    dec=$((o3 * 256 + o4))
+    hex=$(printf "%x" "$dec")
+    classid="1:$hex"
     tc class show dev "$LAN_DEV" classid "$classid" 2>/dev/null | \
         grep -oE 'rate [0-9]+[A-Za-z]+' | head -1 | awk '{
             rate=$2

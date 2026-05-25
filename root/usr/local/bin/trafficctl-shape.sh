@@ -1,4 +1,5 @@
 #!/bin/sh
+# shellcheck shell=dash
 # Traffic shaping (tc/HTB) for per-device bandwidth control.
 # Usage: trafficctl-shape.sh <add|remove|status> <ip> [rate_kbit] [label]
 
@@ -10,6 +11,7 @@ LAN_DEV=$(tctl_get_lan_device)
 ACTION="$1"
 IP="$2"
 RATE="$3"
+# shellcheck disable=SC2034
 LABEL="${4:-shape_$IP}"
 
 # Convert IP to classid: 1:<hex of 3rd*256+4th octet>

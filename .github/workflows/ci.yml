@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@2.0.0
+        with:
+          scandir: root/usr/local/bin
+          additional_files: root/etc/hotplug.d/iface/99-trafficctl-shapes
+        env:
+          SHELLCHECK_OPTS: -x -e SC1091
+
+  eslint:
+    name: ESLint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm ci
+      - run: npx eslint htdocs/
+
+  build:
+    name: OpenWrt SDK Build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - x86-64
+          - ath79-generic
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build with OpenWrt SDK
+        uses: openwrt/gh-action-sdk@v7
+        env:
+          ARCH: ${{ matrix.target }}
+          FEEDNAME: trafficctl
+          PACKAGES: luci-app-trafficctl
+          NO_REFRESH_CHECK: 1

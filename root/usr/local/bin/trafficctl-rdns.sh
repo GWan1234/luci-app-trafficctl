@@ -1,4 +1,5 @@
 #!/bin/sh
+# shellcheck shell=dash
 # Reverse DNS lookup for an IP address.
 # Usage: trafficctl-rdns.sh <ip>
 # Output: {"ip":"...","host":"..."}
