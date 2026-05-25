@@ -49,21 +49,12 @@ make package/luci-app-trafficctl/compile V=s
 
 ### Manual installation
 
-Copy files directly to the router:
+Copy the `root/` tree to the router's filesystem, then restart rpcd:
 
 ```sh
-scp -r root/usr/local/bin/*.sh root@router:/usr/local/bin/
-scp root/usr/libexec/rpcd/trafficctl root@router:/usr/libexec/rpcd/
-scp root/usr/share/rpcd/acl.d/luci-app-trafficctl.json root@router:/usr/share/rpcd/acl.d/
-scp root/usr/share/luci/menu.d/luci-app-trafficctl.json root@router:/usr/share/luci/menu.d/
-scp htdocs/luci-static/resources/view/trafficctl/status.js root@router:/www/luci-static/resources/view/trafficctl/
-scp root/etc/hotplug.d/iface/99-trafficctl-shapes root@router:/etc/hotplug.d/iface/
-
-# Set executable permissions
-ssh root@router 'chmod +x /usr/local/bin/trafficctl-*.sh /usr/libexec/rpcd/trafficctl'
-
-# Restart rpcd to pick up new ACL
-ssh root@router '/etc/init.d/rpcd restart'
+scp -r root/* root@router:/
+scp -r htdocs/luci-static root@router:/www/
+ssh root@router 'chmod +x /usr/local/bin/trafficctl-*.sh /usr/libexec/rpcd/trafficctl && /etc/init.d/rpcd restart'
 ```
 
 ### Required packages
@@ -123,134 +114,44 @@ When a device is WiFi-blocked:
 ## Architecture
 
 ```mermaid
-graph TD
-    subgraph Browser
-        UI["status.js — LuCI view.extend()"]
-        LS["localStorage<br/>(user preferences)"]
-        UI <--> LS
-    end
+flowchart LR
+    A((LuCI\nBrowser)) -->|JSON-RPC| B[rpcd backend]
 
-    subgraph "rpcd — ACL-gated"
-        RPC["rpcd/trafficctl<br/>(JSON-RPC dispatch)"]
-    end
+    B --> C{Query or\nAction?}
 
-    subgraph "Query Scripts"
-        SUM["trafficctl-summary.sh"]
-        DEV["trafficctl-device.sh"]
-        BYT["trafficctl-bytes.sh"]
-        RLS["trafficctl-ratelimit-stats.sh"]
-        SHS["trafficctl-shape-stats.sh"]
-        RDNS["trafficctl-rdns.sh"]
-    end
+    C -->|query| D[/Monitoring/]
+    C -->|action| E[/Control/]
 
-    subgraph "Action Scripts"
-        BLK["trafficctl-block.sh<br/>trafficctl-unblock.sh"]
-        RL["trafficctl-ratelimit.sh"]
-        SH["trafficctl-shape.sh"]
-        MF["trafficctl-macfilter-add.sh<br/>trafficctl-macfilter-remove.sh"]
-    end
+    D --> F[(conntrack)]
+    D --> G[(iw / brctl)]
 
-    subgraph "Abstraction Layer"
-        FW["trafficctl-fw.sh<br/>(nft vs iptables auto-detect)"]
-    end
+    E --> H[Firewall\nabstraction]
+    E --> I[tc / HTB]
+    E --> J[hostapd]
 
-    subgraph "Kernel / System"
-        NFT["nftables / iptables"]
-        TC["tc — HTB + fq_codel<br/>(on br-lan)"]
-        CT["/proc/net/nf_conntrack"]
-        IW["iw + brctl<br/>(interface detection)"]
-        WIFI["cfg80211 / hostapd<br/>(WiFi MAC filter)"]
-    end
+    H --> K[(nftables)]
+    H --> L[(iptables)]
 
-    subgraph "Persistence"
-        SHAPES["/etc/trafficmon/shapes.json"]
-        HP["99-trafficctl-shapes<br/>(hotplug restore on boot)"]
-    end
-
-    UI -->|"JSON-RPC / ubus"| RPC
-
-    RPC --> SUM
-    RPC --> DEV
-    RPC --> BYT
-    RPC --> RLS
-    RPC --> SHS
-    RPC --> RDNS
-    RPC --> BLK
-    RPC --> RL
-    RPC --> SH
-    RPC --> MF
-
-    SUM --> CT
-    SUM --> IW
-    DEV --> CT
-    DEV --> IW
-    BYT --> CT
-
-    BLK --> FW
-    RL --> FW
-    FW --> NFT
-
-    SH --> TC
-    SHS --> TC
-
-    MF --> WIFI
-
-    SH -->|"save state"| SHAPES
-    HP -->|"restore on ifup lan"| SH
+    I --> M[(shapes.json)]
+    M -.->|boot restore| I
 ```
 
-### Data Flow
-
-1. **Browser** calls `luci.trafficctl.*` via JSON-RPC over ubus.
-2. **rpcd** dispatches to shell scripts under `/usr/local/bin/trafficctl-*.sh`.
-3. Scripts read from `/proc/net/nf_conntrack`, `tc`, `iw`, `brctl`, and firewall state.
-4. All output is JSON to stdout. Errors: `{"ok":false,"msg":"..."}`.
-5. **Shaping persistence**: `shapes.json` is written on every tc change; hotplug restores on boot.
-
-### Interface Detection
-
-- WiFi band: `iw dev <iface> info` (channel number) + `iw dev <iface> station dump` (MAC list)
-- LAN port: `/sys/class/net/br-lan/brif/*/port_no` + `brctl showmacs br-lan`
+The frontend talks to a thin rpcd dispatcher over ubus. Backend shell scripts split into two groups: **monitoring** (read-only, pulls data from conntrack and wireless subsystems) and **control** (writes firewall rules, tc classes, or WiFi MAC filters). A firewall abstraction layer auto-detects nft vs iptables at runtime. Shaping state persists across reboots via a hotplug script.
 
 ---
 
-## File Layout
+## Project Layout
 
-```
-luci-app-trafficctl/
-├── htdocs/luci-static/resources/view/trafficctl/
-│   └── status.js                    # Frontend (single-file, ES5, no deps)
-├── root/
-│   ├── etc/
-│   │   ├── config/trafficctl        # UCI config placeholder
-│   │   └── hotplug.d/iface/
-│   │       └── 99-trafficctl-shapes # Restore tc rules on boot
-│   ├── usr/
-│   │   ├── libexec/rpcd/
-│   │   │   └── trafficctl           # rpcd backend (ACL dispatch)
-│   │   ├── local/bin/
-│   │   │   ├── trafficctl-fw.sh     # Firewall abstraction (nft/iptables)
-│   │   │   ├── trafficctl-summary.sh# All-device summary
-│   │   │   ├── trafficctl-device.sh # Per-device connections detail
-│   │   │   ├── trafficctl-bytes.sh  # Byte counters (speed calc)
-│   │   │   ├── trafficctl-block.sh  # Internet block
-│   │   │   ├── trafficctl-unblock.sh# Internet unblock
-│   │   │   ├── trafficctl-shape.sh  # tc/HTB shaping
-│   │   │   ├── trafficctl-shape-stats.sh
-│   │   │   ├── trafficctl-ratelimit.sh     # nft policer
-│   │   │   ├── trafficctl-ratelimit-stats.sh
-│   │   │   ├── trafficctl-macfilter-add.sh # WiFi MAC block
-│   │   │   ├── trafficctl-macfilter-remove.sh
-│   │   │   └── trafficctl-rdns.sh   # Reverse DNS lookup
-│   │   └── share/
-│   │       ├── luci/menu.d/
-│   │       │   └── luci-app-trafficctl.json  # Menu entry
-│   │       └── rpcd/acl.d/
-│   │           └── luci-app-trafficctl.json  # ACL permissions
-├── Makefile                         # OpenWrt package build
-├── po/templates/                    # i18n template
-└── docs/                            # Extended documentation
-```
+| Path | Role |
+|------|------|
+| `htdocs/.../view/trafficctl/status.js` | Frontend — single ES5 file, no deps |
+| `root/usr/libexec/rpcd/trafficctl` | rpcd backend — JSON-RPC dispatch |
+| `root/usr/local/bin/trafficctl-*.sh` | Backend scripts (monitoring + control) |
+| `root/usr/local/bin/trafficctl-fw.sh` | Firewall abstraction layer (sourced) |
+| `root/etc/hotplug.d/iface/99-trafficctl-shapes` | Boot persistence for tc rules |
+| `root/usr/share/rpcd/acl.d/` | ACL permissions |
+| `Makefile` | OpenWrt package build |
+| `docs/` | Extended docs (architecture, API, compat) |
 
 ---
 
