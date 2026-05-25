@@ -29,9 +29,10 @@ ensure_root_qdisc() {
     # Set up root HTB hierarchy if not present
     tc class show dev "$LAN_DEV" 2>/dev/null | grep -q "class htb 1:1 " && return 0
     tc qdisc del dev "$LAN_DEV" root 2>/dev/null
-    tc qdisc add dev "$LAN_DEV" root handle 1: htb default fffe
-    tc class add dev "$LAN_DEV" parent 1: classid 1:1 htb rate 1000mbit ceil 1000mbit
-    tc class add dev "$LAN_DEV" parent 1:1 classid 1:fffe htb rate 1000mbit ceil 1000mbit
+    tc qdisc add dev "$LAN_DEV" root handle 1: htb default fffe r2q 10
+    tc class add dev "$LAN_DEV" parent 1: classid 1:1 htb rate 1000mbit ceil 1000mbit burst 125000b cburst 125000b
+    tc class add dev "$LAN_DEV" parent 1:1 classid 1:fffe htb rate 1000mbit ceil 1000mbit burst 125000b cburst 125000b prio 0
+    tc qdisc add dev "$LAN_DEV" parent 1:fffe fq_codel 2>/dev/null
 }
 
 save_shape() {
@@ -113,8 +114,14 @@ do_add() {
     tc qdisc del dev "$LAN_DEV" parent "$classid" 2>/dev/null
     tc class del dev "$LAN_DEV" classid "$classid" 2>/dev/null
 
+    # Calculate burst: 10ms of data, minimum 1600 bytes
+    local burst_bytes
+    burst_bytes=$(( RATE * 125 / 100 ))
+    [ "$burst_bytes" -lt 1600 ] && burst_bytes=1600
+
     # Add class and filter
-    tc class add dev "$LAN_DEV" parent 1:1 classid "$classid" htb rate "${RATE}kbit" ceil "${RATE}kbit"
+    tc class add dev "$LAN_DEV" parent 1:1 classid "$classid" htb \
+        rate "${RATE}kbit" ceil "${RATE}kbit" burst "${burst_bytes}b" cburst "${burst_bytes}b"
     tc qdisc add dev "$LAN_DEV" parent "$classid" fq_codel 2>/dev/null
     tc filter add dev "$LAN_DEV" parent 1:0 prio 10 protocol ip u32 match ip dst "$IP"/32 flowid "$classid"
 
