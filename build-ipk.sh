@@ -1,0 +1,67 @@
+#!/bin/sh
+set -e
+
+PKG_NAME="luci-app-trafficctl"
+PKG_VERSION="${1:-1.0.0}"
+PKG_RELEASE="${2:-1}"
+PKG_ARCH="all"
+
+OUTDIR="dist"
+WORKDIR=$(mktemp -d)
+
+trap 'rm -rf "$WORKDIR"' EXIT
+
+# Build data.tar.gz — actual package files
+DATA="$WORKDIR/data"
+mkdir -p "$DATA"
+
+cp -a root/* "$DATA/"
+mkdir -p "$DATA/www/luci-static/resources/view/trafficctl"
+cp htdocs/luci-static/resources/view/trafficctl/status.js "$DATA/www/luci-static/resources/view/trafficctl/"
+
+# Ensure scripts are executable
+chmod +x "$DATA/usr/local/bin/trafficctl-"*.sh
+chmod +x "$DATA/usr/libexec/rpcd/trafficctl"
+
+(cd "$DATA" && tar czf "$WORKDIR/data.tar.gz" .)
+
+# Build control.tar.gz — package metadata
+CTRL="$WORKDIR/control"
+mkdir -p "$CTRL"
+
+cat > "$CTRL/control" <<EOF
+Package: $PKG_NAME
+Version: ${PKG_VERSION}-${PKG_RELEASE}
+Depends: conntrack, luci-base, rpcd
+Source: https://github.com/YusDyr/luci-app-trafficctl
+License: Apache-2.0
+Section: luci
+Architecture: $PKG_ARCH
+Maintainer: Denis Iusupov <yusdyr@gmail.com>
+Description: Per-device traffic monitoring, rate limiting (nft/iptables),
+ traffic shaping (tc/HTB), internet blocking, and WiFi MAC filtering.
+EOF
+
+cat > "$CTRL/conffiles" <<EOF
+/etc/config/trafficctl
+/etc/trafficmon/shapes.json
+EOF
+
+cat > "$CTRL/postinst" <<'EOF'
+#!/bin/sh
+[ -n "${IPKG_INSTROOT}" ] || /etc/init.d/rpcd restart
+exit 0
+EOF
+chmod +x "$CTRL/postinst"
+
+(cd "$CTRL" && tar czf "$WORKDIR/control.tar.gz" .)
+
+# Assemble ipk (ar archive: debian-binary + control.tar.gz + data.tar.gz)
+echo "2.0" > "$WORKDIR/debian-binary"
+
+mkdir -p "$OUTDIR"
+IPK_FILE="$OUTDIR/${PKG_NAME}_${PKG_VERSION}-${PKG_RELEASE}_${PKG_ARCH}.ipk"
+
+(cd "$WORKDIR" && ar cr "$OLDPWD/$IPK_FILE" debian-binary control.tar.gz data.tar.gz)
+
+echo "$IPK_FILE"

@@ -33,6 +33,15 @@ Runs on all architectures (no compiled code): `mips`, `mipsel`, `arm`, `aarch64`
 
 ## Installation
 
+### From .ipk (recommended)
+
+Download the latest `.ipk` from [Releases](https://github.com/YusDyr/luci-app-trafficctl/releases), copy to the router and install:
+
+```sh
+scp luci-app-trafficctl_*_all.ipk root@router:/tmp/
+ssh root@router 'opkg install /tmp/luci-app-trafficctl_*_all.ipk'
+```
+
 ### From source (OpenWrt build system)
 
 ```sh

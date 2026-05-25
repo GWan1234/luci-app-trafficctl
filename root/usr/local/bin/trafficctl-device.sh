@@ -45,7 +45,11 @@ MAC=$(echo "$MAC" | tr 'A-F' 'a-f')
 [ -z "$NAME" ] && NAME="*"
 
 # Detect connection type — specific interface or band
-CONN_TYPE="ethernet"
+CONN_TYPE=""
+CONN_LAST=""
+CONN_CACHE="/tmp/trafficctl_conn_cache"
+[ -f "$CONN_CACHE" ] || : > "$CONN_CACHE"
+
 if [ -n "$MAC" ]; then
     _wifi_stations=$(
         for _wi in $(iw dev 2>/dev/null | awk '/Interface/{print $2}'); do
@@ -65,7 +69,6 @@ if [ -n "$MAC" ]; then
         CONN_TYPE=$(echo "$WIFI_LINE" | awk '{print $3}')
         [ -z "$CONN_TYPE" ] && CONN_TYPE="wifi"
     else
-        LAN_DEV=$(tctl_get_lan_device)
         BR_PORT=$(brctl showmacs "$LAN_DEV" 2>/dev/null | awk -v mac="$MAC" '
             NR>1 && $3=="no" && tolower($2)==mac {print $1; exit}')
         if [ -n "$BR_PORT" ]; then
@@ -81,11 +84,28 @@ if [ -n "$MAC" ]; then
             done
             case "$PORT_IFACE" in
                 phy*|wlan*) CONN_TYPE="wifi" ;;
-                "") CONN_TYPE="ethernet" ;;
+                "") ;;
                 *) CONN_TYPE="$PORT_IFACE" ;;
             esac
         fi
     fi
+fi
+
+if [ -n "$CONN_TYPE" ]; then
+    sed -i "/^$IP /d" "$CONN_CACHE" 2>/dev/null
+    echo "$IP $CONN_TYPE $(date +%s)" >> "$CONN_CACHE"
+else
+    _arp_state=$(ip neigh show "$IP" 2>/dev/null | awk '{print $NF}')
+    case "$_arp_state" in
+        REACHABLE|STALE|DELAY|PROBE) CONN_TYPE="ethernet" ;;
+        *)
+            CONN_TYPE="?"
+            _cached=$(grep "^$IP " "$CONN_CACHE" 2>/dev/null | tail -1)
+            if [ -n "$_cached" ]; then
+                CONN_LAST=$(echo "$_cached" | awk '{print $2 "@" $3}')
+            fi
+            ;;
+    esac
 fi
 
 # Check blocked status
@@ -282,7 +302,7 @@ if [ "$DO_RDNS" = "1" ] && command -v dig >/dev/null 2>&1; then
 fi
 
 # Output final JSON
-printf '{"ip":"%s","name":"%s","mac":"%s","conn_type":"%s","timestamp":%d,"blocked":%s,"block_packets":%d,"block_bytes":%d,"wifi_blocked":%s,"total":%d,"protocols":{"tcp":%d,"udp":%d,"other":%d},"tcp_states":{"established":%d,"time_wait":%d,"syn_sent":%d,"close_wait":%d},"connections":[%s],"rate_limit_kbit":%d,"shape_kbit":%d}\n' \
-    "$IP" "$NAME" "$MAC" "$CONN_TYPE" "$TIMESTAMP" "$BLOCKED" "$BLOCK_PACKETS" "$BLOCK_BYTES" \
+printf '{"ip":"%s","name":"%s","mac":"%s","conn_type":"%s","conn_last":"%s","timestamp":%d,"blocked":%s,"block_packets":%d,"block_bytes":%d,"wifi_blocked":%s,"total":%d,"protocols":{"tcp":%d,"udp":%d,"other":%d},"tcp_states":{"established":%d,"time_wait":%d,"syn_sent":%d,"close_wait":%d},"connections":[%s],"rate_limit_kbit":%d,"shape_kbit":%d}\n' \
+    "$IP" "$NAME" "$MAC" "$CONN_TYPE" "$CONN_LAST" "$TIMESTAMP" "$BLOCKED" "$BLOCK_PACKETS" "$BLOCK_BYTES" \
     "$WIFI_BLOCKED" "$TOTAL" "$N_TCP" "$N_UDP" "$N_OTHER" \
     "$EST" "$TW" "$SS" "$CW" "$CONNS_OUT" "$RATE_LIM" "$SHAPE_KBIT"

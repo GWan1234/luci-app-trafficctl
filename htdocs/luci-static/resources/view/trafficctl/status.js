@@ -540,7 +540,20 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		var linkBadge;
 		var ct = r.conn_type || 'ethernet';
 		var isWifi = (ct === 'wifi' || ct === '2.4G' || ct === '5G' || ct === '6G');
-		if (isWifi) {
+		if (ct === '?') {
+			var tip = _('Unknown — device unreachable');
+			if (r.conn_last) {
+				var parts = r.conn_last.split('@');
+				var lastType = parts[0] || '';
+				var lastTs = parseInt(parts[1], 10);
+				if (lastTs) {
+					var ago = Math.floor((Date.now()/1000) - lastTs);
+					var agoStr = ago < 60 ? ago + 's' : ago < 3600 ? Math.floor(ago/60) + 'm' : Math.floor(ago/3600) + 'h';
+					tip = _('Last seen') + ': ' + lastType + ', ' + agoStr + ' ' + _('ago');
+				}
+			}
+			linkBadge = E('span', { 'style': 'color:'+C.textFaint+';cursor:help', 'title': tip }, '❓');
+		} else if (isWifi) {
 			var wLabel = ct === 'wifi' ? 'WiFi' : ct;
 			linkBadge = r.wifi_blocked
 				? E('span', { 'style': 'color:'+C.rateFg+';font-weight:600;text-decoration:line-through' }, '📶 ' + wLabel)

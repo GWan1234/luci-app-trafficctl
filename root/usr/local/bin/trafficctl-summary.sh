@@ -7,6 +7,8 @@
 
 LAN_DEV=$(tctl_get_lan_device)
 LAN_SUBNET=$(ip -4 addr show dev "$LAN_DEV" 2>/dev/null | grep -oE 'inet [0-9.]+/[0-9]+' | head -1 | awk '{print $2}')
+CONN_CACHE="/tmp/trafficctl_conn_cache"
+[ -f "$CONN_CACHE" ] || : > "$CONN_CACHE"
 
 # Get all active IPs from conntrack
 get_active_ips() {
@@ -209,7 +211,8 @@ for ip in $ACTIVE_IPS; do
     SHAPE=$(get_shape_kbit "$ip")
     [ -z "$SHAPE" ] && SHAPE=0
     [ -z "$NAME" ] && NAME="*"
-    CONN_TYPE="ethernet"
+    CONN_TYPE=""
+    CONN_LAST=""
     if [ -n "$MAC" ]; then
         _wl=$(echo "$WIFI_STATIONS" | grep -i "$MAC")
         if [ -n "$_wl" ]; then
@@ -226,14 +229,30 @@ for ip in $ACTIVE_IPS; do
             fi
         fi
     fi
+    if [ -n "$CONN_TYPE" ]; then
+        sed -i "/^$ip /d" "$CONN_CACHE" 2>/dev/null
+        echo "$ip $CONN_TYPE $(date +%s)" >> "$CONN_CACHE"
+    else
+        _arp_state=$(ip neigh show "$ip" 2>/dev/null | awk '{print $NF}')
+        case "$_arp_state" in
+            REACHABLE|STALE|DELAY|PROBE) CONN_TYPE="ethernet" ;;
+            *)
+                CONN_TYPE="?"
+                _cached=$(grep "^$ip " "$CONN_CACHE" 2>/dev/null | tail -1)
+                if [ -n "$_cached" ]; then
+                    CONN_LAST=$(echo "$_cached" | awk '{print $2 "@" $3}')
+                fi
+                ;;
+        esac
+    fi
 
     if [ "$FIRST" = "1" ]; then
         FIRST=0
     else
         printf ","
     fi
-    printf '{"ip":"%s","name":"%s","mac":"%s","conn_type":"%s","conns":%d,"total":%d,"tcp":%d,"udp":%d,"blocked":%s,"block_bytes":%d,"wifi_blocked":%s,"rate_limit_kbit":%d,"shape_kbit":%d}' \
-        "$ip" "$NAME" "$MAC" "$CONN_TYPE" "$CONNS" "$TOTAL" "$TCP" "$UDP" \
+    printf '{"ip":"%s","name":"%s","mac":"%s","conn_type":"%s","conn_last":"%s","conns":%d,"total":%d,"tcp":%d,"udp":%d,"blocked":%s,"block_bytes":%d,"wifi_blocked":%s,"rate_limit_kbit":%d,"shape_kbit":%d}' \
+        "$ip" "$NAME" "$MAC" "$CONN_TYPE" "$CONN_LAST" "$CONNS" "$TOTAL" "$TCP" "$UDP" \
         "$([ "$BLOCKED" = "1" ] && echo true || echo false)" \
         "$BLOCK_BYTES" \
         "$([ "$WIFI_BLK" = "1" ] && echo true || echo false)" \
