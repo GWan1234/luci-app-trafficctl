@@ -1149,8 +1149,8 @@ return view.extend({
 		], 'mbit', function() {});
 		customUnitPick.el.style.display = 'none';
 		var modePick = mkInlinePick([
-			{v:'limiter',l:_('Limiter (drop)')},{v:'shaper',l:_('Shaper (queue)')}
-		], 'limiter', function() {});
+			{v:'shaper',l:_('Shaper (queue)')},{v:'limiter',l:_('Limiter (drop)')}
+		], 'shaper', function() {});
 		var rateBtn = E('button', { 'class': 'cbi-button cbi-button-action', 'style': 'font-size:12px;padding:3px 12px' }, _('Apply'));
 
 		var rateLimitRow = E('div', {
@@ -1534,29 +1534,28 @@ return view.extend({
 			statsDiv.style.cssText = 'padding:8px 14px;border-radius:4px;font-size:13px;margin-bottom:8px;background:'+C.infoBg+';border:1px solid '+C.infoBorder+';color:'+C.infoFg;
 			while (statsDiv.firstChild) statsDiv.removeChild(statsDiv.firstChild);
 
+			function mkFilterVal(filter, color, text) {
+				var active = activeFilter === filter;
+				var b = E('b', {'style': lnk+';color:'+color+(active?';font-weight:700':''), 'data-filter': filter}, text);
+				return b;
+			}
+
 			var parts = [];
-			parts.push(E('span', {}, [document.createTextNode(_('Active devices') + ': '), E('b', {}, String(rows.length))]));
-			parts.push(E('span', {'style':lnk+(activeFilter==='blocked'?';font-weight:700':''),'data-filter':'blocked'}, [
-				document.createTextNode(_('Blocked') + ': '), E('b', {'style':'color:'+C.blockedFg}, String(blocked))
-			]));
-			parts.push(E('span', {'style':lnk+(activeFilter==='wifi_blocked'?';font-weight:700':''),'data-filter':'wifi_blocked'}, [
-				document.createTextNode(_('WiFi blocked') + ': '), E('b', {'style':'color:'+C.stateWait}, String(wifiBlk))
-			]));
-			if (limited > 0) parts.push(E('span', {'style':lnk+(activeFilter==='limited'?';font-weight:700':''),'data-filter':'limited'}, [
-				document.createTextNode(_('Limited') + ': '), E('b', {'style':'color:'+C.rateFg}, '⚡ ' + limited)
-			]));
-			if (shaped > 0) parts.push(E('span', {'style':lnk+(activeFilter==='shaped'?';font-weight:700':''),'data-filter':'shaped'}, [
-				document.createTextNode(_('Shaped') + ': '), E('b', {'style':'color:'+C.shapeFg}, '🌊 ' + shaped)
-			]));
+			parts.push(E('span', {}, [document.createTextNode(_('Active') + ': '), E('b', {}, String(rows.length))]));
+			parts.push(E('span', {}, [document.createTextNode(_('Blocked') + ': '), mkFilterVal('blocked', C.blockedFg, String(blocked))]));
+			parts.push(E('span', {}, [document.createTextNode(_('WiFi') + ': '), mkFilterVal('wifi_blocked', C.stateWait, String(wifiBlk))]));
+			if (limited > 0) parts.push(E('span', {}, [document.createTextNode(_('Limited') + ': '), mkFilterVal('limited', C.rateFg, '⚡' + limited)]));
+			if (shaped > 0) parts.push(E('span', {}, [document.createTextNode(_('Shaped') + ': '), mkFilterVal('shaped', C.shapeFg, '🌊' + shaped)]));
 			if (totalDropPkts > 0) parts.push(E('span', {}, [
-				document.createTextNode(_('Dropped') + ': '), E('b', {'style':'color:'+C.dropFg}, '🚫 ' + totalDropPkts + ' pkts')
+				document.createTextNode(_('Dropped') + ': '), E('b', {'style':'color:'+C.dropFg}, '🚫' + totalDropPkts)
 			]));
 
 			parts.forEach(function(el, i) {
 				if (i > 0) statsDiv.appendChild(E('span', {'style':'margin:0 6px;color:'+C.textFaint}, '|'));
 				statsDiv.appendChild(el);
-				if (el.getAttribute('data-filter')) {
-					el.addEventListener('click', function() { setTableFilter(el.getAttribute('data-filter')); });
+				var filterEl = el.querySelector('[data-filter]');
+				if (filterEl) {
+					filterEl.addEventListener('click', function() { setTableFilter(filterEl.getAttribute('data-filter')); });
 				}
 			});
 
