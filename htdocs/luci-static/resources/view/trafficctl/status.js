@@ -172,6 +172,24 @@ function escHtml(s) {
 	return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+function mkEthIcon(size) {
+	var s = size || 14;
+	var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+	svg.setAttribute('width', s);
+	svg.setAttribute('height', s);
+	svg.setAttribute('viewBox', '0 0 24 24');
+	svg.setAttribute('fill', 'none');
+	svg.setAttribute('stroke', 'currentColor');
+	svg.setAttribute('stroke-width', '2');
+	svg.setAttribute('stroke-linecap', 'round');
+	svg.setAttribute('stroke-linejoin', 'round');
+	svg.style.cssText = 'display:inline-block;vertical-align:middle;margin-right:3px';
+	var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+	path.setAttribute('d', 'M4 7h16a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1zM7 11v2M10 11v2M13 11v2M16 11v2');
+	svg.appendChild(path);
+	return svg;
+}
+
 function renderSparkline(history, globalMax, width, height) {
 	if (!history || history.length < 2) return null;
 	var maxVal = globalMax || 1;
@@ -527,10 +545,9 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 			linkBadge = r.wifi_blocked
 				? E('span', { 'style': 'color:'+C.rateFg+';font-weight:600;text-decoration:line-through' }, '📶 ' + wLabel)
 				: E('span', { 'style': 'color:'+C.proto }, '📶 ' + wLabel);
-		} else if (ct === 'ethernet') {
-			linkBadge = E('span', { 'style': 'color:'+C.textMute }, '🔗 Eth');
 		} else {
-			linkBadge = E('span', { 'style': 'color:'+C.textMute }, '🔗 ' + ct);
+			var ethLabel = (ct === 'ethernet') ? 'eth' : ct;
+			linkBadge = E('span', { 'style': 'color:'+C.textMute }, [mkEthIcon(14), document.createTextNode(ethLabel)]);
 		}
 		cellMap.conn_type = E('td', { 'style': td+';text-align:center' }, linkBadge);
 
