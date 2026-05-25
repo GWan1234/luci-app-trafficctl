@@ -1,0 +1,3 @@
+config trafficctl 'main'
+	option enabled '1'
+	option default_mode 'limiter'

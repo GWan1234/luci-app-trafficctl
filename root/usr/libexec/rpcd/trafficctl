@@ -1,0 +1,167 @@
+#!/bin/sh
+# shellcheck shell=dash
+# rpcd/ubus backend for luci-app-trafficctl.
+# Provides ubus object "luci.trafficctl" with methods for traffic control.
+
+. /usr/local/bin/trafficctl-fw.sh
+
+SCRIPTS="/usr/local/bin"
+
+case "$1" in
+list)
+	printf '{'
+	printf '"summary":{},'
+	printf '"device":{"ip":"str","proto":"str"},'
+	printf '"bytes":{},'
+	printf '"block":{"ip":"str","label":"str"},'
+	printf '"unblock":{"ip":"str","label":"str"},'
+	printf '"macfilter_add":{"ip":"str"},'
+	printf '"macfilter_remove":{"ip":"str"},'
+	printf '"ratelimit":{"ip":"str","rate_kbit":"int","label":"str"},'
+	printf '"ratelimit_stats":{},'
+	printf '"shape_add":{"ip":"str","rate_kbit":"int","label":"str"},'
+	printf '"shape_remove":{"ip":"str","label":"str"},'
+	printf '"shape_status":{"ip":"str"},'
+	printf '"shape_stats":{},'
+	printf '"rdns":{"ip":"str"},'
+	printf '"config_get":{},'
+	printf '"config_set":{"enabled":"bool","default_mode":"str"}'
+	printf '}'
+	;;
+call)
+	case "$2" in
+	summary)
+		"$SCRIPTS/trafficctl-summary.sh"
+		;;
+	device)
+		read -r input
+		ip=$(echo "$input" | jsonfilter -e '@.ip' 2>/dev/null)
+		proto=$(echo "$input" | jsonfilter -e '@.proto' 2>/dev/null)
+		if [ -z "$ip" ]; then
+			echo '{"ok":false,"msg":"ip required"}'
+		else
+			params="$ip"
+			[ -n "$proto" ] && [ "$proto" != "all" ] && params="$params --proto $proto"
+			# shellcheck disable=SC2086
+			"$SCRIPTS/trafficctl-device.sh" $params
+		fi
+		;;
+	bytes)
+		"$SCRIPTS/trafficctl-bytes.sh"
+		;;
+	block)
+		read -r input
+		ip=$(echo "$input" | jsonfilter -e '@.ip' 2>/dev/null)
+		label=$(echo "$input" | jsonfilter -e '@.label' 2>/dev/null)
+		if [ -z "$ip" ]; then
+			echo '{"ok":false,"msg":"ip required"}'
+		else
+			"$SCRIPTS/trafficctl-block.sh" "$ip" "$label"
+		fi
+		;;
+	unblock)
+		read -r input
+		ip=$(echo "$input" | jsonfilter -e '@.ip' 2>/dev/null)
+		label=$(echo "$input" | jsonfilter -e '@.label' 2>/dev/null)
+		if [ -z "$ip" ]; then
+			echo '{"ok":false,"msg":"ip required"}'
+		else
+			"$SCRIPTS/trafficctl-unblock.sh" "$ip" "$label"
+		fi
+		;;
+	macfilter_add)
+		read -r input
+		ip=$(echo "$input" | jsonfilter -e '@.ip' 2>/dev/null)
+		if [ -z "$ip" ]; then
+			echo '{"ok":false,"msg":"ip required"}'
+		else
+			"$SCRIPTS/trafficctl-macfilter-add.sh" "$ip"
+		fi
+		;;
+	macfilter_remove)
+		read -r input
+		ip=$(echo "$input" | jsonfilter -e '@.ip' 2>/dev/null)
+		if [ -z "$ip" ]; then
+			echo '{"ok":false,"msg":"ip required"}'
+		else
+			"$SCRIPTS/trafficctl-macfilter-remove.sh" "$ip"
+		fi
+		;;
+	ratelimit)
+		read -r input
+		ip=$(echo "$input" | jsonfilter -e '@.ip' 2>/dev/null)
+		rate=$(echo "$input" | jsonfilter -e '@.rate_kbit' 2>/dev/null)
+		label=$(echo "$input" | jsonfilter -e '@.label' 2>/dev/null)
+		if [ -z "$ip" ]; then
+			echo '{"ok":false,"msg":"ip required"}'
+		else
+			"$SCRIPTS/trafficctl-ratelimit.sh" "$ip" "${rate:-0}" "$label"
+		fi
+		;;
+	ratelimit_stats)
+		"$SCRIPTS/trafficctl-ratelimit-stats.sh"
+		;;
+	shape_add)
+		read -r input
+		ip=$(echo "$input" | jsonfilter -e '@.ip' 2>/dev/null)
+		rate=$(echo "$input" | jsonfilter -e '@.rate_kbit' 2>/dev/null)
+		label=$(echo "$input" | jsonfilter -e '@.label' 2>/dev/null)
+		if [ -z "$ip" ] || [ -z "$rate" ]; then
+			echo '{"ok":false,"msg":"ip and rate_kbit required"}'
+		else
+			"$SCRIPTS/trafficctl-shape.sh" add "$ip" "$rate" "$label"
+		fi
+		;;
+	shape_remove)
+		read -r input
+		ip=$(echo "$input" | jsonfilter -e '@.ip' 2>/dev/null)
+		label=$(echo "$input" | jsonfilter -e '@.label' 2>/dev/null)
+		if [ -z "$ip" ]; then
+			echo '{"ok":false,"msg":"ip required"}'
+		else
+			"$SCRIPTS/trafficctl-shape.sh" remove "$ip"
+		fi
+		;;
+	shape_status)
+		read -r input
+		ip=$(echo "$input" | jsonfilter -e '@.ip' 2>/dev/null)
+		if [ -z "$ip" ]; then
+			echo '{"ok":false,"msg":"ip required"}'
+		else
+			"$SCRIPTS/trafficctl-shape.sh" status "$ip"
+		fi
+		;;
+	shape_stats)
+		"$SCRIPTS/trafficctl-shape-stats.sh"
+		;;
+	rdns)
+		read -r input
+		ip=$(echo "$input" | jsonfilter -e '@.ip' 2>/dev/null)
+		if [ -z "$ip" ]; then
+			echo '{"ok":false,"msg":"ip required"}'
+		else
+			"$SCRIPTS/trafficctl-rdns.sh" "$ip"
+		fi
+		;;
+	config_get)
+		enabled=$(uci -q get trafficctl.main.enabled)
+		mode=$(uci -q get trafficctl.main.default_mode)
+		printf '{"enabled":%s,"default_mode":"%s"}' \
+			"$([ "$enabled" = "1" ] && echo true || echo false)" \
+			"${mode:-limiter}"
+		;;
+	config_set)
+		read -r input
+		enabled=$(echo "$input" | jsonfilter -e '@.enabled' 2>/dev/null)
+		mode=$(echo "$input" | jsonfilter -e '@.default_mode' 2>/dev/null)
+		[ -n "$enabled" ] && uci set trafficctl.main.enabled="$([ "$enabled" = "true" ] && echo 1 || echo 0)"
+		[ -n "$mode" ] && uci set trafficctl.main.default_mode="$mode"
+		uci commit trafficctl
+		echo '{"ok":true}'
+		;;
+	*)
+		echo '{"error":"unknown method"}'
+		;;
+	esac
+	;;
+esac

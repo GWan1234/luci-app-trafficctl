@@ -1,5 +1,6 @@
 'use strict';
 'require view';
+'require rpc';
 'require fs';
 
 var STORAGE_KEY = 'trafficctl_opts';
@@ -13,7 +14,84 @@ var SERVICE_PORTS = {
 	19302:'stun', 51820:'wireguard'
 };
 
-// CSS variables for theme support — defined in injectStyles(), reactive to LuCI dark mode
+var callTrafficctl = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'summary',
+	expect: { '': [] }
+});
+
+var callDevice = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'device',
+	params: ['ip', 'proto']
+});
+
+var callBytes = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'bytes',
+	expect: { '': [] }
+});
+
+var callBlock = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'block',
+	params: ['ip', 'label']
+});
+
+var callUnblock = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'unblock',
+	params: ['ip', 'label']
+});
+
+var callMacfilterAdd = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'macfilter_add',
+	params: ['ip']
+});
+
+var callMacfilterRemove = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'macfilter_remove',
+	params: ['ip']
+});
+
+var callRatelimit = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'ratelimit',
+	params: ['ip', 'rate_kbit', 'label']
+});
+
+var callRatelimitStats = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'ratelimit_stats',
+	expect: { '': [] }
+});
+
+var callShapeAdd = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'shape_add',
+	params: ['ip', 'rate_kbit', 'label']
+});
+
+var callShapeRemove = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'shape_remove',
+	params: ['ip', 'label']
+});
+
+var callShapeStats = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'shape_stats',
+	expect: { '': [] }
+});
+
+var callRdns = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'rdns',
+	params: ['ip']
+});
+
 var C = {
 	thBg:          'var(--tm-th-bg)',
 	thFg:          'var(--tm-th-fg)',
@@ -44,7 +122,7 @@ var C = {
 };
 
 var RATE_PRESETS = [
-	{v:'0',      l:'Off'},
+	{v:'0',      l: _('Off')},
 	{v:'1000',   l:'1 Mbit/s'},
 	{v:'2000',   l:'2 Mbit/s'},
 	{v:'5000',   l:'5 Mbit/s'},
@@ -52,15 +130,15 @@ var RATE_PRESETS = [
 	{v:'25000',  l:'25 Mbit/s'},
 	{v:'50000',  l:'50 Mbit/s'},
 	{v:'100000', l:'100 Mbit/s'},
-	{v:'custom', l:'Custom…'}
+	{v:'custom', l: _('Custom…')}
 ];
 
 var GROUP_OPTS = [
-	{v:'none',    l:'None (per-flow)'},
-	{v:'host',    l:'Hostname / Dst IP'},
-	{v:'service', l:'Service'},
-	{v:'port',    l:'Port'},
-	{v:'proto',   l:'Protocol'}
+	{v:'none',    l: _('None (per-flow)')},
+	{v:'host',    l: _('Hostname / Dst IP')},
+	{v:'service', l: _('Service')},
+	{v:'port',    l: _('Port')},
+	{v:'proto',   l: _('Protocol')}
 ];
 
 function loadOpts() {
@@ -173,7 +251,6 @@ var TH = 'cursor:pointer;padding:7px 12px;white-space:nowrap;background:' + C.th
 
 var PRIVATE_RE = /^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/;
 
-// Aggregate connections by a field. Returns array of {key, count, bytes, tcp, udp}.
 function groupConnections(conns, groupBy) {
 	if (groupBy === 'none') return null;
 	var keyFn;
@@ -198,11 +275,11 @@ function groupConnections(conns, groupBy) {
 
 function buildGroupedTable(groups, sortCol, sortDir) {
 	var cols = [
-		{ key:'key',   label:'Group', num:false },
-		{ key:'count', label:'Conns', num:true  },
-		{ key:'tcp',   label:'TCP',   num:true  },
-		{ key:'udp',   label:'UDP',   num:true  },
-		{ key:'bytes', label:'Bytes', num:true  }
+		{ key:'key',   label: _('Group'), num:false },
+		{ key:'count', label: _('Conns'), num:true  },
+		{ key:'tcp',   label:'TCP',       num:true  },
+		{ key:'udp',   label:'UDP',       num:true  },
+		{ key:'bytes', label: _('Bytes'), num:true  }
 	];
 
 	var sorted = groups.slice().sort(function(a, b) {
@@ -236,13 +313,13 @@ function buildGroupedTable(groups, sortCol, sortDir) {
 
 function buildTable(conns, sortCol, sortDir, rdnsMode) {
 	var cols = [
-		{ key:'proto',   label:'Proto',    num:false },
-		{ key:'dst',     label:'Dst IP',   num:false },
-		{ key:'host',    label:'Hostname', num:false },
-		{ key:'port',    label:'Port',     num:true  },
-		{ key:'service', label:'Service',  num:false },
-		{ key:'bytes',   label:'Bytes',    num:true  },
-		{ key:'state',   label:'State',    num:false }
+		{ key:'proto',   label: _('Proto'),    num:false },
+		{ key:'dst',     label: _('Dst IP'),   num:false },
+		{ key:'host',    label: _('Hostname'), num:false },
+		{ key:'port',    label: _('Port'),     num:true  },
+		{ key:'service', label: _('Service'),  num:false },
+		{ key:'bytes',   label: _('Bytes'),    num:true  },
+		{ key:'state',   label: _('State'),    num:false }
 	];
 
 	var sorted = conns.slice().sort(function(a, b) {
@@ -264,7 +341,6 @@ function buildTable(conns, sortCol, sortDir, rdnsMode) {
 		var td = 'padding:5px 12px;border-bottom:1px solid '+C.border+';color:'+C.hostname+';font-size:12px;background:'+bg;
 
 		var dst = r.dst || '';
-		var isExternal = dst && !PRIVATE_RE.test(dst);
 		var dstEl = dst
 			? E('a', { 'href': 'https://ipinfo.io/'+dst, 'target': '_blank', 'rel': 'noopener noreferrer',
 			           'class':'tm-link', 'onclick': 'event.stopPropagation()' }, dst)
@@ -273,8 +349,8 @@ function buildTable(conns, sortCol, sortDir, rdnsMode) {
 		var hostCell = E('td', { 'style': td+';color:'+C.hostname, 'data-dst': dst });
 		if (r.host) {
 			hostCell.textContent = r.host;
-		} else if (rdnsMode && isExternal) {
-			hostCell.innerHTML = '<span style="color:'+C.textFaint+';font-style:italic">resolving…</span>';
+		} else if (rdnsMode && !PRIVATE_RE.test(dst)) {
+			hostCell.innerHTML = '<span style="color:'+C.textFaint+';font-style:italic">' + _('resolving…') + '</span>';
 		} else {
 			hostCell.textContent = '—';
 		}
@@ -297,18 +373,18 @@ function buildTable(conns, sortCol, sortDir, rdnsMode) {
 
 function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, dropMap, shapeMap) {
 	var cols = [
-		{ key:'name',             label:'Device',     num:false },
-		{ key:'ip',               label:'IP',         num:false },
-		{ key:'mac',              label:'MAC',        num:false },
-		{ key:'_speed',           label:'DL Speed',   num:true  },
-		{ key:'total',            label:'Conns',      num:true  },
-		{ key:'tcp',              label:'TCP',        num:true  },
-		{ key:'udp',              label:'UDP',        num:true  },
-		{ key:'blocked',          label:'Inet',       num:false },
-		{ key:'wifi_blocked',     label:'WiFi',       num:false },
-		{ key:'_throttle_kbit',   label:'Throttle',   num:true  },
-		{ key:'_drop_packets',    label:'Dropped',    num:true  },
-		{ key:'_backlog',         label:'Queued',     num:true  }
+		{ key:'name',             label: _('Device'),   num:false },
+		{ key:'ip',               label:'IP',           num:false },
+		{ key:'mac',              label:'MAC',          num:false },
+		{ key:'_speed',           label: _('DL Speed'), num:true  },
+		{ key:'total',            label: _('Conns'),    num:true  },
+		{ key:'tcp',              label:'TCP',          num:true  },
+		{ key:'udp',              label:'UDP',          num:true  },
+		{ key:'blocked',          label: _('Inet'),     num:false },
+		{ key:'wifi_blocked',     label: _('WiFi'),     num:false },
+		{ key:'_throttle_kbit',   label: _('Throttle'), num:true  },
+		{ key:'_drop_packets',    label: _('Dropped'),  num:true  },
+		{ key:'_backlog',         label: _('Queued'),   num:true  }
 	];
 
 	function ipToInt(s) {
@@ -317,7 +393,6 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		return ((parseInt(p[0])||0)*16777216 + (parseInt(p[1])||0)*65536 + (parseInt(p[2])||0)*256 + (parseInt(p[3])||0));
 	}
 
-	// Attach current speed to each row from speedMap (if any)
 	speedMap = speedMap || {};
 	dropMap  = dropMap  || {};
 	shapeMap = shapeMap || {};
@@ -329,7 +404,6 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		r._drop_bytes   = d ? d.bytes   : 0;
 		var sh = shapeMap[r.ip];
 		r._backlog = sh ? sh.backlog : 0;
-		// Unified throttle: prefer shape if active, else limiter
 		r._throttle_kbit = (r.shape_kbit || 0) > 0 ? r.shape_kbit : (r.rate_limit_kbit || 0);
 		r._throttle_mode = (r.shape_kbit || 0) > 0 ? 'shaper' : ((r.rate_limit_kbit || 0) > 0 ? 'limiter' : 'none');
 	});
@@ -357,16 +431,16 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		var bg = i%2===0 ? C.rowEven : C.rowOdd;
 		var td = 'padding:6px 12px;border-bottom:1px solid '+C.border+';color:'+C.hostname+';font-size:12px;background:'+bg;
 		var inetBadge = r.blocked
-			? E('span', { 'style': 'color:'+C.blockedFg+';font-weight:600' }, '⛔ blocked')
-			: E('span', { 'style': 'color:'+C.stateOk }, '✓ ok');
+			? E('span', { 'style': 'color:'+C.blockedFg+';font-weight:600' }, '⛔ ' + _('blocked'))
+			: E('span', { 'style': 'color:'+C.stateOk }, '✓ ' + _('ok'));
 		var wifiBadge = r.wifi_blocked
-			? E('span', { 'style': 'color:'+C.stateWait+';font-weight:600' }, '📵 blocked')
+			? E('span', { 'style': 'color:'+C.stateWait+';font-weight:600' }, '📵 ' + _('blocked'))
 			: E('span', { 'style': 'color:'+C.textFaint }, '—');
 		var throttleBadge;
 		if (r._throttle_mode === 'shaper') {
-			throttleBadge = E('span', { 'style': 'color:'+C.shapeFg+';font-weight:600', 'title': 'Shaper (tc/HTB queue)' }, '🌊 ' + fmtRate(r._throttle_kbit));
+			throttleBadge = E('span', { 'style': 'color:'+C.shapeFg+';font-weight:600', 'title': _('Shaper (tc/HTB queue)') }, '🌊 ' + fmtRate(r._throttle_kbit));
 		} else if (r._throttle_mode === 'limiter') {
-			throttleBadge = E('span', { 'style': 'color:'+C.rateFg+';font-weight:600', 'title': 'Limiter (nft drop)' }, '⚡ ' + fmtRate(r._throttle_kbit));
+			throttleBadge = E('span', { 'style': 'color:'+C.rateFg+';font-weight:600', 'title': _('Limiter (nft drop)') }, '⚡ ' + fmtRate(r._throttle_kbit));
 		} else {
 			throttleBadge = E('span', { 'style': 'color:'+C.textFaint }, '—');
 		}
@@ -375,13 +449,13 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		var dropBadge = dp > 0
 			? E('span', {
 				'style': 'color:'+C.dropFg+';font-weight:600',
-				'title': fmtBytes(r._drop_bytes || 0) + ' dropped'
+				'title': fmtBytes(r._drop_bytes || 0) + ' ' + _('dropped')
 			}, '🚫 ' + dp)
 			: E('span', { 'style': 'color:'+C.textFaint }, '—');
 
 		var bl = r._backlog || 0;
 		var backlogBadge = bl > 0
-			? E('span', { 'style': 'color:'+C.shapeFg+';font-weight:600', 'title': 'Bytes queued in tc' }, fmtBytes(bl))
+			? E('span', { 'style': 'color:'+C.shapeFg+';font-weight:600', 'title': _('Bytes queued in tc') }, fmtBytes(bl))
 			: E('span', { 'style': 'color:'+C.textFaint }, '—');
 
 		var macEl = r.mac
@@ -390,17 +464,16 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 				'target': '_blank',
 				'rel': 'noopener',
 				'class': 'tm-link',
-				'title': 'Open DHCP/DNS bindings',
+				'title': _('Open DHCP/DNS bindings'),
 				'onclick': 'event.stopPropagation()'
 			}, r.mac)
 			: '';
 
-		// Speed cell (initially —, updated by background polling)
 		var sd = speedMap[r.ip];
 		var speedCell = E('td', {
 			'style': td+';text-align:right;font-family:monospace',
 			'data-speed-ip': r.ip,
-			'title': sd ? ('Avg: '+fmtSpeed(sd.avg)+' / Max: '+fmtSpeed(sd.max)) : 'Calculating…'
+			'title': sd ? (_('Avg')+': '+fmtSpeed(sd.avg)+' / '+_('Max')+': '+fmtSpeed(sd.max)) : _('Calculating…')
 		});
 		if (sd && sd.current > 1024) {
 			speedCell.className = 'tm-speed-active';
@@ -410,7 +483,7 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 			speedCell.textContent = sd ? fmtSpeed(sd.current) : '—';
 		}
 
-		var row = E('tr', { 'class': 'tm-row', 'title': 'Click to inspect ' + r.name }, [
+		var row = E('tr', { 'class': 'tm-row', 'title': _('Click to inspect') + ' ' + r.name }, [
 			E('td', { 'style': td+';font-weight:600;color:'+C.proto  }, escHtml(r.name)),
 			E('td', { 'style': td+';font-family:monospace'           }, escHtml(r.ip)),
 			E('td', { 'style': td+';font-family:monospace;color:'+C.mac+';font-size:11px' }, macEl || ''),
@@ -450,11 +523,11 @@ return view.extend({
 	_bytesTimer:   null,
 	_dropTimer:    null,
 	_shapeTimer:   null,
-	_bytesHistory: {},  // ip -> {bytes_in, bytes_out, time}
-	_speedHistory: {},  // ip -> array of last N {speed, time}
-	_speedMap:     {},  // ip -> {current, avg, max} (for sorting and initial render)
-	_dropMap:      {},  // ip -> {packets, bytes} cumulative drop counters from nft
-	_shapeMap:     {},  // ip -> {packets, bytes, backlog, rate_kbit} from tc/HTB
+	_bytesHistory: {},
+	_speedHistory: {},
+	_speedMap:     {},
+	_dropMap:      {},
+	_shapeMap:     {},
 	_sortCol:    'bytes',
 	_sortDir:    'desc',
 	_sumCol:     '_speed',
@@ -469,7 +542,6 @@ return view.extend({
 		var opts = loadOpts();
 		injectStyles();
 
-		// Parse DHCP leases
 		var devices = [];
 		(leasesRaw || '').split('\n').forEach(function(line) {
 			var p = line.trim().split(/\s+/);
@@ -480,7 +552,7 @@ return view.extend({
 		devices.sort(function(a, b) { return a.name.localeCompare(b.name); });
 
 		var select = E('select', { 'class': 'cbi-input-select', 'style': 'min-width:280px' },
-			[E('option', { 'value': '__all__' }, '— All active devices —')]
+			[E('option', { 'value': '__all__' }, '— ' + _('All active devices') + ' —')]
 			.concat(devices.map(function(d) {
 				return E('option', { 'value': d.ip }, d.name + '  —  ' + d.ip);
 			}))
@@ -500,20 +572,20 @@ return view.extend({
 			return E('span', { 'style': 'color:'+C.textMute+';font-size:12px;margin-right:4px' }, t);
 		}
 
-		var showStats = mkCheck('tm-stats', 'Stats', opts.showStats !== false, function() {
+		var showStats = mkCheck('tm-stats', _('Stats'), opts.showStats !== false, function() {
 			var o = loadOpts(); o.showStats = this.checked; saveOpts(o);
 			statsDiv.style.display = this.checked ? '' : 'none';
 		});
-		var showConns = mkCheck('tm-conns', 'Connections', opts.showConns !== false, function() {
+		var showConns = mkCheck('tm-conns', _('Connections'), opts.showConns !== false, function() {
 			var o = loadOpts(); o.showConns = this.checked; saveOpts(o);
 			connsDiv.style.display = this.checked ? '' : 'none';
 		});
-		var rdnsCheck = mkCheck('tm-rdns', 'Reverse DNS', opts.rdns, function() {
+		var rdnsCheck = mkCheck('tm-rdns', _('Reverse DNS'), opts.rdns, function() {
 			var o = loadOpts(); o.rdns = this.checked; saveOpts(o);
 		});
 
 		var refreshSel = E('select', { 'class': 'cbi-input-select' }, [
-			E('option',{'value':'0'},'Off'), E('option',{'value':'5'},'5s'),
+			E('option',{'value':'0'}, _('Off')), E('option',{'value':'5'},'5s'),
 			E('option',{'value':'10'},'10s'), E('option',{'value':'30'},'30s'),
 			E('option',{'value':'60'},'60s')
 		]);
@@ -525,7 +597,7 @@ return view.extend({
 		});
 
 		var protoSel = E('select', { 'class': 'cbi-input-select' }, [
-			E('option',{'value':'all'},'All'), E('option',{'value':'tcp'},'TCP only'), E('option',{'value':'udp'},'UDP only')
+			E('option',{'value':'all'}, _('All')), E('option',{'value':'tcp'},'TCP'), E('option',{'value':'udp'},'UDP')
 		]);
 		Array.prototype.forEach.call(protoSel.options, function(o) {
 			if (o.value === (opts.proto||'all')) o.selected = true;
@@ -534,7 +606,6 @@ return view.extend({
 			var o = loadOpts(); o.proto = this.value; saveOpts(o);
 		});
 
-		// Group-by selector (per-device view)
 		var groupSel = E('select', { 'class': 'cbi-input-select' },
 			GROUP_OPTS.map(function(g){ return E('option', {'value': g.v}, g.l); })
 		);
@@ -545,13 +616,12 @@ return view.extend({
 			var o = loadOpts(); o.groupBy = this.value; saveOpts(o); runQuery();
 		});
 
-		// Output areas
 		var statusDiv = E('div', { 'style': 'display:none' });
 		var statsDiv  = E('div', { 'style': 'margin:8px 0' + (opts.showStats===false?';display:none':'') });
 		var connsDiv  = E('div', { 'style': opts.showConns===false?'display:none':'' });
 
-		var blockBtn   = E('button', { 'class': 'cbi-button cbi-button-negative' }, '⛔ Block');
-		var unblockBtn = E('button', { 'class': 'cbi-button cbi-button-action'   }, '✅ Unblock');
+		var blockBtn   = E('button', { 'class': 'cbi-button cbi-button-negative' }, '⛔ ' + _('Block'));
+		var unblockBtn = E('button', { 'class': 'cbi-button cbi-button-action'   }, '✅ ' + _('Unblock'));
 		var wifiBtn = E('button', { 'class': 'cbi-button', 'style': 'display:none' }, '');
 
 		function updateWifiBtn(wifiBlocked, hasMac) {
@@ -559,31 +629,30 @@ return view.extend({
 			wifiBtn.style.display = '';
 			wifiBtn.disabled = false;
 			if (wifiBlocked) {
-				wifiBtn.textContent = '📶 WiFi Unblock';
+				wifiBtn.textContent = '📶 ' + _('WiFi Unblock');
 				wifiBtn.style.cssText = 'background:#22c55e;color:#fff;border:1px solid #16a34a;padding:4px 10px;border-radius:3px;cursor:pointer;font-size:13px';
 				wifiBtn._wifiAction = 'unblock';
 			} else {
-				wifiBtn.textContent = '📵 WiFi Block';
+				wifiBtn.textContent = '📵 ' + _('WiFi Block');
 				wifiBtn.style.cssText = 'background:#f97316;color:#fff;border:1px solid #ea580c;padding:4px 10px;border-radius:3px;cursor:pointer;font-size:13px';
 				wifiBtn._wifiAction = 'block';
 			}
 		}
 
-		// Speed Limit row with Custom support
 		var rateSel = E('select', { 'class': 'cbi-input-select' },
 			RATE_PRESETS.map(function(p) { return E('option', { 'value': p.v }, p.l); })
 		);
-		var customInput = E('input', { 'type':'number', 'min':'1', 'step':'1', 'placeholder':'value',
+		var customInput = E('input', { 'type':'number', 'min':'1', 'step':'1', 'placeholder': _('value'),
 			'class':'cbi-input-text', 'style':'width:90px;display:none' });
 		var customUnit = E('select', { 'class':'cbi-input-select', 'style':'display:none' }, [
 			E('option', {'value':'mbit'}, 'Mbit/s'),
 			E('option', {'value':'kbit'}, 'kbit/s')
 		]);
 		var modeSel = E('select', { 'class': 'cbi-input-select' }, [
-			E('option', { 'value': 'limiter' }, 'Limiter (drop)'),
-			E('option', { 'value': 'shaper'  }, 'Shaper (queue)')
+			E('option', { 'value': 'limiter' }, _('Limiter (drop)')),
+			E('option', { 'value': 'shaper'  }, _('Shaper (queue)'))
 		]);
-		var rateBtn = E('button', { 'class': 'cbi-button cbi-button-action' }, 'Apply');
+		var rateBtn = E('button', { 'class': 'cbi-button cbi-button-action' }, _('Apply'));
 
 		rateSel.addEventListener('change', function() {
 			var isCustom = this.value === 'custom';
@@ -593,7 +662,7 @@ return view.extend({
 
 		var rateLimitRow = E('div', {
 			'style': 'display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap'
-		}, [mkLabel('Speed Limit:'), rateSel, customInput, customUnit, mkLabel('Mode:'), modeSel, rateBtn]);
+		}, [mkLabel(_('Speed Limit') + ':'), rateSel, customInput, customUnit, mkLabel(_('Mode') + ':'), modeSel, rateBtn]);
 
 		function getRateKbit() {
 			var v = rateSel.value;
@@ -606,9 +675,9 @@ return view.extend({
 
 		var actionRow = E('div', { 'style': 'display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:6px' },
 			[blockBtn, unblockBtn, wifiBtn]);
-		var perDeviceOpts = E('span', {}, [mkLabel('Proto:'), protoSel,
+		var perDeviceOpts = E('span', {}, [mkLabel(_('Proto') + ':'), protoSel,
 			E('span',{'style':'display:inline-block;width:8px'}),
-			mkLabel('Group by:'), groupSel,
+			mkLabel(_('Group by') + ':'), groupSel,
 			E('span',{'style':'display:inline-block;width:8px'}),
 			rdnsCheck]);
 
@@ -621,7 +690,6 @@ return view.extend({
 			perDeviceOpts.style.display = all ? 'none' : '';
 		}
 
-		// ── Background bandwidth polling (only in all-devices mode) ───────
 		function updateSpeedCells() {
 			Object.keys(self._speedMap).forEach(function(ip) {
 				var s = self._speedMap[ip];
@@ -633,327 +701,309 @@ return view.extend({
 					cell.className = 'tm-speed-idle';
 				}
 				cell.textContent = fmtSpeed(s.current);
-				cell.title = 'Avg: '+fmtSpeed(s.avg)+' / Max: '+fmtSpeed(s.max);
+				cell.title = _('Avg')+': '+fmtSpeed(s.avg)+' / '+_('Max')+': '+fmtSpeed(s.max);
 			});
 		}
 
 		function pollDrops() {
 			if (document.hidden) return;
 			if (!isAllMode()) return;
-			fs.exec_direct('/usr/local/bin/trafficctl-ratelimit-stats.sh', [])
-				.then(function(raw) {
-					var data; try { data = JSON.parse(raw); } catch(e) { return; }
-					data.forEach(function(d) {
-						self._dropMap[d.ip] = { packets: d.packets, bytes: d.bytes, rate_kbit: d.rate_kbit };
-					});
-					// Update drop cells in place
-					Object.keys(self._dropMap).forEach(function(ip) {
-						var dp = self._dropMap[ip].packets || 0;
-						var db = self._dropMap[ip].bytes   || 0;
-						var cell = connsDiv.querySelector('td[data-drop-ip="'+ip+'"]');
-						if (!cell) return;
-						while (cell.firstChild) cell.removeChild(cell.firstChild);
-						if (dp > 0) {
-							cell.appendChild(E('span', {
-								'style': 'color:'+C.dropFg+';font-weight:600',
-								'title': fmtBytes(db) + ' dropped'
-							}, '🚫 ' + dp));
-						} else {
-							cell.appendChild(E('span', { 'style': 'color:'+C.textFaint }, '—'));
-						}
-					});
-				})
-				.catch(function(){});
+			callRatelimitStats().then(function(data) {
+				if (!Array.isArray(data)) return;
+				data.forEach(function(d) {
+					self._dropMap[d.ip] = { packets: d.packets, bytes: d.bytes, rate_kbit: d.rate_kbit };
+				});
+				Object.keys(self._dropMap).forEach(function(ip) {
+					var dp = self._dropMap[ip].packets || 0;
+					var db = self._dropMap[ip].bytes   || 0;
+					var cell = connsDiv.querySelector('td[data-drop-ip="'+ip+'"]');
+					if (!cell) return;
+					while (cell.firstChild) cell.removeChild(cell.firstChild);
+					if (dp > 0) {
+						cell.appendChild(E('span', {
+							'style': 'color:'+C.dropFg+';font-weight:600',
+							'title': fmtBytes(db) + ' ' + _('dropped')
+						}, '🚫 ' + dp));
+					} else {
+						cell.appendChild(E('span', { 'style': 'color:'+C.textFaint }, '—'));
+					}
+				});
+			}).catch(function(){});
 		}
 
 		function pollShapeStats() {
 			if (document.hidden) return;
 			if (!isAllMode()) return;
-			fs.exec_direct('/usr/local/bin/trafficctl-shape-stats.sh', [])
-				.then(function(raw) {
-					var data; try { data = JSON.parse(raw); } catch(e) { return; }
-					data.forEach(function(d) {
-						self._shapeMap[d.ip] = { packets: d.packets, bytes: d.bytes, backlog: d.backlog, rate_kbit: d.rate_kbit };
-					});
-					// Update backlog cells in place
-					Object.keys(self._shapeMap).forEach(function(ip) {
-						var bl = self._shapeMap[ip].backlog || 0;
-						var cell = connsDiv.querySelector('td[data-backlog-ip="'+ip+'"]');
-						if (!cell) return;
-						while (cell.firstChild) cell.removeChild(cell.firstChild);
-						if (bl > 0) {
-							cell.appendChild(E('span', { 'style': 'color:'+C.shapeFg+';font-weight:600', 'title': 'Bytes queued in tc' }, fmtBytes(bl)));
-						} else {
-							cell.appendChild(E('span', { 'style': 'color:'+C.textFaint }, '—'));
-						}
-					});
-				})
-				.catch(function(){});
+			callShapeStats().then(function(data) {
+				if (!Array.isArray(data)) return;
+				data.forEach(function(d) {
+					self._shapeMap[d.ip] = { packets: d.packets, bytes: d.bytes, backlog: d.backlog, rate_kbit: d.rate_kbit };
+				});
+				Object.keys(self._shapeMap).forEach(function(ip) {
+					var bl = self._shapeMap[ip].backlog || 0;
+					var cell = connsDiv.querySelector('td[data-backlog-ip="'+ip+'"]');
+					if (!cell) return;
+					while (cell.firstChild) cell.removeChild(cell.firstChild);
+					if (bl > 0) {
+						cell.appendChild(E('span', { 'style': 'color:'+C.shapeFg+';font-weight:600', 'title': _('Bytes queued in tc') }, fmtBytes(bl)));
+					} else {
+						cell.appendChild(E('span', { 'style': 'color:'+C.textFaint }, '—'));
+					}
+				});
+			}).catch(function(){});
 		}
 
 		function pollBytes() {
 			if (document.hidden) return;
 			if (!isAllMode()) return;
-			fs.exec_direct('/usr/local/bin/trafficctl-bytes.sh', [])
-				.then(function(raw) {
-					var data; try { data = JSON.parse(raw); } catch(e) { return; }
-					var now = Date.now();
-					data.forEach(function(d) {
-						var prev = self._bytesHistory[d.ip];
-						if (prev) {
-							var dt = (now - prev.time) / 1000;
-							if (dt < 0.5) return;
-							var dIn = d.bytes_in - prev.bytes_in;
-							if (dIn < 0) dIn = 0;
-							var speed = dIn / dt;
-							if (!self._speedHistory[d.ip]) self._speedHistory[d.ip] = [];
-							self._speedHistory[d.ip].push({speed: speed, time: now});
-							if (self._speedHistory[d.ip].length > 30) self._speedHistory[d.ip].shift();
-							var hist = self._speedHistory[d.ip];
-							var sum = 0, max = 0;
-							hist.forEach(function(h){ sum += h.speed; if (h.speed > max) max = h.speed; });
-							self._speedMap[d.ip] = {
-								current: speed,
-								avg: sum / hist.length,
-								max: max
-							};
-						}
-						self._bytesHistory[d.ip] = {
-							bytes_in: d.bytes_in,
-							bytes_out: d.bytes_out,
-							time: now
+			callBytes().then(function(data) {
+				if (!Array.isArray(data)) return;
+				var now = Date.now();
+				data.forEach(function(d) {
+					var prev = self._bytesHistory[d.ip];
+					if (prev) {
+						var dt = (now - prev.time) / 1000;
+						if (dt < 0.5) return;
+						var dIn = d.bytes_in - prev.bytes_in;
+						if (dIn < 0) dIn = 0;
+						var speed = dIn / dt;
+						if (!self._speedHistory[d.ip]) self._speedHistory[d.ip] = [];
+						self._speedHistory[d.ip].push({speed: speed, time: now});
+						if (self._speedHistory[d.ip].length > 30) self._speedHistory[d.ip].shift();
+						var hist = self._speedHistory[d.ip];
+						var sum = 0, max = 0;
+						hist.forEach(function(h){ sum += h.speed; if (h.speed > max) max = h.speed; });
+						self._speedMap[d.ip] = {
+							current: speed,
+							avg: sum / hist.length,
+							max: max
 						};
-					});
-					updateSpeedCells();
-				})
-				.catch(function(){});
+					}
+					self._bytesHistory[d.ip] = {
+						bytes_in: d.bytes_in,
+						bytes_out: d.bytes_out,
+						time: now
+					};
+				});
+				updateSpeedCells();
+			}).catch(function(){});
 		}
 
-		// ── Run single device ──────────────────────────────────────────────
 		function runSingle(ip) {
 			var o = loadOpts();
-			var params = [ip];
-			if (o.proto && o.proto !== 'all') { params.push('--proto'); params.push(o.proto); }
+			var proto = (o.proto && o.proto !== 'all') ? o.proto : '';
 
 			runBtn.disabled = true;
-			setStatus(statusDiv, 'loading', 'Running…');
+			setStatus(statusDiv, 'loading', _('Running…'));
 
-			fs.exec_direct('/usr/local/bin/trafficctl-device.sh', params)
-				.then(function(raw) {
-					var data; try { data = JSON.parse(raw); } catch(e) {
-						setStatus(statusDiv, 'error', 'Parse error: ' + raw.slice(0,120)); return;
-					}
+			callDevice(ip, proto).then(function(data) {
+				if (!data || data.error) {
+					setStatus(statusDiv, 'error', (data && data.error) || _('Unknown error'));
+					return;
+				}
 
-					if (opts.showStats !== false) {
-						var parts = ['Connections: <b>'+data.total+'</b>'];
-						if (data.total > 0) {
-							parts.push('TCP: <b>'+(data.protocols.tcp||0)+'</b>');
-							parts.push('UDP: <b>'+(data.protocols.udp||0)+'</b>');
-							if (data.tcp_states) {
-								Object.keys(data.tcp_states).forEach(function(s) {
-									parts.push(escHtml(s)+': <b>'+data.tcp_states[s]+'</b>');
-								});
-							}
+				if (opts.showStats !== false) {
+					var parts = [_('Connections') + ': <b>'+data.total+'</b>'];
+					if (data.total > 0) {
+						parts.push('TCP: <b>'+(data.protocols.tcp||0)+'</b>');
+						parts.push('UDP: <b>'+(data.protocols.udp||0)+'</b>');
+						if (data.tcp_states) {
+							Object.keys(data.tcp_states).forEach(function(s) {
+								parts.push(escHtml(s)+': <b>'+data.tcp_states[s]+'</b>');
+							});
 						}
-						if ((data.shape_kbit || 0) > 0) {
-							parts.push('Shaped: <b style="color:'+C.shapeFg+'">🌊 '+fmtRate(data.shape_kbit)+'</b>');
-							var sm = self._shapeMap[data.ip || select.value] || {};
-							if ((sm.backlog||0) > 0) parts.push('Queued: <b style="color:'+C.shapeFg+'">'+fmtBytes(sm.backlog)+'</b>');
-							if ((sm.bytes||0) > 0) parts.push('Passed: <b>'+fmtBytes(sm.bytes)+'</b>');
-						} else if ((data.rate_limit_kbit || 0) > 0) {
-							parts.push('Speed limit: <b style="color:'+C.rateFg+'">⚡ '+fmtRate(data.rate_limit_kbit)+'</b>');
-							var dm = self._dropMap[data.ip || select.value] || {};
-							if ((dm.packets||0) > 0) {
-								parts.push('Dropped: <b style="color:'+C.dropFg+'">🚫 '+dm.packets+' pkts / '+fmtBytes(dm.bytes||0)+'</b>');
-							}
-						}
-						var wifiPart = data.wifi_blocked
-							? ' &nbsp;|&nbsp; <b style="color:'+C.stateWait+'">📵 WiFi blocked</b> ('+escHtml(data.mac||'') + ')'
-							: (data.mac ? ' &nbsp;|&nbsp; <span style="color:'+C.textFaint+'">MAC: '+escHtml(data.mac)+'</span>' : '');
-						statsDiv.style.cssText = 'padding:8px 14px;border-radius:4px;font-size:13px;margin-bottom:8px;' +
-							(data.blocked ? 'background:'+C.blockedBg+';border:1px solid '+C.blockedBorder+';color:'+C.blockedFg
-							             : 'background:'+C.infoBg   +';border:1px solid '+C.infoBorder+';color:'+C.infoFg);
-						statsDiv.innerHTML = (data.blocked
-							? '<b>⛔ BLOCKED</b> — '+data.block_packets+' pkts, '+fmtBytes(data.block_bytes)+' dropped &nbsp;|&nbsp; '
-							: '') + parts.join(' &nbsp;|&nbsp; ') + wifiPart +
-							' &nbsp;<span style="color:'+C.textFaint+';font-size:11px">'+escHtml(data.timestamp)+'</span>';
 					}
+					if ((data.shape_kbit || 0) > 0) {
+						parts.push(_('Shaped') + ': <b style="color:'+C.shapeFg+'">🌊 '+fmtRate(data.shape_kbit)+'</b>');
+						var sm = self._shapeMap[data.ip || select.value] || {};
+						if ((sm.backlog||0) > 0) parts.push(_('Queued') + ': <b style="color:'+C.shapeFg+'">'+fmtBytes(sm.backlog)+'</b>');
+						if ((sm.bytes||0) > 0) parts.push(_('Passed') + ': <b>'+fmtBytes(sm.bytes)+'</b>');
+					} else if ((data.rate_limit_kbit || 0) > 0) {
+						parts.push(_('Speed limit') + ': <b style="color:'+C.rateFg+'">⚡ '+fmtRate(data.rate_limit_kbit)+'</b>');
+						var dm = self._dropMap[data.ip || select.value] || {};
+						if ((dm.packets||0) > 0) {
+							parts.push(_('Dropped') + ': <b style="color:'+C.dropFg+'">🚫 '+dm.packets+' pkts / '+fmtBytes(dm.bytes||0)+'</b>');
+						}
+					}
+					var wifiPart = data.wifi_blocked
+						? ' &nbsp;|&nbsp; <b style="color:'+C.stateWait+'">📵 ' + _('WiFi blocked') + '</b> ('+escHtml(data.mac||'') + ')'
+						: (data.mac ? ' &nbsp;|&nbsp; <span style="color:'+C.textFaint+'">MAC: '+escHtml(data.mac)+'</span>' : '');
+					statsDiv.style.cssText = 'padding:8px 14px;border-radius:4px;font-size:13px;margin-bottom:8px;' +
+						(data.blocked ? 'background:'+C.blockedBg+';border:1px solid '+C.blockedBorder+';color:'+C.blockedFg
+						             : 'background:'+C.infoBg   +';border:1px solid '+C.infoBorder+';color:'+C.infoFg);
+					statsDiv.innerHTML = (data.blocked
+						? '<b>⛔ ' + _('BLOCKED') + '</b> — '+data.block_packets+' pkts, '+fmtBytes(data.block_bytes)+' ' + _('dropped') + ' &nbsp;|&nbsp; '
+						: '') + parts.join(' &nbsp;|&nbsp; ') + wifiPart +
+						' &nbsp;<span style="color:'+C.textFaint+';font-size:11px">'+escHtml(data.timestamp)+'</span>';
+				}
 
-					blockBtn.disabled   = data.blocked;
-					unblockBtn.disabled = !data.blocked;
-					updateWifiBtn(data.wifi_blocked, !!data.mac);
+				blockBtn.disabled   = data.blocked;
+				unblockBtn.disabled = !data.blocked;
+				updateWifiBtn(data.wifi_blocked, !!data.mac);
 
-					// Sync rate/mode selectors from backend state
-					var curShapeRate = data.shape_kbit || 0;
-					var curLimitRate = data.rate_limit_kbit || 0;
-					var curRate = curShapeRate > 0 ? curShapeRate : curLimitRate;
-					modeSel.value = curShapeRate > 0 ? 'shaper' : 'limiter';
+				var curShapeRate = data.shape_kbit || 0;
+				var curLimitRate = data.rate_limit_kbit || 0;
+				var curRate = curShapeRate > 0 ? curShapeRate : curLimitRate;
+				modeSel.value = curShapeRate > 0 ? 'shaper' : 'limiter';
 
-					var curRateStr = String(curRate);
-					var matched = false;
+				var curRateStr = String(curRate);
+				var matched = false;
+				Array.prototype.forEach.call(rateSel.options, function(o) {
+					if (o.value === curRateStr) { o.selected = true; matched = true; }
+				});
+				if (!matched && curRate > 0) {
 					Array.prototype.forEach.call(rateSel.options, function(o) {
-						if (o.value === curRateStr) { o.selected = true; matched = true; }
+						if (o.value === 'custom') o.selected = true;
 					});
-					if (!matched && curRate > 0) {
-						Array.prototype.forEach.call(rateSel.options, function(o) {
-							if (o.value === 'custom') o.selected = true;
-						});
-						customInput.value = curRate * 8;
-						customUnit.value = 'kbit';
-						customInput.style.display = '';
-						customUnit.style.display = '';
-					} else if (matched) {
-						customInput.style.display = 'none';
-						customUnit.style.display = 'none';
-					} else {
-						rateSel.options[0].selected = true;
-						customInput.style.display = 'none';
-						customUnit.style.display = 'none';
-					}
+					customInput.value = curRate;
+					customUnit.value = 'kbit';
+					customInput.style.display = '';
+					customUnit.style.display = '';
+				} else if (matched) {
+					customInput.style.display = 'none';
+					customUnit.style.display = 'none';
+				} else {
+					rateSel.options[0].selected = true;
+					customInput.style.display = 'none';
+					customUnit.style.display = 'none';
+				}
 
-					while (connsDiv.firstChild) connsDiv.removeChild(connsDiv.firstChild);
-					if (!data.connections || data.connections.length === 0) {
-						connsDiv.appendChild(E('p', {'style':'color:'+C.textMute+';padding:12px 0'}, 'No active connections.'));
-					} else {
-						var groupBy = o.groupBy || 'none';
-						var tbl;
-						if (groupBy !== 'none') {
-							var groups = groupConnections(data.connections, groupBy);
-							tbl = buildGroupedTable(groups, self._sortCol === 'bytes' || self._sortCol === 'count' ? self._sortCol : 'bytes', self._sortDir);
-							Array.prototype.forEach.call(tbl.querySelectorAll('th'), function(th) {
-								th.addEventListener('click', function() {
-									var col = th.getAttribute('data-col');
-									if (self._sortCol === col) {
-										self._sortDir = self._sortDir === 'asc' ? 'desc' : 'asc';
-									} else {
-										self._sortCol = col;
-										self._sortDir = th.getAttribute('data-num') === '1' ? 'desc' : 'asc';
-									}
-									runQuery();
-								});
-							});
-							connsDiv.appendChild(E('div',{'style':'overflow-x:auto'},[tbl]));
-							connsDiv.appendChild(E('p',{'style':'color:'+C.textFaint+';font-size:11px;margin-top:6px'},
-								groups.length+' groups from '+data.connections.length+' connections. Click header to sort.'));
-						} else {
-							tbl = buildTable(data.connections, self._sortCol, self._sortDir, o.rdns);
-							Array.prototype.forEach.call(tbl.querySelectorAll('th'), function(th) {
-								th.addEventListener('click', function() {
-									var col = th.getAttribute('data-col');
-									if (self._sortCol === col) {
-										self._sortDir = self._sortDir === 'asc' ? 'desc' : 'asc';
-									} else {
-										self._sortCol = col;
-										self._sortDir = th.getAttribute('data-num') === '1' ? 'desc' : 'asc';
-									}
-									runQuery();
-								});
-							});
-							connsDiv.appendChild(E('div',{'style':'overflow-x:auto'},[tbl]));
-							connsDiv.appendChild(E('p',{'style':'color:'+C.textFaint+';font-size:11px;margin-top:6px'},
-								data.connections.length+' connections. Click header to sort.'));
-
-							if (o.rdns) {
-								var seen = {};
-								data.connections.forEach(function(c) {
-									var dst = c.dst || '';
-									if (!dst || seen[dst]) return;
-									if (PRIVATE_RE.test(dst)) return;
-									seen[dst] = true;
-									fs.exec_direct('/usr/local/bin/trafficctl-rdns.sh', [dst])
-										.then(function(raw) {
-											var res; try { res = JSON.parse(raw); } catch(e) { res = null; }
-											var host = (res && res.host) ? res.host : null;
-											Array.prototype.forEach.call(
-												connsDiv.querySelectorAll('td[data-dst="'+dst+'"]'),
-												function(cell) {
-													if (host) {
-														cell.textContent = host;
-														cell.style.color = C.hostname;
-													} else {
-														cell.innerHTML = '<span style="color:'+C.textFaint+'">—</span>';
-													}
-												}
-											);
-										})
-										.catch(function() {
-											Array.prototype.forEach.call(
-												connsDiv.querySelectorAll('td[data-dst="'+dst+'"]'),
-												function(cell) { cell.innerHTML = '<span style="color:'+C.textFaint+'">—</span>'; }
-											);
-										});
-								});
-							}
-						}
-					}
-					setStatus(statusDiv, 'ok', '✓ '+new Date().toLocaleTimeString());
-				})
-				.catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); })
-				.then(function() { runBtn.disabled = false; });
-		}
-
-		// ── Run all devices ────────────────────────────────────────────────
-		function runAll() {
-			runBtn.disabled = true;
-			setStatus(statusDiv, 'loading', 'Scanning all devices…');
-
-			fs.exec_direct('/usr/local/bin/trafficctl-summary.sh', [])
-				.then(function(raw) {
-					var rows; try { rows = JSON.parse(raw); } catch(e) {
-						setStatus(statusDiv, 'error', 'Parse error: '+raw.slice(0,120)); return;
-					}
-					var limited = rows.filter(function(r){return (r.rate_limit_kbit||0) > 0;}).length;
-					var shaped  = rows.filter(function(r){return (r.shape_kbit||0) > 0;}).length;
-					var totalDropPkts = Object.keys(self._dropMap).reduce(function(s, ip) { return s + (self._dropMap[ip].packets||0); }, 0);
-					statsDiv.style.cssText = 'padding:8px 14px;border-radius:4px;font-size:13px;margin-bottom:8px;background:'+C.infoBg+';border:1px solid '+C.infoBorder+';color:'+C.infoFg;
-					statsDiv.innerHTML = 'Active devices: <b>'+rows.length+'</b>'
-						+ ' &nbsp;|&nbsp; Blocked: <b style="color:'+C.blockedFg+'">'
-						+ rows.filter(function(r){return r.blocked;}).length+'</b>'
-						+ ' &nbsp;|&nbsp; WiFi blocked: <b style="color:'+C.stateWait+'">'
-						+ rows.filter(function(r){return r.wifi_blocked;}).length+'</b>'
-						+ (limited > 0 ? ' &nbsp;|&nbsp; Limited: <b style="color:'+C.rateFg+'">⚡ '+limited+'</b>' : '')
-						+ (shaped > 0 ? ' &nbsp;|&nbsp; Shaped: <b style="color:'+C.shapeFg+'">🌊 '+shaped+'</b>' : '')
-						+ (totalDropPkts > 0 ? ' &nbsp;|&nbsp; Dropped: <b style="color:'+C.dropFg+'">🚫 '+totalDropPkts+' pkts</b>' : '')
-						+ ' &nbsp;<span style="color:'+C.textFaint+';font-size:11px">'+new Date().toLocaleTimeString()+'</span>';
-
-					while (connsDiv.firstChild) connsDiv.removeChild(connsDiv.firstChild);
-					if (rows.length === 0) {
-						connsDiv.appendChild(E('p',{'style':'color:'+C.textMute+';padding:12px 0'},'No active devices.'));
-					} else {
-						var tbl = buildSummaryTable(
-							rows,
-							self._sumCol,
-							self._sumDir,
-							function(key, isNum) {
-								if (self._sumCol === key) {
-									self._sumDir = self._sumDir === 'asc' ? 'desc' : 'asc';
+				while (connsDiv.firstChild) connsDiv.removeChild(connsDiv.firstChild);
+				if (!data.connections || data.connections.length === 0) {
+					connsDiv.appendChild(E('p', {'style':'color:'+C.textMute+';padding:12px 0'}, _('No active connections.')));
+				} else {
+					var groupBy = o.groupBy || 'none';
+					var tbl;
+					if (groupBy !== 'none') {
+						var groups = groupConnections(data.connections, groupBy);
+						tbl = buildGroupedTable(groups, self._sortCol === 'bytes' || self._sortCol === 'count' ? self._sortCol : 'bytes', self._sortDir);
+						Array.prototype.forEach.call(tbl.querySelectorAll('th'), function(th) {
+							th.addEventListener('click', function() {
+								var col = th.getAttribute('data-col');
+								if (self._sortCol === col) {
+									self._sortDir = self._sortDir === 'asc' ? 'desc' : 'asc';
 								} else {
-									self._sumCol = key;
-									self._sumDir = isNum ? 'desc' : 'asc';
+									self._sortCol = col;
+									self._sortDir = th.getAttribute('data-num') === '1' ? 'desc' : 'asc';
 								}
-								runAll();
-							},
-							function(ip) {
-								Array.prototype.forEach.call(select.options, function(o) {
-									if (o.value === ip) { o.selected = true; }
-								});
-								var o = loadOpts(); o.lastIp = ip; saveOpts(o);
-								updateModeUI();
 								runQuery();
-							},
-							self._speedMap,
-							self._dropMap,
-							self._shapeMap
-						);
+							});
+						});
 						connsDiv.appendChild(E('div',{'style':'overflow-x:auto'},[tbl]));
 						connsDiv.appendChild(E('p',{'style':'color:'+C.textFaint+';font-size:11px;margin-top:6px'},
-							'Click a row to inspect that device. Download speed updates every 2 seconds.'));
+							groups.length + ' ' + _('groups from') + ' ' + data.connections.length + ' ' + _('connections') + '. ' + _('Click header to sort.')));
+					} else {
+						tbl = buildTable(data.connections, self._sortCol, self._sortDir, o.rdns);
+						Array.prototype.forEach.call(tbl.querySelectorAll('th'), function(th) {
+							th.addEventListener('click', function() {
+								var col = th.getAttribute('data-col');
+								if (self._sortCol === col) {
+									self._sortDir = self._sortDir === 'asc' ? 'desc' : 'asc';
+								} else {
+									self._sortCol = col;
+									self._sortDir = th.getAttribute('data-num') === '1' ? 'desc' : 'asc';
+								}
+								runQuery();
+							});
+						});
+						connsDiv.appendChild(E('div',{'style':'overflow-x:auto'},[tbl]));
+						connsDiv.appendChild(E('p',{'style':'color:'+C.textFaint+';font-size:11px;margin-top:6px'},
+							data.connections.length + ' ' + _('connections') + '. ' + _('Click header to sort.')));
+
+						if (o.rdns) {
+							var seen = {};
+							data.connections.forEach(function(c) {
+								var dst = c.dst || '';
+								if (!dst || seen[dst]) return;
+								if (PRIVATE_RE.test(dst)) return;
+								seen[dst] = true;
+								callRdns(dst).then(function(res) {
+									var host = (res && res.host) ? res.host : null;
+									Array.prototype.forEach.call(
+										connsDiv.querySelectorAll('td[data-dst="'+dst+'"]'),
+										function(cell) {
+											if (host) {
+												cell.textContent = host;
+												cell.style.color = C.hostname;
+											} else {
+												cell.innerHTML = '<span style="color:'+C.textFaint+'">—</span>';
+											}
+										}
+									);
+								}).catch(function() {
+									Array.prototype.forEach.call(
+										connsDiv.querySelectorAll('td[data-dst="'+dst+'"]'),
+										function(cell) { cell.innerHTML = '<span style="color:'+C.textFaint+'">—</span>'; }
+									);
+								});
+							});
+						}
 					}
-					setStatus(statusDiv, 'ok', '✓ '+new Date().toLocaleTimeString());
-					self._startBytesPoll();
-				})
-				.catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); })
-				.then(function() { runBtn.disabled = false; });
+				}
+				setStatus(statusDiv, 'ok', '✓ '+new Date().toLocaleTimeString());
+			})
+			.catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); })
+			.then(function() { runBtn.disabled = false; });
+		}
+
+		function runAll() {
+			runBtn.disabled = true;
+			setStatus(statusDiv, 'loading', _('Scanning all devices…'));
+
+			callTrafficctl().then(function(rows) {
+				if (!Array.isArray(rows)) rows = [];
+				var limited = rows.filter(function(r){return (r.rate_limit_kbit||0) > 0;}).length;
+				var shaped  = rows.filter(function(r){return (r.shape_kbit||0) > 0;}).length;
+				var totalDropPkts = Object.keys(self._dropMap).reduce(function(s, ip) { return s + (self._dropMap[ip].packets||0); }, 0);
+				statsDiv.style.cssText = 'padding:8px 14px;border-radius:4px;font-size:13px;margin-bottom:8px;background:'+C.infoBg+';border:1px solid '+C.infoBorder+';color:'+C.infoFg;
+				statsDiv.innerHTML = _('Active devices') + ': <b>'+rows.length+'</b>'
+					+ ' &nbsp;|&nbsp; ' + _('Blocked') + ': <b style="color:'+C.blockedFg+'">'
+					+ rows.filter(function(r){return r.blocked;}).length+'</b>'
+					+ ' &nbsp;|&nbsp; ' + _('WiFi blocked') + ': <b style="color:'+C.stateWait+'">'
+					+ rows.filter(function(r){return r.wifi_blocked;}).length+'</b>'
+					+ (limited > 0 ? ' &nbsp;|&nbsp; ' + _('Limited') + ': <b style="color:'+C.rateFg+'">⚡ '+limited+'</b>' : '')
+					+ (shaped > 0 ? ' &nbsp;|&nbsp; ' + _('Shaped') + ': <b style="color:'+C.shapeFg+'">🌊 '+shaped+'</b>' : '')
+					+ (totalDropPkts > 0 ? ' &nbsp;|&nbsp; ' + _('Dropped') + ': <b style="color:'+C.dropFg+'">🚫 '+totalDropPkts+' pkts</b>' : '')
+					+ ' &nbsp;<span style="color:'+C.textFaint+';font-size:11px">'+new Date().toLocaleTimeString()+'</span>';
+
+				while (connsDiv.firstChild) connsDiv.removeChild(connsDiv.firstChild);
+				if (rows.length === 0) {
+					connsDiv.appendChild(E('p',{'style':'color:'+C.textMute+';padding:12px 0'}, _('No active devices.')));
+				} else {
+					var tbl = buildSummaryTable(
+						rows,
+						self._sumCol,
+						self._sumDir,
+						function(key, isNum) {
+							if (self._sumCol === key) {
+								self._sumDir = self._sumDir === 'asc' ? 'desc' : 'asc';
+							} else {
+								self._sumCol = key;
+								self._sumDir = isNum ? 'desc' : 'asc';
+							}
+							runAll();
+						},
+						function(ip) {
+							Array.prototype.forEach.call(select.options, function(o) {
+								if (o.value === ip) { o.selected = true; }
+							});
+							var o = loadOpts(); o.lastIp = ip; saveOpts(o);
+							updateModeUI();
+							runQuery();
+						},
+						self._speedMap,
+						self._dropMap,
+						self._shapeMap
+					);
+					connsDiv.appendChild(E('div',{'style':'overflow-x:auto'},[tbl]));
+					connsDiv.appendChild(E('p',{'style':'color:'+C.textFaint+';font-size:11px;margin-top:6px'},
+						_('Click a row to inspect that device. Download speed updates every 2 seconds.')));
+				}
+				setStatus(statusDiv, 'ok', '✓ '+new Date().toLocaleTimeString());
+				self._startBytesPoll();
+			})
+			.catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); })
+			.then(function() { runBtn.disabled = false; });
 		}
 
 		function runQuery() {
@@ -964,12 +1014,11 @@ return view.extend({
 				runAll();
 			} else {
 				self._stopBytesPoll();
-				pollDrops(); // refresh drop counters for per-device stats display
+				pollDrops();
 				runSingle(ip);
 			}
 		}
 
-		// Rate limit / shaper apply handler
 		rateBtn.addEventListener('click', function() {
 			var ip   = select.value;
 			var name = select.options[select.selectedIndex].text.split('  —  ')[0].trim();
@@ -978,38 +1027,36 @@ return view.extend({
 			rateBtn.disabled = true;
 
 			if (kbit === '0') {
-				setStatus(statusDiv, 'loading', 'Removing throttle for '+name+'…');
+				setStatus(statusDiv, 'loading', _('Removing throttle for') + ' ' + name + '…');
 				Promise.all([
-					fs.exec_direct('/usr/local/bin/trafficctl-ratelimit.sh', [ip, '0', name]),
-					fs.exec_direct('/usr/local/bin/trafficctl-shape.sh', ['remove', ip, '0', name])
+					callRatelimit(ip, 0, name),
+					callShapeRemove(ip, name)
 				]).then(function(results) {
-					var res; try { res = JSON.parse(results[0]); } catch(e) { res = {ok:true,msg:'Throttle removed'}; }
-					setStatus(statusDiv, 'ok', res.msg || 'Throttle removed for '+name);
+					var res = results[0] || {};
+					setStatus(statusDiv, 'ok', res.msg || _('Throttle removed'));
 					runQuery();
 				}).catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); })
 				  .then(function() { rateBtn.disabled = false; });
 			} else if (mode === 'shaper') {
-				setStatus(statusDiv, 'loading', 'Shaping '+name+' to '+fmtRate(parseInt(kbit))+'…');
-				fs.exec_direct('/usr/local/bin/trafficctl-ratelimit.sh', [ip, '0', name])
+				setStatus(statusDiv, 'loading', _('Shaping') + ' ' + name + ' → ' + fmtRate(parseInt(kbit)) + '…');
+				callRatelimit(ip, 0, name)
 					.then(function() {
-						return fs.exec_direct('/usr/local/bin/trafficctl-shape.sh', ['add', ip, kbit, name]);
+						return callShapeAdd(ip, parseInt(kbit), name);
 					})
-					.then(function(r) {
-						var res; try { res = JSON.parse(r); } catch(e) { res = {ok:false,msg:r}; }
-						setStatus(statusDiv, res.ok ? 'action' : 'error', res.msg||'?');
+					.then(function(res) {
+						setStatus(statusDiv, (res && res.ok) ? 'action' : 'error', (res && res.msg) || '?');
 						runQuery();
 					})
 					.catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); })
 					.then(function() { rateBtn.disabled = false; });
 			} else {
-				setStatus(statusDiv, 'loading', 'Limiting '+name+' to '+fmtRate(parseInt(kbit))+'…');
-				fs.exec_direct('/usr/local/bin/trafficctl-shape.sh', ['remove', ip, '0', name])
+				setStatus(statusDiv, 'loading', _('Limiting') + ' ' + name + ' → ' + fmtRate(parseInt(kbit)) + '…');
+				callShapeRemove(ip, name)
 					.then(function() {
-						return fs.exec_direct('/usr/local/bin/trafficctl-ratelimit.sh', [ip, kbit, name]);
+						return callRatelimit(ip, parseInt(kbit), name);
 					})
-					.then(function(r) {
-						var res; try { res = JSON.parse(r); } catch(e) { res = {ok:false,msg:r}; }
-						setStatus(statusDiv, res.ok ? 'action' : 'error', res.msg||'?');
+					.then(function(res) {
+						setStatus(statusDiv, (res && res.ok) ? 'action' : 'error', (res && res.msg) || '?');
 						runQuery();
 					})
 					.catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); })
@@ -1019,14 +1066,13 @@ return view.extend({
 
 		wifiBtn.addEventListener('click', function() {
 			var ip   = select.value;
-			var name = select.options[select.selectedIndex].text.split('  —  ')[0].trim();
 			var action = wifiBtn._wifiAction;
 			wifiBtn.disabled = true;
-			setStatus(statusDiv, 'loading', (action==='block' ? 'Adding to' : 'Removing from')+' WiFi deny list: '+name+'…');
-			var script = action === 'block' ? '/usr/local/bin/trafficctl-macfilter-add.sh' : '/usr/local/bin/trafficctl-macfilter-remove.sh';
-			fs.exec_direct(script, [ip]).then(function(r) {
-				var res; try { res = JSON.parse(r); } catch(e) { res = {ok:false,msg:r}; }
-				setStatus(statusDiv, res.ok ? (action==='block'?'action':'ok') : 'error', res.msg||'?');
+			var name = select.options[select.selectedIndex].text.split('  —  ')[0].trim();
+			setStatus(statusDiv, 'loading', (action==='block' ? _('Adding to') : _('Removing from')) + ' ' + _('WiFi deny list') + ': ' + name + '…');
+			var fn = action === 'block' ? callMacfilterAdd : callMacfilterRemove;
+			fn(ip).then(function(res) {
+				setStatus(statusDiv, (res && res.ok) ? (action==='block'?'action':'ok') : 'error', (res && res.msg) || '?');
 				runQuery();
 			});
 		});
@@ -1035,10 +1081,9 @@ return view.extend({
 			var ip   = select.value;
 			var name = select.options[select.selectedIndex].text.split('  —  ')[0].trim();
 			blockBtn.disabled = true;
-			setStatus(statusDiv, 'loading', 'Blocking '+name+'…');
-			fs.exec_direct('/usr/local/bin/trafficctl-block.sh', [ip, name]).then(function(r) {
-				var res; try { res = JSON.parse(r); } catch(e) { res = {ok:false,msg:r}; }
-				setStatus(statusDiv, res.ok?'action':'error', res.msg||'?');
+			setStatus(statusDiv, 'loading', _('Blocking') + ' ' + name + '…');
+			callBlock(ip, name).then(function(res) {
+				setStatus(statusDiv, (res && res.ok) ? 'action' : 'error', (res && res.msg) || '?');
 				runQuery();
 			});
 		});
@@ -1046,10 +1091,9 @@ return view.extend({
 			var ip   = select.value;
 			var name = select.options[select.selectedIndex].text.split('  —  ')[0].trim();
 			unblockBtn.disabled = true;
-			setStatus(statusDiv, 'loading', 'Unblocking '+name+'…');
-			fs.exec_direct('/usr/local/bin/trafficctl-unblock.sh', [ip, name]).then(function(r) {
-				var res; try { res = JSON.parse(r); } catch(e) { res = {ok:false,msg:r}; }
-				setStatus(statusDiv, res.ok?'ok':'error', res.msg||'?');
+			setStatus(statusDiv, 'loading', _('Unblocking') + ' ' + name + '…');
+			callUnblock(ip, name).then(function(res) {
+				setStatus(statusDiv, (res && res.ok) ? 'ok' : 'error', (res && res.msg) || '?');
 				runQuery();
 			});
 		});
@@ -1057,7 +1101,7 @@ return view.extend({
 		var runBtn = E('button', {
 			'class': 'cbi-button cbi-button-action important',
 			'click': function() { runQuery(); }
-		}, '▶ Run');
+		}, '▶ ' + _('Run'));
 
 		this._setupTimer = function() {
 			if (self._timer) { clearInterval(self._timer); self._timer = null; }
@@ -1069,7 +1113,6 @@ return view.extend({
 			if (self._bytesTimer) return;
 			pollBytes();
 			self._bytesTimer = setInterval(pollBytes, 2000);
-			// Poll drops and shape stats less frequently (every 5s)
 			pollDrops();
 			self._dropTimer = setInterval(pollDrops, 5000);
 			pollShapeStats();
@@ -1087,7 +1130,7 @@ return view.extend({
 
 		var ob = 'border:1px solid '+C.optsBorder+';background:'+C.optsBg;
 		return E('div', {'class':'cbi-map', 'style':'color:'+C.hostname}, [
-			E('h2', {'style':'color:'+C.hostname}, 'Traffic Control'),
+			E('h2', {'style':'color:'+C.hostname}, _('Traffic Control')),
 			E('div', {'class':'cbi-section'}, [
 				E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:6px'},
 					[select, runBtn]),
@@ -1095,9 +1138,9 @@ return view.extend({
 				rateLimitRow,
 				statusDiv,
 				E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:12px;padding:8px 12px;border-radius:4px;'+ob}, [
-					mkLabel('Show:'), showStats, showConns,
+					mkLabel(_('Show') + ':'), showStats, showConns,
 					E('span',{'style':'border-left:1px solid '+C.border+';height:18px;margin:0 8px'}),
-					mkLabel('Refresh:'), refreshSel,
+					mkLabel(_('Refresh') + ':'), refreshSel,
 					E('span',{'style':'border-left:1px solid '+C.border+';height:18px;margin:0 8px'}),
 					perDeviceOpts
 				]),

@@ -11,6 +11,7 @@
     }
   },
   "globals": {
+    "_": "readonly",
     "E": "readonly",
     "L": "readonly",
     "poll": "readonly",

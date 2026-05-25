@@ -4,7 +4,7 @@
 		"order": 80,
 		"action": {
 			"type": "view",
-			"path": "trafficctl"
+			"path": "trafficctl/status"
 		},
 		"depends": {
 			"acl": [ "luci-app-trafficctl" ]

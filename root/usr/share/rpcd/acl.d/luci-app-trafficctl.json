@@ -1,27 +1,30 @@
 {
 	"luci-app-trafficctl": {
-		"description": "Traffic Control - monitor, limit, shape, and block devices",
+		"description": "Grant access to LuCI Traffic Control",
 		"read": {
-			"cgi-io": [ "exec" ],
 			"ubus": {
+				"luci.trafficctl": [
+					"summary", "device", "bytes",
+					"ratelimit_stats", "shape_stats", "rdns",
+					"config_get"
+				],
 				"file": [ "read" ]
 			},
-			"uci": [ "wireless", "network" ],
+			"uci": [ "trafficctl", "wireless", "network" ],
 			"file": {
-				"/tmp/dhcp.leases": [ "read" ],
-				"/usr/local/bin/trafficctl-summary.sh":          [ "exec" ],
-				"/usr/local/bin/trafficctl-device.sh *":         [ "exec" ],
-				"/usr/local/bin/trafficctl-block.sh *":          [ "exec" ],
-				"/usr/local/bin/trafficctl-unblock.sh *":        [ "exec" ],
-				"/usr/local/bin/trafficctl-macfilter-add.sh *":  [ "exec" ],
-				"/usr/local/bin/trafficctl-macfilter-remove.sh *": [ "exec" ],
-				"/usr/local/bin/trafficctl-ratelimit.sh *":      [ "exec" ],
-				"/usr/local/bin/trafficctl-ratelimit-stats.sh":  [ "exec" ],
-				"/usr/local/bin/trafficctl-shape.sh *":          [ "exec" ],
-				"/usr/local/bin/trafficctl-shape-stats.sh":      [ "exec" ],
-				"/usr/local/bin/trafficctl-rdns.sh *":           [ "exec" ],
-				"/usr/local/bin/trafficctl-bytes.sh":            [ "exec" ]
+				"/tmp/dhcp.leases": [ "read" ]
 			}
+		},
+		"write": {
+			"ubus": {
+				"luci.trafficctl": [
+					"block", "unblock",
+					"macfilter_add", "macfilter_remove",
+					"ratelimit", "shape_add", "shape_remove", "shape_status",
+					"config_set"
+				]
+			},
+			"uci": [ "trafficctl" ]
 		}
 	}
 }
