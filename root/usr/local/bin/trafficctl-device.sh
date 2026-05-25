@@ -44,14 +44,47 @@ fi
 MAC=$(echo "$MAC" | tr 'A-F' 'a-f')
 [ -z "$NAME" ] && NAME="*"
 
-# Detect connection type (wifi vs ethernet)
+# Detect connection type — specific interface or band
 CONN_TYPE="ethernet"
 if [ -n "$MAC" ]; then
-    WIFI_MACS=$(iw dev 2>/dev/null | awk '/Interface/{print $2}' | while read -r iface; do
-        iw dev "$iface" station dump 2>/dev/null
-    done | awk '/Station/{print tolower($2)}')
-    if echo "$WIFI_MACS" | grep -qi "$MAC"; then
-        CONN_TYPE="wifi"
+    _wifi_stations=$(
+        for _wi in $(iw dev 2>/dev/null | awk '/Interface/{print $2}'); do
+            _ch=$(iw dev "$_wi" info 2>/dev/null | awk '/channel/{print $2}')
+            _band=""
+            if [ -n "$_ch" ]; then
+                if [ "$_ch" -le 14 ] 2>/dev/null; then _band="2.4G"
+                elif [ "$_ch" -le 177 ] 2>/dev/null; then _band="5G"
+                else _band="6G"; fi
+            fi
+            iw dev "$_wi" station dump 2>/dev/null | awk -v iface="$_wi" -v band="$_band" \
+                '/Station/{print tolower($2), iface, band}'
+        done
+    )
+    WIFI_LINE=$(echo "$_wifi_stations" | grep -i "$MAC")
+    if [ -n "$WIFI_LINE" ]; then
+        CONN_TYPE=$(echo "$WIFI_LINE" | awk '{print $3}')
+        [ -z "$CONN_TYPE" ] && CONN_TYPE="wifi"
+    else
+        LAN_DEV=$(tctl_get_lan_device)
+        BR_PORT=$(brctl showmacs "$LAN_DEV" 2>/dev/null | awk -v mac="$MAC" '
+            NR>1 && $3=="no" && tolower($2)==mac {print $1; exit}')
+        if [ -n "$BR_PORT" ]; then
+            PORT_IFACE=""
+            for pdir in /sys/class/net/"$LAN_DEV"/brif/*/; do
+                [ -d "$pdir" ] || continue
+                pno=$(cat "${pdir}port_no" 2>/dev/null)
+                [ -z "$pno" ] && continue
+                if [ $(( pno )) -eq "$BR_PORT" ] 2>/dev/null; then
+                    PORT_IFACE=$(basename "$pdir")
+                    break
+                fi
+            done
+            case "$PORT_IFACE" in
+                phy*|wlan*) CONN_TYPE="wifi" ;;
+                "") CONN_TYPE="ethernet" ;;
+                *) CONN_TYPE="$PORT_IFACE" ;;
+            esac
+        fi
     fi
 fi
 

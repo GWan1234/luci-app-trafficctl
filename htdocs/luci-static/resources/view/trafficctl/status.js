@@ -423,7 +423,7 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		{ key:'tcp',              label:'TCP',          num:true,  tip: _('TCP bytes transferred'), hide:true },
 		{ key:'udp',              label:'UDP',          num:true,  tip: _('UDP bytes transferred'), hide:true },
 		{ key:'blocked',          label: _('Inet'),     num:false, tip: _('Internet access status (paused = traffic blocked)') },
-		{ key:'conn_type',        label: _('Link'),     num:false, tip: _('Connection type: WiFi or Ethernet') },
+		{ key:'conn_type',        label: _('Link'),     num:false, tip: _('Connection interface (WiFi band or LAN port)') },
 		{ key:'_throttle_kbit',   label: _('Speed Limit'), num:true,  tip: _('Active speed limit: shaper (queue) or limiter (drop)') },
 		{ key:'_drop_packets',    label: _('Dropped'),  num:true,  tip: _('Packets dropped by rate limiter'), hide:true },
 		{ key:'_backlog',         label: _('Queued'),   num:true,  tip: _('Bytes queued in traffic shaper'), hide:true }
@@ -520,12 +520,17 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		cellMap.blocked = E('td', { 'style': td+';text-align:center' }, inetBadge);
 
 		var linkBadge;
-		if (r.conn_type === 'wifi') {
+		var ct = r.conn_type || 'ethernet';
+		var isWifi = (ct === 'wifi' || ct === '2.4G' || ct === '5G' || ct === '6G');
+		if (isWifi) {
+			var wLabel = ct === 'wifi' ? 'WiFi' : ct;
 			linkBadge = r.wifi_blocked
-				? E('span', { 'style': 'color:'+C.rateFg+';font-weight:600;text-decoration:line-through' }, '📶 WiFi')
-				: E('span', { 'style': 'color:'+C.proto }, '📶 WiFi');
-		} else {
+				? E('span', { 'style': 'color:'+C.rateFg+';font-weight:600;text-decoration:line-through' }, '📶 ' + wLabel)
+				: E('span', { 'style': 'color:'+C.proto }, '📶 ' + wLabel);
+		} else if (ct === 'ethernet') {
 			linkBadge = E('span', { 'style': 'color:'+C.textMute }, '🔗 Eth');
+		} else {
+			linkBadge = E('span', { 'style': 'color:'+C.textMute }, '🔗 ' + ct);
 		}
 		cellMap.conn_type = E('td', { 'style': td+';text-align:center' }, linkBadge);
 

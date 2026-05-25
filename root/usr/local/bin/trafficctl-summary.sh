@@ -141,13 +141,45 @@ get_shape_kbit() {
         }'
 }
 
-# Get all WiFi-connected MACs (called once, used for each device)
-get_wifi_macs() {
-    local ifaces
-    ifaces=$(iw dev 2>/dev/null | awk '/Interface/{print $2}')
-    for iface in $ifaces; do
-        iw dev "$iface" station dump 2>/dev/null
-    done | awk '/Station/{print tolower($2)}'
+# Get WiFi station→interface mapping: "mac iface_name band"
+get_wifi_stations() {
+    iw dev 2>/dev/null | awk '/Interface/{print $2}' | while read -r iface; do
+        local band=""
+        local ch
+        ch=$(iw dev "$iface" info 2>/dev/null | awk '/channel/{print $2}')
+        if [ -n "$ch" ]; then
+            if [ "$ch" -le 14 ] 2>/dev/null; then
+                band="2.4G"
+            elif [ "$ch" -le 177 ] 2>/dev/null; then
+                band="5G"
+            else
+                band="6G"
+            fi
+        fi
+        iw dev "$iface" station dump 2>/dev/null | awk -v iface="$iface" -v band="$band" \
+            '/Station/{print tolower($2), iface, band}'
+    done
+}
+
+# Get bridge MAC→port interface mapping: "mac port_iface"
+get_bridge_macs() {
+    local port_map_file="/tmp/.trafficctl_portmap.$$"
+    for pdir in /sys/class/net/"$LAN_DEV"/brif/*/; do
+        [ -d "$pdir" ] || continue
+        local iface pno
+        iface=$(basename "$pdir")
+        pno=$(cat "${pdir}port_no" 2>/dev/null)
+        [ -z "$pno" ] && continue
+        printf "%d %s\n" "$(( pno ))" "$iface"
+    done > "$port_map_file"
+    brctl showmacs "$LAN_DEV" 2>/dev/null | awk -v pmf="$port_map_file" '
+    BEGIN { while ((getline line < pmf) > 0) { split(line, p, " "); portname[p[1]] = p[2] } }
+    NR > 1 && $3 == "no" {
+        mac = tolower($2)
+        port = $1 + 0
+        if (port in portname) print mac, portname[port]
+    }'
+    rm -f "$port_map_file"
 }
 
 # Filter to only LAN IPs, exclude the router itself
@@ -155,7 +187,8 @@ LAN_PREFIX=$(echo "$LAN_SUBNET" | cut -d. -f1-3)
 LAN_IP=$(echo "$LAN_SUBNET" | cut -d/ -f1)
 
 ACTIVE_IPS=$(get_active_ips | grep "^${LAN_PREFIX}\." | grep -v "^${LAN_IP}$" | grep -v '\.255$')
-WIFI_MACS=$(get_wifi_macs)
+WIFI_STATIONS=$(get_wifi_stations)
+BRIDGE_MACS=$(get_bridge_macs)
 
 printf "["
 FIRST=1
@@ -177,8 +210,21 @@ for ip in $ACTIVE_IPS; do
     [ -z "$SHAPE" ] && SHAPE=0
     [ -z "$NAME" ] && NAME="*"
     CONN_TYPE="ethernet"
-    if [ -n "$MAC" ] && echo "$WIFI_MACS" | grep -qi "$MAC"; then
-        CONN_TYPE="wifi"
+    if [ -n "$MAC" ]; then
+        _wl=$(echo "$WIFI_STATIONS" | grep -i "$MAC")
+        if [ -n "$_wl" ]; then
+            _band=$(echo "$_wl" | awk '{print $3}')
+            CONN_TYPE="${_band:-wifi}"
+        else
+            _bl=$(echo "$BRIDGE_MACS" | grep -i "$MAC")
+            if [ -n "$_bl" ]; then
+                _piface=$(echo "$_bl" | awk '{print $2}')
+                case "$_piface" in
+                    phy*|wlan*) CONN_TYPE="wifi" ;;
+                    *) CONN_TYPE="$_piface" ;;
+                esac
+            fi
+        fi
     fi
 
     if [ "$FIRST" = "1" ]; then
