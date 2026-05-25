@@ -17,7 +17,7 @@ var SERVICE_PORTS = {
 var callTrafficctl = rpc.declare({
 	object: 'luci.trafficctl',
 	method: 'summary',
-	expect: { '': [] }
+	expect: { result: [] }
 });
 
 var callDevice = rpc.declare({
@@ -29,7 +29,7 @@ var callDevice = rpc.declare({
 var callBytes = rpc.declare({
 	object: 'luci.trafficctl',
 	method: 'bytes',
-	expect: { '': [] }
+	expect: { result: [] }
 });
 
 var callBlock = rpc.declare({
@@ -65,7 +65,7 @@ var callRatelimit = rpc.declare({
 var callRatelimitStats = rpc.declare({
 	object: 'luci.trafficctl',
 	method: 'ratelimit_stats',
-	expect: { '': [] }
+	expect: { result: [] }
 });
 
 var callShapeAdd = rpc.declare({
@@ -83,7 +83,7 @@ var callShapeRemove = rpc.declare({
 var callShapeStats = rpc.declare({
 	object: 'luci.trafficctl',
 	method: 'shape_stats',
-	expect: { '': [] }
+	expect: { result: [] }
 });
 
 var callRdns = rpc.declare({

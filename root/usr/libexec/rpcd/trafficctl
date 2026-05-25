@@ -31,7 +31,9 @@ list)
 call)
 	case "$2" in
 	summary)
+		printf '{"result":'
 		"$SCRIPTS/trafficctl-summary.sh"
+		printf '}'
 		;;
 	device)
 		read -r input
@@ -47,7 +49,9 @@ call)
 		fi
 		;;
 	bytes)
+		printf '{"result":'
 		"$SCRIPTS/trafficctl-bytes.sh"
+		printf '}'
 		;;
 	block)
 		read -r input
@@ -99,7 +103,9 @@ call)
 		fi
 		;;
 	ratelimit_stats)
+		printf '{"result":'
 		"$SCRIPTS/trafficctl-ratelimit-stats.sh"
+		printf '}'
 		;;
 	shape_add)
 		read -r input
@@ -132,7 +138,9 @@ call)
 		fi
 		;;
 	shape_stats)
+		printf '{"result":'
 		"$SCRIPTS/trafficctl-shape-stats.sh"
+		printf '}'
 		;;
 	rdns)
 		read -r input
