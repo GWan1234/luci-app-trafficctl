@@ -94,7 +94,9 @@ o4=$(echo "$IP" | cut -d. -f4)
 dec=$((o3 * 256 + o4))
 hex=$(printf "%x" "$dec")
 classid="1:$hex"
-shape_info=$(tc class show dev "$LAN_DEV" classid "$classid" 2>/dev/null)
+# Skip reserved HTB classes (root 1:1 and default 1:fffe)
+shape_info=""
+case "$hex" in 1|fffe) ;; *) shape_info=$(tc class show dev "$LAN_DEV" classid "$classid" 2>/dev/null) ;; esac
 if [ -n "$shape_info" ]; then
     SHAPE_KBIT=$(echo "$shape_info" | grep -oE 'rate [0-9]+[A-Za-z]+' | head -1 | awk '{
         rate=$2; num=rate+0

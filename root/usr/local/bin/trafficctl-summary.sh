@@ -124,6 +124,8 @@ get_shape_kbit() {
     dec=$((o3 * 256 + o4))
     hex=$(printf "%x" "$dec")
     classid="1:$hex"
+    # Skip reserved HTB classes (root 1:1 and default 1:fffe)
+    case "$hex" in 1|fffe) echo 0; return ;; esac
     tc class show dev "$LAN_DEV" classid "$classid" 2>/dev/null | \
         grep -oE 'rate [0-9]+[A-Za-z]+' | head -1 | awk '{
             rate=$2
@@ -135,10 +137,11 @@ get_shape_kbit() {
         }'
 }
 
-# Filter to only LAN IPs
+# Filter to only LAN IPs, exclude the router itself
 LAN_PREFIX=$(echo "$LAN_SUBNET" | cut -d. -f1-3)
+LAN_IP=$(echo "$LAN_SUBNET" | cut -d/ -f1)
 
-ACTIVE_IPS=$(get_active_ips | grep "^${LAN_PREFIX}\.")
+ACTIVE_IPS=$(get_active_ips | grep "^${LAN_PREFIX}\." | grep -v "^${LAN_IP}$")
 
 printf "["
 FIRST=1
