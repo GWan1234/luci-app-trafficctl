@@ -150,7 +150,7 @@ get_wifi_macs() {
 LAN_PREFIX=$(echo "$LAN_SUBNET" | cut -d. -f1-3)
 LAN_IP=$(echo "$LAN_SUBNET" | cut -d/ -f1)
 
-ACTIVE_IPS=$(get_active_ips | grep "^${LAN_PREFIX}\." | grep -v "^${LAN_IP}$")
+ACTIVE_IPS=$(get_active_ips | grep "^${LAN_PREFIX}\." | grep -v "^${LAN_IP}$" | grep -v '\.255$')
 WIFI_MACS=$(get_wifi_macs)
 
 printf "["

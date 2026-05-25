@@ -275,7 +275,14 @@ function injectStyles() {
 		'.tm-speed-idle{color:var(--tm-text-faint)!important}' +
 		'tr.tm-row:hover td{background:var(--tm-hover)!important;cursor:pointer}' +
 		'.tm-link{color:inherit;text-decoration:none;border-bottom:1px dotted var(--tm-text-faint)}' +
-		'.tm-link:hover{border-bottom-style:solid}';
+		'.tm-link:hover{border-bottom-style:solid}' +
+		'.tm-toggle-input{position:absolute;opacity:0;width:0;height:0}' +
+		'.tm-toggle{position:relative;display:inline-block;width:34px;height:18px;background:var(--tm-border);' +
+		'border-radius:9px;cursor:pointer;transition:background .2s}' +
+		'.tm-toggle::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;' +
+		'background:#fff;border-radius:50%;transition:transform .2s;box-shadow:0 1px 2px rgba(0,0,0,.2)}' +
+		'.tm-toggle-input:checked+.tm-toggle{background:var(--tm-proto)}' +
+		'.tm-toggle-input:checked+.tm-toggle::after{transform:translateX(16px)}';
 	document.head.appendChild(s);
 }
 
@@ -404,22 +411,25 @@ function buildTable(conns, sortCol, sortDir, rdnsMode) {
 	}, [thead, tbody]);
 }
 
-function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, dropMap, shapeMap, speedHistory) {
+function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, dropMap, shapeMap, speedHistory, hiddenCols) {
 	var cols = [
-		{ key:'name',             label: _('Device'),   num:false },
-		{ key:'ip',               label:'IP',           num:false },
-		{ key:'mac',              label:'MAC',          num:false },
-		{ key:'_speed',           label: _('DL Speed'), num:true  },
-		{ key:'_spark',           label: '',            num:false },
-		{ key:'total',            label: _('Conns'),    num:true  },
-		{ key:'tcp',              label:'TCP',          num:true  },
-		{ key:'udp',              label:'UDP',          num:true  },
-		{ key:'blocked',          label: _('Inet'),     num:false },
-		{ key:'wifi_blocked',     label: _('Link'),     num:false },
-		{ key:'_throttle_kbit',   label: _('Throttle'), num:true  },
-		{ key:'_drop_packets',    label: _('Dropped'),  num:true  },
-		{ key:'_backlog',         label: _('Queued'),   num:true  }
+		{ key:'name',             label: _('Device'),   num:false, tip: _('Device hostname from DHCP lease') },
+		{ key:'ip',               label:'IP',           num:false, tip: _('Local IP address') },
+		{ key:'mac',              label:'MAC',          num:false, tip: _('Hardware MAC address'), hide:true },
+		{ key:'_speed',           label: _('DL Speed'), num:true,  tip: _('Current download speed (bytes/sec from router to device)') },
+		{ key:'_spark',           label: '',            num:false, tip: _('Speed history graph (shared scale)') },
+		{ key:'total',            label: _('Conns'),    num:true,  tip: _('Total active connections in conntrack') },
+		{ key:'tcp',              label:'TCP',          num:true,  tip: _('Active TCP connections'), hide:true },
+		{ key:'udp',              label:'UDP',          num:true,  tip: _('Active UDP connections'), hide:true },
+		{ key:'blocked',          label: _('Inet'),     num:false, tip: _('Internet access status (paused = traffic blocked)') },
+		{ key:'conn_type',        label: _('Link'),     num:false, tip: _('Connection type: WiFi or Ethernet') },
+		{ key:'_throttle_kbit',   label: _('Throttle'), num:true,  tip: _('Speed limit: shaper (queue) or limiter (drop)') },
+		{ key:'_drop_packets',    label: _('Dropped'),  num:true,  tip: _('Packets dropped by rate limiter'), hide:true },
+		{ key:'_backlog',         label: _('Queued'),   num:true,  tip: _('Bytes queued in traffic shaper'), hide:true }
 	];
+
+	hiddenCols = hiddenCols || {};
+	var visibleCols = cols.filter(function(c) { return !hiddenCols[c.key]; });
 
 	function ipToInt(s) {
 		var p = String(s||'').split('.');
@@ -468,10 +478,12 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
 	});
 
-	var thead = E('thead', {}, E('tr', {}, cols.map(function(c) {
+	var thead = E('thead', {}, E('tr', {}, visibleCols.map(function(c) {
 		var arrow = c.key === sortCol ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
 		var thStyle = TH + (c.key === '_spark' ? ';cursor:default;width:68px' : '');
-		var th = E('th', { 'style': thStyle, 'data-col': c.key, 'data-num': c.num ? '1' : '0' }, c.label + arrow);
+		var attrs = { 'style': thStyle, 'data-col': c.key, 'data-num': c.num ? '1' : '0' };
+		if (c.tip) attrs.title = c.tip;
+		var th = E('th', attrs, c.label + arrow);
 		if (c.key !== '_spark') th.addEventListener('click', function() { onSort(c.key, c.num); });
 		return th;
 	})));
@@ -479,83 +491,58 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 	var tbody = E('tbody', {}, sorted.map(function(r, i) {
 		var bg = i%2===0 ? C.rowEven : C.rowOdd;
 		var td = 'padding:6px 12px;border-bottom:1px solid '+C.border+';color:'+C.hostname+';font-size:12px;background:'+bg;
+
+		var sd = speedMap[r.ip];
+		var cellMap = {};
+
+		cellMap.name = E('td', { 'style': td+';font-weight:600;color:'+C.proto }, escHtml(r.name));
+		cellMap.ip = E('td', { 'style': td+';font-family:monospace' }, escHtml(r.ip));
+		var macEl = r.mac ? E('a', { 'href':'/cgi-bin/luci/admin/network/dhcp','target':'_blank','rel':'noopener','class':'tm-link','title':_('Open DHCP/DNS bindings'),'onclick':'event.stopPropagation()' }, r.mac) : '';
+		cellMap.mac = E('td', { 'style': td+';font-family:monospace;color:'+C.mac+';font-size:11px' }, macEl || '');
+
+		cellMap._speed = E('td', { 'style': td+';text-align:right;font-family:monospace', 'data-speed-ip': r.ip, 'title': sd ? (_('Avg')+': '+fmtSpeed(sd.avg)+' / '+_('Max')+': '+fmtSpeed(sd.max)) : _('Calculating…') });
+		if (sd && sd.current > 1024) { cellMap._speed.className = 'tm-speed-active'; cellMap._speed.textContent = fmtSpeed(sd.current); }
+		else { cellMap._speed.className = 'tm-speed-idle'; cellMap._speed.textContent = sd ? fmtSpeed(sd.current) : '—'; }
+
+		cellMap._spark = E('td', { 'style': td+';text-align:center;padding:2px 4px', 'data-spark-ip': r.ip });
+		var sparkSvg = renderSparkline(speedHistory[r.ip], globalSpeedMax, 60, 20);
+		if (sparkSvg) cellMap._spark.appendChild(sparkSvg);
+
+		cellMap.total = E('td', { 'style': td+';text-align:right;font-weight:600' }, String(r.total));
+		cellMap.tcp = E('td', { 'style': td+';text-align:right;color:'+C.proto }, String(r.tcp));
+		cellMap.udp = E('td', { 'style': td+';text-align:right;color:'+C.stateClose }, String(r.udp));
+
 		var inetBadge = r.blocked
 			? E('span', { 'style': 'color:'+C.rateFg+';font-weight:600' }, '⏸️ ' + _('paused'))
 			: E('span', { 'style': 'color:'+C.proto }, '▶️ ' + _('ok'));
+		cellMap.blocked = E('td', { 'style': td+';text-align:center' }, inetBadge);
+
 		var linkBadge;
 		if (r.conn_type === 'wifi') {
 			linkBadge = r.wifi_blocked
 				? E('span', { 'style': 'color:'+C.rateFg+';font-weight:600;text-decoration:line-through' }, '📶 WiFi')
 				: E('span', { 'style': 'color:'+C.proto }, '📶 WiFi');
 		} else {
-			linkBadge = E('span', { 'style': 'color:'+C.textMute }, '🔌 LAN');
+			linkBadge = E('span', { 'style': 'color:'+C.textMute }, '🔗 Eth');
 		}
+		cellMap.conn_type = E('td', { 'style': td+';text-align:center' }, linkBadge);
+
 		var throttleBadge;
-		if (r._throttle_mode === 'shaper') {
-			throttleBadge = E('span', { 'style': 'color:'+C.shapeFg+';font-weight:600', 'title': _('Shaper (tc/HTB queue)') }, '🌊 ' + fmtRate(r._throttle_kbit));
-		} else if (r._throttle_mode === 'limiter') {
-			throttleBadge = E('span', { 'style': 'color:'+C.rateFg+';font-weight:600', 'title': _('Limiter (nft drop)') }, '⚡ ' + fmtRate(r._throttle_kbit));
-		} else {
-			throttleBadge = E('span', { 'style': 'color:'+C.textFaint }, '—');
-		}
+		if (r._throttle_mode === 'shaper') { throttleBadge = E('span', { 'style': 'color:'+C.shapeFg+';font-weight:600', 'title': _('Shaper (tc/HTB queue)') }, '🌊 ' + fmtRate(r._throttle_kbit)); }
+		else if (r._throttle_mode === 'limiter') { throttleBadge = E('span', { 'style': 'color:'+C.rateFg+';font-weight:600', 'title': _('Limiter (nft drop)') }, '⚡ ' + fmtRate(r._throttle_kbit)); }
+		else { throttleBadge = E('span', { 'style': 'color:'+C.textFaint }, '—'); }
+		cellMap._throttle_kbit = E('td', { 'style': td+';text-align:center' }, throttleBadge);
 
 		var dp = r._drop_packets || 0;
-		var dropBadge = dp > 0
-			? E('span', {
-				'style': 'color:'+C.dropFg+';font-weight:600',
-				'title': fmtBytes(r._drop_bytes || 0) + ' ' + _('dropped')
-			}, '🚫 ' + dp)
-			: E('span', { 'style': 'color:'+C.textFaint }, '—');
+		var dropBadge = dp > 0 ? E('span', { 'style': 'color:'+C.dropFg+';font-weight:600', 'title': fmtBytes(r._drop_bytes||0)+' '+_('dropped') }, '🚫 ' + dp) : E('span', { 'style': 'color:'+C.textFaint }, '—');
+		cellMap._drop_packets = E('td', { 'style': td+';text-align:center', 'data-drop-ip': r.ip }, dropBadge);
 
 		var bl = r._backlog || 0;
-		var backlogBadge = bl > 0
-			? E('span', { 'style': 'color:'+C.shapeFg+';font-weight:600', 'title': _('Bytes queued in tc') }, fmtBytes(bl))
-			: E('span', { 'style': 'color:'+C.textFaint }, '—');
+		var backlogBadge = bl > 0 ? E('span', { 'style': 'color:'+C.shapeFg+';font-weight:600', 'title': _('Bytes queued in tc') }, fmtBytes(bl)) : E('span', { 'style': 'color:'+C.textFaint }, '—');
+		cellMap._backlog = E('td', { 'style': td+';text-align:center', 'data-backlog-ip': r.ip }, backlogBadge);
 
-		var macEl = r.mac
-			? E('a', {
-				'href': '/cgi-bin/luci/admin/network/dhcp',
-				'target': '_blank',
-				'rel': 'noopener',
-				'class': 'tm-link',
-				'title': _('Open DHCP/DNS bindings'),
-				'onclick': 'event.stopPropagation()'
-			}, r.mac)
-			: '';
-
-		var sd = speedMap[r.ip];
-		var speedCell = E('td', {
-			'style': td+';text-align:right;font-family:monospace',
-			'data-speed-ip': r.ip,
-			'title': sd ? (_('Avg')+': '+fmtSpeed(sd.avg)+' / '+_('Max')+': '+fmtSpeed(sd.max)) : _('Calculating…')
-		});
-		if (sd && sd.current > 1024) {
-			speedCell.className = 'tm-speed-active';
-			speedCell.textContent = fmtSpeed(sd.current);
-		} else {
-			speedCell.className = 'tm-speed-idle';
-			speedCell.textContent = sd ? fmtSpeed(sd.current) : '—';
-		}
-
-		var sparkCell = E('td', { 'style': td+';text-align:center;padding:2px 4px', 'data-spark-ip': r.ip });
-		var sparkSvg = renderSparkline(speedHistory[r.ip], globalSpeedMax, 60, 20);
-		if (sparkSvg) sparkCell.appendChild(sparkSvg);
-
-		var row = E('tr', { 'class': 'tm-row', 'title': _('Click to inspect') + ' ' + r.name }, [
-			E('td', { 'style': td+';font-weight:600;color:'+C.proto  }, escHtml(r.name)),
-			E('td', { 'style': td+';font-family:monospace'           }, escHtml(r.ip)),
-			E('td', { 'style': td+';font-family:monospace;color:'+C.mac+';font-size:11px' }, macEl || ''),
-			speedCell,
-			sparkCell,
-			E('td', { 'style': td+';text-align:right;font-weight:600'}, String(r.total)),
-			E('td', { 'style': td+';text-align:right;color:'+C.proto }, String(r.tcp)),
-			E('td', { 'style': td+';text-align:right;color:'+C.stateClose }, String(r.udp)),
-			E('td', { 'style': td+';text-align:center'               }, inetBadge),
-			E('td', { 'style': td+';text-align:center'               }, linkBadge),
-			E('td', { 'style': td+';text-align:center'               }, throttleBadge),
-			E('td', { 'style': td+';text-align:center', 'data-drop-ip': r.ip }, dropBadge),
-			E('td', { 'style': td+';text-align:center', 'data-backlog-ip': r.ip }, backlogBadge)
-		]);
+		var cells = visibleCols.map(function(c) { return cellMap[c.key]; });
+		var row = E('tr', { 'class': 'tm-row', 'title': _('Click to inspect') + ' ' + r.name }, cells);
 		row.addEventListener('click', function() { onSelect(r.ip, r.name); });
 		return row;
 	}));
@@ -869,6 +856,7 @@ return view.extend({
 	_sortDir:    'desc',
 	_sumCol:     '_speed',
 	_sumDir:     'desc',
+	_hiddenCols: {},
 
 	load: function() {
 		return fs.read('/tmp/dhcp.leases').catch(function() { return ''; });
@@ -901,28 +889,32 @@ return view.extend({
 			searchSelect.setValue(savedIp, matchDev ? matchDev.name + '  —  ' + matchDev.ip : savedIp);
 		}
 
-		function mkCheck(id, label, checked, onChange) {
-			var cb = E('input', { 'type': 'checkbox', 'id': id, 'style': 'margin-right:4px' });
+		function mkToggle(id, label, checked, onChange) {
+			var cb = E('input', { 'type': 'checkbox', 'id': id, 'class': 'tm-toggle-input' });
 			cb.checked = !!checked;
 			cb.addEventListener('change', onChange);
-			return E('label', { 'style': 'margin-right:16px;cursor:pointer;white-space:nowrap;color:'+C.hostname+';font-size:13px' }, [cb, label]);
+			var track = E('label', { 'class': 'tm-toggle', 'for': id });
+			return E('div', { 'style': 'display:inline-flex;align-items:center;gap:6px;margin-right:12px;white-space:nowrap' }, [
+				cb, track,
+				E('label', { 'for': id, 'style': 'cursor:pointer;color:'+C.hostname+';font-size:12px;user-select:none' }, label)
+			]);
 		}
 		function mkLabel(t) {
-			return E('span', { 'style': 'color:'+C.textMute+';font-size:12px;margin-right:4px' }, t);
+			return E('span', { 'style': 'color:'+C.textMute+';font-size:12px;margin-right:4px;white-space:nowrap' }, t);
 		}
 
-		var showStats = mkCheck('tm-stats', _('Stats'), opts.showStats !== false, function() {
+		var showStats = mkToggle('tm-stats', _('Stats'), opts.showStats !== false, function() {
 			var o = loadOpts(); o.showStats = this.checked; saveOpts(o); updateUrlParams(o);
 			statsDiv.style.display = this.checked ? '' : 'none';
 		});
-		var showConns = mkCheck('tm-conns', _('Connections'), opts.showConns !== false, function() {
+		var showConns = mkToggle('tm-conns', _('Connections'), opts.showConns !== false, function() {
 			var o = loadOpts(); o.showConns = this.checked; saveOpts(o); updateUrlParams(o);
 			connsDiv.style.display = this.checked ? '' : 'none';
 		});
-		var rdnsCheck = mkCheck('tm-rdns', _('Reverse DNS'), opts.rdns, function() {
+		var rdnsCheck = mkToggle('tm-rdns', _('rDNS'), opts.rdns, function() {
 			var o = loadOpts(); o.rdns = this.checked; saveOpts(o); updateUrlParams(o);
 		});
-		var extStatsCheck = mkCheck('tm-extended', _('Extended stats'), opts.extendedStats, function() {
+		var extStatsCheck = mkToggle('tm-extended', _('Extended'), opts.extendedStats, function() {
 			var o = loadOpts(); o.extendedStats = this.checked; saveOpts(o); updateUrlParams(o);
 			extStatsDiv.style.display = this.checked ? '' : 'none';
 			if (this.checked) updateExtendedStats();
@@ -1074,11 +1066,10 @@ return view.extend({
 
 		var actionRow = E('div', { 'style': 'display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:6px' },
 			[inetBtn, wifiBtn]);
-		var perDeviceOpts = E('span', {}, [mkLabel(_('Proto') + ':'), protoSel,
-			E('span',{'style':'display:inline-block;width:8px'}),
-			mkLabel(_('Group by') + ':'), groupSel,
-			E('span',{'style':'display:inline-block;width:8px'}),
-			rdnsCheck]);
+		var perDeviceOpts = E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:6px'}, [
+			mkLabel(_('Proto') + ':'), protoSel,
+			mkLabel(_('Group by') + ':'), groupSel
+		]);
 
 		function isAllMode() { return searchSelect.getValue() === '__all__'; }
 
@@ -1438,7 +1429,8 @@ return view.extend({
 						self._speedMap,
 						self._dropMap,
 						self._shapeMap,
-						self._speedHistory
+						self._speedHistory,
+						self._hiddenCols
 					);
 					connsDiv.appendChild(E('div',{'style':'overflow-x:auto'},[tbl]));
 					connsDiv.appendChild(E('p',{'style':'color:'+C.textFaint+';font-size:11px;margin-top:6px'},
@@ -1580,7 +1572,36 @@ return view.extend({
 		this._setupTimer();
 		setTimeout(function() { runQuery(); }, 0);
 
+		var savedHidden = opts.hiddenCols || {};
+		self._hiddenCols = savedHidden;
+
+		var colToggles = [
+			{key:'mac', label:'MAC'}, {key:'tcp', label:'TCP'}, {key:'udp', label:'UDP'},
+			{key:'_drop_packets', label:_('Drops')}, {key:'_backlog', label:_('Queue')}
+		].map(function(ct) {
+			return mkToggle('tm-col-'+ct.key, ct.label, !savedHidden[ct.key], function() {
+				if (this.checked) { delete self._hiddenCols[ct.key]; }
+				else { self._hiddenCols[ct.key] = true; }
+				var o = loadOpts(); o.hiddenCols = self._hiddenCols; saveOpts(o);
+				if (isAllMode()) runAll();
+			});
+		});
+
 		var ob = 'border:1px solid '+C.optsBorder+';background:'+C.optsBg;
+		var sep = function() { return E('span',{'style':'border-left:1px solid '+C.border+';height:18px;margin:0 4px'}); };
+		var optRow1 = E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:6px'}, [
+			showStats, showConns, extStatsCheck, rdnsCheck
+		]);
+		var optRow2 = E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:6px'}, [
+			mkLabel(_('Refresh')+':'), refreshSel, sep(),
+			mkLabel(_('Poll')+':'), pollIntervalSel, sep(),
+			mkLabel(_('Avg')+':'), avgWindowSel,
+			mkLabel(_('Method')+':'), avgMethodSel
+		]);
+		var optRow3 = E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:6px'}, [
+			mkLabel(_('Columns')+':')
+		].concat(colToggles));
+
 		return E('div', {'class':'cbi-map', 'style':'color:'+C.hostname}, [
 			E('h2', {'style':'color:'+C.hostname}, _('Traffic Control')),
 			E('div', {'class':'cbi-section'}, [
@@ -1589,18 +1610,10 @@ return view.extend({
 				actionRow,
 				rateLimitRow,
 				statusDiv,
-				E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:12px;padding:8px 12px;border-radius:4px;'+ob}, [
-					mkLabel(_('Show') + ':'), showStats, showConns, extStatsCheck,
-					E('span',{'style':'border-left:1px solid '+C.border+';height:18px;margin:0 8px'}),
-					mkLabel(_('Refresh') + ':'), refreshSel,
-					E('span',{'style':'border-left:1px solid '+C.border+';height:18px;margin:0 8px'}),
-					mkLabel(_('Poll') + ':'), pollIntervalSel,
-					E('span',{'style':'border-left:1px solid '+C.border+';height:18px;margin:0 8px'}),
-					mkLabel(_('Avg window') + ':'), avgWindowSel,
-					mkLabel(_('Method') + ':'), avgMethodSel,
-					E('span',{'style':'border-left:1px solid '+C.border+';height:18px;margin:0 8px'}),
-					perDeviceOpts
+				E('div', {'style':'padding:8px 12px;border-radius:4px;margin-bottom:12px;'+ob}, [
+					optRow1, optRow2, optRow3
 				]),
+				perDeviceOpts,
 				statsDiv,
 				extStatsDiv,
 				connsDiv
