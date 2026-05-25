@@ -237,3 +237,120 @@ msgstr ""
 
 msgid "value"
 msgstr ""
+
+msgid "Extended stats"
+msgstr ""
+
+msgid "Extended Statistics"
+msgstr ""
+
+msgid "Poll"
+msgstr ""
+
+msgid "Avg window"
+msgstr ""
+
+msgid "Method"
+msgstr ""
+
+msgid "Simple"
+msgstr ""
+
+msgid "EWMA"
+msgstr ""
+
+msgid "Drops"
+msgstr ""
+
+msgid "Overlimits"
+msgstr ""
+
+msgid "ECN marks"
+msgstr ""
+
+msgid "Flows"
+msgstr ""
+
+msgid "new"
+msgstr ""
+
+msgid "old"
+msgstr ""
+
+msgid "Queue memory"
+msgstr ""
+
+msgid "Lended"
+msgstr ""
+
+msgid "Borrowed"
+msgstr ""
+
+msgid "Utilization"
+msgstr ""
+
+msgid "Packets dropped"
+msgstr ""
+
+msgid "Bytes dropped"
+msgstr ""
+
+msgid "Drop ratio"
+msgstr ""
+
+msgid "No extended stats available for this device."
+msgstr ""
+
+msgid "What do these stats mean?"
+msgstr ""
+
+msgid "packets dropped by queue overflow"
+msgstr ""
+
+msgid "rate exceeded events"
+msgstr ""
+
+msgid "congestion signals without drop"
+msgstr ""
+
+msgid "active concurrent connections in queue"
+msgstr ""
+
+msgid "bytes allocated by the queue discipline"
+msgstr ""
+
+msgid "own-rate vs parent-rate packets"
+msgstr ""
+
+msgid "current speed as percentage of rate limit"
+msgstr ""
+
+msgid "traffic discarded by nft policer"
+msgstr ""
+
+msgid "percentage of total traffic that was dropped"
+msgstr ""
+
+msgid "Shaped devices"
+msgstr ""
+
+msgid "Total drops"
+msgstr ""
+
+msgid "Total queue memory"
+msgstr ""
+
+msgid "Limited devices"
+msgstr ""
+
+msgid "Total dropped"
+msgstr ""
+
+msgid "pkts"
+msgstr ""
+
+msgid "No extended stats available."
+msgstr ""
+
+msgid "all devices"
+msgstr ""

@@ -1,7 +1,7 @@
 #!/bin/sh
 # shellcheck shell=dash
 # Show active rate-limit statistics.
-# Output: JSON array [{"ip":"...","rate_kbit":N,"packets":N,"bytes":N}]
+# Output: JSON array [{"ip":"...","rate_kbit":N,"packets":N,"bytes":N,"pass_packets":0,"pass_bytes":0}]
 
 . /usr/local/bin/trafficctl-fw.sh
 
@@ -28,7 +28,7 @@ if [ "$TCTL_FW" = "nft" ]; then
         }
         if (ip != "") {
             if (first) printf ","
-            printf "{\"ip\":\"%s\",\"rate_kbit\":%d,\"packets\":%d,\"bytes\":%d}", ip, rate, packets, bytes
+            printf "{\"ip\":\"%s\",\"rate_kbit\":%d,\"packets\":%d,\"bytes\":%d,\"pass_packets\":0,\"pass_bytes\":0}", ip, rate, packets, bytes
             first = 1
         }
     }
@@ -58,7 +58,7 @@ else
         }
         if (ip != "" && ip != "0.0.0.0/0") {
             if (first) printf ","
-            printf "{\"ip\":\"%s\",\"rate_kbit\":%d,\"packets\":%d,\"bytes\":%d}", ip, rate, packets, bytes
+            printf "{\"ip\":\"%s\",\"rate_kbit\":%d,\"packets\":%d,\"bytes\":%d,\"pass_packets\":0,\"pass_bytes\":0}", ip, rate, packets, bytes
             first = 1
         }
     }

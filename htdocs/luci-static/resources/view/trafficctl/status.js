@@ -518,6 +518,149 @@ function setStatus(el, type, msg) {
 	el.style.display = '';
 }
 
+function updateUrlParams(opts) {
+	var params = new URLSearchParams();
+	if (opts.lastIp && opts.lastIp !== '__all__') params.set('ip', opts.lastIp);
+	if (opts.refresh && opts.refresh > 0) params.set('refresh', String(opts.refresh));
+	if (opts.pollInterval && opts.pollInterval !== 2) params.set('poll', String(opts.pollInterval));
+	if (opts.avgWindow && opts.avgWindow !== 15) params.set('avg', String(opts.avgWindow));
+	if (opts.avgMethod && opts.avgMethod !== 'simple') params.set('method', opts.avgMethod);
+	if (opts.extendedStats) params.set('extended', '1');
+	if (opts.rdns) params.set('rdns', '1');
+	var newUrl = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
+	history.replaceState(null, '', newUrl);
+}
+
+function applyUrlParams(opts) {
+	var urlParams = new URLSearchParams(window.location.search);
+	var paramIp = urlParams.get('ip');
+	var paramRefresh = urlParams.get('refresh');
+	var paramPoll = urlParams.get('poll');
+	var paramAvg = urlParams.get('avg');
+	var paramMethod = urlParams.get('method');
+	var paramExtended = urlParams.get('extended');
+	var paramRdns = urlParams.get('rdns');
+
+	if (paramIp) opts.lastIp = paramIp;
+	if (paramRefresh) opts.refresh = parseInt(paramRefresh) || 0;
+	if (paramPoll) opts.pollInterval = parseInt(paramPoll) || 2;
+	if (paramAvg) opts.avgWindow = parseInt(paramAvg) || 15;
+	if (paramMethod && (paramMethod === 'ewma' || paramMethod === 'simple')) opts.avgMethod = paramMethod;
+	if (paramExtended === '1') opts.extendedStats = true;
+	if (paramRdns === '1') opts.rdns = true;
+	return opts;
+}
+
+function buildExtendedStatsPanel(ip, shapeMap, dropMap, speedMap) {
+	var sm = shapeMap[ip];
+	var dm = dropMap[ip];
+	var spd = speedMap[ip];
+
+	var panelStyle = 'background:var(--tm-bg-subtle);border:1px solid var(--tm-border);border-radius:4px;padding:10px 14px;font-size:12px;font-family:monospace;margin:8px 0';
+	var lines = [];
+
+	if (sm && sm.rate_kbit > 0) {
+		if (sm.drops != null) lines.push(_('Drops') + ': ' + sm.drops);
+		if (sm.overlimits != null) lines.push(_('Overlimits') + ': ' + sm.overlimits);
+		if (sm.ecn_mark != null) lines.push(_('ECN marks') + ': ' + sm.ecn_mark);
+		if (sm.new_flows != null || sm.old_flows != null) {
+			lines.push(_('Flows') + ': ' + (sm.new_flows || 0) + ' ' + _('new') + ' / ' + (sm.old_flows || 0) + ' ' + _('old'));
+		}
+		if (sm.memory_used != null) lines.push(_('Queue memory') + ': ' + fmtBytes(sm.memory_used));
+		if (sm.lended != null || sm.borrowed != null) {
+			lines.push(_('Lended') + ': ' + (sm.lended || 0) + ' / ' + _('Borrowed') + ': ' + (sm.borrowed || 0));
+		}
+		if (spd && sm.rate_kbit > 0) {
+			var currentBps = spd.current || 0;
+			var rateBytes = (sm.rate_kbit * 1000) / 8;
+			var util = rateBytes > 0 ? ((currentBps / rateBytes) * 100) : 0;
+			lines.push(_('Utilization') + ': ' + util.toFixed(1) + '%');
+		}
+	} else if (dm && dm.rate_kbit > 0) {
+		lines.push(_('Packets dropped') + ': ' + (dm.packets || 0));
+		lines.push(_('Bytes dropped') + ': ' + fmtBytes(dm.bytes || 0));
+		var dropBytes = dm.bytes || 0;
+		var passBytes = dm.pass_bytes || 0;
+		var totalBytes = dropBytes + passBytes;
+		var dropRatio = totalBytes > 0 ? ((dropBytes / totalBytes) * 100) : 0;
+		lines.push(_('Drop ratio') + ': ' + dropRatio.toFixed(1) + '%');
+	}
+
+	if (lines.length === 0) {
+		lines.push(_('No extended stats available for this device.'));
+	}
+
+	var content = E('div', { 'style': panelStyle }, [
+		E('div', { 'style': 'margin-bottom:6px;font-weight:600;font-family:sans-serif' }, _('Extended Statistics')),
+		E('div', {}, lines.map(function(l) {
+			return E('div', { 'style': 'padding:2px 0' }, l);
+		})),
+		E('details', { 'style': 'margin-top:8px;font-family:sans-serif;font-size:11px;color:var(--tm-text-mute)' }, [
+			E('summary', { 'style': 'cursor:pointer;font-weight:500' }, _('What do these stats mean?')),
+			E('div', { 'style': 'padding:6px 0 2px 0;line-height:1.6' }, [
+				E('div', {}, _('Drops') + ': ' + _('packets dropped by queue overflow')),
+				E('div', {}, _('Overlimits') + ': ' + _('rate exceeded events')),
+				E('div', {}, _('ECN marks') + ': ' + _('congestion signals without drop')),
+				E('div', {}, _('Flows') + ': ' + _('active concurrent connections in queue')),
+				E('div', {}, _('Queue memory') + ': ' + _('bytes allocated by the queue discipline')),
+				E('div', {}, _('Lended') + '/' + _('Borrowed') + ': ' + _('own-rate vs parent-rate packets')),
+				E('div', {}, _('Utilization') + ': ' + _('current speed as percentage of rate limit')),
+				E('div', {}, _('Packets dropped') + '/' + _('Bytes dropped') + ': ' + _('traffic discarded by nft policer')),
+				E('div', {}, _('Drop ratio') + ': ' + _('percentage of total traffic that was dropped'))
+			])
+		])
+	]);
+
+	return content;
+}
+
+function buildExtendedStatsLegend(shapeMap, dropMap, speedMap) {
+	var panelStyle = 'position:sticky;top:0;background:var(--tm-bg-subtle);border:1px solid var(--tm-border);border-radius:4px;padding:10px 14px;font-size:12px;font-family:monospace;margin:8px 0';
+	var totalDrops = 0, totalOverlimits = 0, totalEcn = 0, totalMemory = 0;
+	var totalDropPkts = 0, totalDropBytes = 0;
+	var shapedCount = 0, limitedCount = 0;
+
+	Object.keys(shapeMap).forEach(function(ip) {
+		var sm = shapeMap[ip];
+		if (sm && sm.rate_kbit > 0) {
+			shapedCount++;
+			totalDrops += (sm.drops || 0);
+			totalOverlimits += (sm.overlimits || 0);
+			totalEcn += (sm.ecn_mark || 0);
+			totalMemory += (sm.memory_used || 0);
+		}
+	});
+	Object.keys(dropMap).forEach(function(ip) {
+		var dm = dropMap[ip];
+		if (dm && dm.rate_kbit > 0) {
+			limitedCount++;
+			totalDropPkts += (dm.packets || 0);
+			totalDropBytes += (dm.bytes || 0);
+		}
+	});
+
+	var lines = [];
+	if (shapedCount > 0) {
+		lines.push(_('Shaped devices') + ': ' + shapedCount);
+		lines.push(_('Total drops') + ': ' + totalDrops + ' | ' + _('Overlimits') + ': ' + totalOverlimits + ' | ' + _('ECN marks') + ': ' + totalEcn);
+		lines.push(_('Total queue memory') + ': ' + fmtBytes(totalMemory));
+	}
+	if (limitedCount > 0) {
+		lines.push(_('Limited devices') + ': ' + limitedCount);
+		lines.push(_('Total dropped') + ': ' + totalDropPkts + ' ' + _('pkts') + ' / ' + fmtBytes(totalDropBytes));
+	}
+	if (lines.length === 0) {
+		lines.push(_('No extended stats available.'));
+	}
+
+	return E('div', { 'style': panelStyle }, [
+		E('div', { 'style': 'margin-bottom:6px;font-weight:600;font-family:sans-serif' }, _('Extended Statistics') + ' (' + _('all devices') + ')'),
+		E('div', {}, lines.map(function(l) {
+			return E('div', { 'style': 'padding:2px 0' }, l);
+		}))
+	]);
+}
+
 return view.extend({
 	_timer:        null,
 	_bytesTimer:   null,
@@ -528,6 +671,7 @@ return view.extend({
 	_speedMap:     {},
 	_dropMap:      {},
 	_shapeMap:     {},
+	_speedEwma:    {},
 	_sortCol:    'bytes',
 	_sortDir:    'desc',
 	_sumCol:     '_speed',
@@ -540,6 +684,8 @@ return view.extend({
 	render: function(leasesRaw) {
 		var self = this;
 		var opts = loadOpts();
+		opts = applyUrlParams(opts);
+		saveOpts(opts);
 		injectStyles();
 
 		var devices = [];
@@ -573,16 +719,23 @@ return view.extend({
 		}
 
 		var showStats = mkCheck('tm-stats', _('Stats'), opts.showStats !== false, function() {
-			var o = loadOpts(); o.showStats = this.checked; saveOpts(o);
+			var o = loadOpts(); o.showStats = this.checked; saveOpts(o); updateUrlParams(o);
 			statsDiv.style.display = this.checked ? '' : 'none';
 		});
 		var showConns = mkCheck('tm-conns', _('Connections'), opts.showConns !== false, function() {
-			var o = loadOpts(); o.showConns = this.checked; saveOpts(o);
+			var o = loadOpts(); o.showConns = this.checked; saveOpts(o); updateUrlParams(o);
 			connsDiv.style.display = this.checked ? '' : 'none';
 		});
 		var rdnsCheck = mkCheck('tm-rdns', _('Reverse DNS'), opts.rdns, function() {
-			var o = loadOpts(); o.rdns = this.checked; saveOpts(o);
+			var o = loadOpts(); o.rdns = this.checked; saveOpts(o); updateUrlParams(o);
 		});
+		var extStatsCheck = mkCheck('tm-extended', _('Extended stats'), opts.extendedStats, function() {
+			var o = loadOpts(); o.extendedStats = this.checked; saveOpts(o); updateUrlParams(o);
+			extStatsDiv.style.display = this.checked ? '' : 'none';
+			if (this.checked) updateExtendedStats();
+		});
+
+		var extStatsDiv = E('div', { 'style': opts.extendedStats ? '' : 'display:none' });
 
 		var refreshSel = E('select', { 'class': 'cbi-input-select' }, [
 			E('option',{'value':'0'}, _('Off')), E('option',{'value':'5'},'5s'),
@@ -593,7 +746,44 @@ return view.extend({
 			if (o.value === String(opts.refresh||0)) o.selected = true;
 		});
 		refreshSel.addEventListener('change', function() {
-			var o = loadOpts(); o.refresh = parseInt(this.value); saveOpts(o); self._setupTimer();
+			var o = loadOpts(); o.refresh = parseInt(this.value); saveOpts(o); updateUrlParams(o); self._setupTimer();
+		});
+
+		var pollIntervalSel = E('select', { 'class': 'cbi-input-select' }, [
+			E('option',{'value':'1'},'1s'),
+			E('option',{'value':'2'},'2s'),
+			E('option',{'value':'5'},'5s')
+		]);
+		Array.prototype.forEach.call(pollIntervalSel.options, function(o) {
+			if (o.value === String(opts.pollInterval || 2)) o.selected = true;
+		});
+		pollIntervalSel.addEventListener('change', function() {
+			var o = loadOpts(); o.pollInterval = parseInt(this.value); saveOpts(o); updateUrlParams(o);
+			self._restartBytesPoll();
+		});
+
+		var avgWindowSel = E('select', { 'class': 'cbi-input-select' }, [
+			E('option',{'value':'5'},'5s'),
+			E('option',{'value':'15'},'15s'),
+			E('option',{'value':'30'},'30s'),
+			E('option',{'value':'60'},'60s')
+		]);
+		Array.prototype.forEach.call(avgWindowSel.options, function(o) {
+			if (o.value === String(opts.avgWindow || 15)) o.selected = true;
+		});
+		avgWindowSel.addEventListener('change', function() {
+			var o = loadOpts(); o.avgWindow = parseInt(this.value); saveOpts(o); updateUrlParams(o);
+		});
+
+		var avgMethodSel = E('select', { 'class': 'cbi-input-select' }, [
+			E('option',{'value':'simple'}, _('Simple')),
+			E('option',{'value':'ewma'}, _('EWMA'))
+		]);
+		Array.prototype.forEach.call(avgMethodSel.options, function(o) {
+			if (o.value === (opts.avgMethod || 'simple')) o.selected = true;
+		});
+		avgMethodSel.addEventListener('change', function() {
+			var o = loadOpts(); o.avgMethod = this.value; saveOpts(o); updateUrlParams(o);
 		});
 
 		var protoSel = E('select', { 'class': 'cbi-input-select' }, [
@@ -707,49 +897,59 @@ return view.extend({
 
 		function pollDrops() {
 			if (document.hidden) return;
-			if (!isAllMode()) return;
 			callRatelimitStats().then(function(data) {
 				if (!Array.isArray(data)) return;
 				data.forEach(function(d) {
-					self._dropMap[d.ip] = { packets: d.packets, bytes: d.bytes, rate_kbit: d.rate_kbit };
+					self._dropMap[d.ip] = { packets: d.packets, bytes: d.bytes, rate_kbit: d.rate_kbit, pass_packets: d.pass_packets, pass_bytes: d.pass_bytes };
 				});
-				Object.keys(self._dropMap).forEach(function(ip) {
-					var dp = self._dropMap[ip].packets || 0;
-					var db = self._dropMap[ip].bytes   || 0;
-					var cell = connsDiv.querySelector('td[data-drop-ip="'+ip+'"]');
-					if (!cell) return;
-					while (cell.firstChild) cell.removeChild(cell.firstChild);
-					if (dp > 0) {
-						cell.appendChild(E('span', {
-							'style': 'color:'+C.dropFg+';font-weight:600',
-							'title': fmtBytes(db) + ' ' + _('dropped')
-						}, '🚫 ' + dp));
-					} else {
-						cell.appendChild(E('span', { 'style': 'color:'+C.textFaint }, '—'));
-					}
-				});
+				if (isAllMode()) {
+					Object.keys(self._dropMap).forEach(function(ip) {
+						var dp = self._dropMap[ip].packets || 0;
+						var db = self._dropMap[ip].bytes   || 0;
+						var cell = connsDiv.querySelector('td[data-drop-ip="'+ip+'"]');
+						if (!cell) return;
+						while (cell.firstChild) cell.removeChild(cell.firstChild);
+						if (dp > 0) {
+							cell.appendChild(E('span', {
+								'style': 'color:'+C.dropFg+';font-weight:600',
+								'title': fmtBytes(db) + ' ' + _('dropped')
+							}, '🚫 ' + dp));
+						} else {
+							cell.appendChild(E('span', { 'style': 'color:'+C.textFaint }, '—'));
+						}
+					});
+				}
+				updateExtendedStats();
 			}).catch(function(){});
 		}
 
 		function pollShapeStats() {
 			if (document.hidden) return;
-			if (!isAllMode()) return;
 			callShapeStats().then(function(data) {
 				if (!Array.isArray(data)) return;
 				data.forEach(function(d) {
-					self._shapeMap[d.ip] = { packets: d.packets, bytes: d.bytes, backlog: d.backlog, rate_kbit: d.rate_kbit };
+					self._shapeMap[d.ip] = {
+						packets: d.packets, bytes: d.bytes, backlog: d.backlog, rate_kbit: d.rate_kbit,
+						drops: d.drops, overlimits: d.overlimits, requeues: d.requeues,
+						lended: d.lended, borrowed: d.borrowed, ecn_mark: d.ecn_mark,
+						new_flows: d.new_flows, old_flows: d.old_flows,
+						target_us: d.target_us, memory_used: d.memory_used
+					};
 				});
-				Object.keys(self._shapeMap).forEach(function(ip) {
-					var bl = self._shapeMap[ip].backlog || 0;
-					var cell = connsDiv.querySelector('td[data-backlog-ip="'+ip+'"]');
-					if (!cell) return;
-					while (cell.firstChild) cell.removeChild(cell.firstChild);
-					if (bl > 0) {
-						cell.appendChild(E('span', { 'style': 'color:'+C.shapeFg+';font-weight:600', 'title': _('Bytes queued in tc') }, fmtBytes(bl)));
-					} else {
-						cell.appendChild(E('span', { 'style': 'color:'+C.textFaint }, '—'));
-					}
-				});
+				if (isAllMode()) {
+					Object.keys(self._shapeMap).forEach(function(ip) {
+						var bl = self._shapeMap[ip].backlog || 0;
+						var cell = connsDiv.querySelector('td[data-backlog-ip="'+ip+'"]');
+						if (!cell) return;
+						while (cell.firstChild) cell.removeChild(cell.firstChild);
+						if (bl > 0) {
+							cell.appendChild(E('span', { 'style': 'color:'+C.shapeFg+';font-weight:600', 'title': _('Bytes queued in tc') }, fmtBytes(bl)));
+						} else {
+							cell.appendChild(E('span', { 'style': 'color:'+C.textFaint }, '—'));
+						}
+					});
+				}
+				updateExtendedStats();
 			}).catch(function(){});
 		}
 
@@ -759,6 +959,12 @@ return view.extend({
 			callBytes().then(function(data) {
 				if (!Array.isArray(data)) return;
 				var now = Date.now();
+				var o = loadOpts();
+				var pollInterval = o.pollInterval || 2;
+				var avgWindow = o.avgWindow || 15;
+				var avgMethod = o.avgMethod || 'simple';
+				var maxSamples = Math.max(2, Math.round(avgWindow / pollInterval));
+
 				data.forEach(function(d) {
 					var prev = self._bytesHistory[d.ip];
 					if (prev) {
@@ -767,17 +973,35 @@ return view.extend({
 						var dIn = d.bytes_in - prev.bytes_in;
 						if (dIn < 0) dIn = 0;
 						var speed = dIn / dt;
-						if (!self._speedHistory[d.ip]) self._speedHistory[d.ip] = [];
-						self._speedHistory[d.ip].push({speed: speed, time: now});
-						if (self._speedHistory[d.ip].length > 30) self._speedHistory[d.ip].shift();
-						var hist = self._speedHistory[d.ip];
-						var sum = 0, max = 0;
-						hist.forEach(function(h){ sum += h.speed; if (h.speed > max) max = h.speed; });
-						self._speedMap[d.ip] = {
-							current: speed,
-							avg: sum / hist.length,
-							max: max
-						};
+
+						if (avgMethod === 'ewma') {
+							var alpha = 2 / (maxSamples + 1);
+							var prevEwma = self._speedEwma[d.ip] || 0;
+							var ewma = alpha * speed + (1 - alpha) * prevEwma;
+							self._speedEwma[d.ip] = ewma;
+							if (!self._speedHistory[d.ip]) self._speedHistory[d.ip] = [];
+							self._speedHistory[d.ip].push({speed: speed, time: now});
+							if (self._speedHistory[d.ip].length > maxSamples) self._speedHistory[d.ip].shift();
+							var max = 0;
+							self._speedHistory[d.ip].forEach(function(h){ if (h.speed > max) max = h.speed; });
+							self._speedMap[d.ip] = {
+								current: speed,
+								avg: ewma,
+								max: max
+							};
+						} else {
+							if (!self._speedHistory[d.ip]) self._speedHistory[d.ip] = [];
+							self._speedHistory[d.ip].push({speed: speed, time: now});
+							if (self._speedHistory[d.ip].length > maxSamples) self._speedHistory[d.ip].shift();
+							var hist = self._speedHistory[d.ip];
+							var sum = 0, sMax = 0;
+							hist.forEach(function(h){ sum += h.speed; if (h.speed > sMax) sMax = h.speed; });
+							self._speedMap[d.ip] = {
+								current: speed,
+								avg: sum / hist.length,
+								max: sMax
+							};
+						}
 					}
 					self._bytesHistory[d.ip] = {
 						bytes_in: d.bytes_in,
@@ -987,7 +1211,7 @@ return view.extend({
 							Array.prototype.forEach.call(select.options, function(o) {
 								if (o.value === ip) { o.selected = true; }
 							});
-							var o = loadOpts(); o.lastIp = ip; saveOpts(o);
+							var o = loadOpts(); o.lastIp = ip; saveOpts(o); updateUrlParams(o);
 							updateModeUI();
 							runQuery();
 						},
@@ -1006,9 +1230,22 @@ return view.extend({
 			.then(function() { runBtn.disabled = false; });
 		}
 
+		function updateExtendedStats() {
+			var o = loadOpts();
+			if (!o.extendedStats) return;
+			while (extStatsDiv.firstChild) extStatsDiv.removeChild(extStatsDiv.firstChild);
+			var ip = select.value;
+			if (ip === '__all__') {
+				extStatsDiv.appendChild(buildExtendedStatsLegend(self._shapeMap, self._dropMap, self._speedMap));
+			} else {
+				extStatsDiv.appendChild(buildExtendedStatsPanel(ip, self._shapeMap, self._dropMap, self._speedMap));
+			}
+		}
+
 		function runQuery() {
 			var ip = select.value;
 			var o = loadOpts(); o.lastIp = ip; saveOpts(o);
+			updateUrlParams(o);
 			updateModeUI();
 			if (ip === '__all__') {
 				runAll();
@@ -1017,6 +1254,7 @@ return view.extend({
 				pollDrops();
 				runSingle(ip);
 			}
+			updateExtendedStats();
 		}
 
 		rateBtn.addEventListener('click', function() {
@@ -1111,8 +1349,10 @@ return view.extend({
 
 		this._startBytesPoll = function() {
 			if (self._bytesTimer) return;
+			var o = loadOpts();
+			var pollMs = (o.pollInterval || 2) * 1000;
 			pollBytes();
-			self._bytesTimer = setInterval(pollBytes, 2000);
+			self._bytesTimer = setInterval(pollBytes, pollMs);
 			pollDrops();
 			self._dropTimer = setInterval(pollDrops, 5000);
 			pollShapeStats();
@@ -1122,6 +1362,10 @@ return view.extend({
 			if (self._bytesTimer) { clearInterval(self._bytesTimer); self._bytesTimer = null; }
 			if (self._dropTimer)  { clearInterval(self._dropTimer);  self._dropTimer  = null; }
 			if (self._shapeTimer) { clearInterval(self._shapeTimer); self._shapeTimer = null; }
+		};
+		this._restartBytesPoll = function() {
+			self._stopBytesPoll();
+			if (isAllMode()) self._startBytesPoll();
 		};
 
 		this._setupTimer();
@@ -1138,13 +1382,19 @@ return view.extend({
 				rateLimitRow,
 				statusDiv,
 				E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:12px;padding:8px 12px;border-radius:4px;'+ob}, [
-					mkLabel(_('Show') + ':'), showStats, showConns,
+					mkLabel(_('Show') + ':'), showStats, showConns, extStatsCheck,
 					E('span',{'style':'border-left:1px solid '+C.border+';height:18px;margin:0 8px'}),
 					mkLabel(_('Refresh') + ':'), refreshSel,
+					E('span',{'style':'border-left:1px solid '+C.border+';height:18px;margin:0 8px'}),
+					mkLabel(_('Poll') + ':'), pollIntervalSel,
+					E('span',{'style':'border-left:1px solid '+C.border+';height:18px;margin:0 8px'}),
+					mkLabel(_('Avg window') + ':'), avgWindowSel,
+					mkLabel(_('Method') + ':'), avgMethodSel,
 					E('span',{'style':'border-left:1px solid '+C.border+';height:18px;margin:0 8px'}),
 					perDeviceOpts
 				]),
 				statsDiv,
+				extStatsDiv,
 				connsDiv
 			])
 		]);
