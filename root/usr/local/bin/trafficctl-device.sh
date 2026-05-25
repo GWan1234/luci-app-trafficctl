@@ -124,11 +124,12 @@ BEGIN { total=0; n_tcp=0; n_udp=0; n_other=0; est=0; tw=0; ss=0; cw=0 }
 
     dst=""; bytes=0; state=""
     src_key = "src=" ip
-    seen_src=0
+    seen_src=0; got_dst=0
     for (i=1; i<=NF; i++) {
-        if ($i == src_key) seen_src=1
-        if (seen_src && index($i, "dst=") == 1) { dst=substr($i, 5) }
-        if (seen_src && index($i, "bytes=") == 1) { bytes=substr($i, 7)+0 }
+        if ($i == src_key && !seen_src) { seen_src=1; continue }
+        if (seen_src && !got_dst && index($i, "dst=") == 1) { dst=substr($i, 5); got_dst=1 }
+        if (seen_src && !got_dst) continue
+        if (seen_src && index($i, "bytes=") == 1 && bytes == 0) { bytes=substr($i, 7)+0 }
         if ($i == "ESTABLISHED") state="ESTABLISHED"
         else if ($i == "TIME_WAIT") state="TIME_WAIT"
         else if ($i == "SYN_SENT") state="SYN_SENT"
@@ -179,12 +180,13 @@ BEGIN { n=0 }
 
     dst=""; dport=""; bytes=0; state=""
     src_key = "src=" ip
-    seen_src=0
+    seen_src=0; got_dst=0
     for (i=1; i<=NF; i++) {
-        if ($i == src_key) seen_src=1
-        if (seen_src && index($i, "dst=") == 1) dst=substr($i, 5)
-        if (seen_src && index($i, "dport=") == 1) dport=substr($i, 7)
-        if (seen_src && index($i, "bytes=") == 1) bytes=substr($i, 7)+0
+        if ($i == src_key && !seen_src) { seen_src=1; continue }
+        if (seen_src && !got_dst && index($i, "dst=") == 1) { dst=substr($i, 5); got_dst=1 }
+        if (seen_src && !got_dst) continue
+        if (seen_src && index($i, "dport=") == 1 && dport == "") dport=substr($i, 7)
+        if (seen_src && index($i, "bytes=") == 1 && bytes == 0) bytes=substr($i, 7)+0
         if ($i == "ESTABLISHED") state="ESTABLISHED"
         else if ($i == "TIME_WAIT") state="TIME_WAIT"
         else if ($i == "SYN_SENT") state="SYN_SENT"

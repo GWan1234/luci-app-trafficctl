@@ -172,6 +172,39 @@ function escHtml(s) {
 	return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+function renderSparkline(history, globalMax, width, height) {
+	if (!history || history.length < 2) return null;
+	var maxVal = globalMax || 1;
+	var w = width || 60;
+	var h = height || 20;
+	var step = w / (history.length - 1);
+	var points = [];
+	for (var i = 0; i < history.length; i++) {
+		var x = (i * step).toFixed(1);
+		var y = (h - (history[i].speed / maxVal) * (h - 2) - 1).toFixed(1);
+		points.push(x + ',' + y);
+	}
+	var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+	svg.setAttribute('width', w);
+	svg.setAttribute('height', h);
+	svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+	svg.style.cssText = 'display:block;margin:0 auto';
+	var polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+	polyline.setAttribute('points', points.join(' '));
+	polyline.setAttribute('fill', 'none');
+	polyline.setAttribute('stroke', 'var(--tm-speed)');
+	polyline.setAttribute('stroke-width', '1.5');
+	polyline.setAttribute('stroke-linejoin', 'round');
+	var area = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+	area.setAttribute('points', '0,' + h + ' ' + points.join(' ') + ' ' + (w - 0) + ',' + h);
+	area.setAttribute('fill', 'var(--tm-speed)');
+	area.setAttribute('opacity', '0.1');
+	area.setAttribute('stroke', 'none');
+	svg.appendChild(area);
+	svg.appendChild(polyline);
+	return svg;
+}
+
 function injectStyles() {
 	if (document.getElementById('tm-style')) return;
 	var s = document.createElement('style');
@@ -371,12 +404,13 @@ function buildTable(conns, sortCol, sortDir, rdnsMode) {
 	}, [thead, tbody]);
 }
 
-function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, dropMap, shapeMap) {
+function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, dropMap, shapeMap, speedHistory) {
 	var cols = [
 		{ key:'name',             label: _('Device'),   num:false },
 		{ key:'ip',               label:'IP',           num:false },
 		{ key:'mac',              label:'MAC',          num:false },
 		{ key:'_speed',           label: _('DL Speed'), num:true  },
+		{ key:'_spark',           label: '',            num:false },
 		{ key:'total',            label: _('Conns'),    num:true  },
 		{ key:'tcp',              label:'TCP',          num:true  },
 		{ key:'udp',              label:'UDP',          num:true  },
@@ -396,6 +430,16 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 	speedMap = speedMap || {};
 	dropMap  = dropMap  || {};
 	shapeMap = shapeMap || {};
+	speedHistory = speedHistory || {};
+
+	var globalSpeedMax = 0;
+	Object.keys(speedHistory).forEach(function(ip) {
+		var hist = speedHistory[ip];
+		if (hist) {
+			hist.forEach(function(h) { if (h.speed > globalSpeedMax) globalSpeedMax = h.speed; });
+		}
+	});
+
 	rows.forEach(function(r) {
 		var s = speedMap[r.ip];
 		r._speed = s ? s.current : 0;
@@ -422,8 +466,9 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 
 	var thead = E('thead', {}, E('tr', {}, cols.map(function(c) {
 		var arrow = c.key === sortCol ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
-		var th = E('th', { 'style': TH, 'data-col': c.key, 'data-num': c.num ? '1' : '0' }, c.label + arrow);
-		th.addEventListener('click', function() { onSort(c.key, c.num); });
+		var thStyle = TH + (c.key === '_spark' ? ';cursor:default;width:68px' : '');
+		var th = E('th', { 'style': thStyle, 'data-col': c.key, 'data-num': c.num ? '1' : '0' }, c.label + arrow);
+		if (c.key !== '_spark') th.addEventListener('click', function() { onSort(c.key, c.num); });
 		return th;
 	})));
 
@@ -483,11 +528,16 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 			speedCell.textContent = sd ? fmtSpeed(sd.current) : '—';
 		}
 
+		var sparkCell = E('td', { 'style': td+';text-align:center;padding:2px 4px', 'data-spark-ip': r.ip });
+		var sparkSvg = renderSparkline(speedHistory[r.ip], globalSpeedMax, 60, 20);
+		if (sparkSvg) sparkCell.appendChild(sparkSvg);
+
 		var row = E('tr', { 'class': 'tm-row', 'title': _('Click to inspect') + ' ' + r.name }, [
 			E('td', { 'style': td+';font-weight:600;color:'+C.proto  }, escHtml(r.name)),
 			E('td', { 'style': td+';font-family:monospace'           }, escHtml(r.ip)),
 			E('td', { 'style': td+';font-family:monospace;color:'+C.mac+';font-size:11px' }, macEl || ''),
 			speedCell,
+			sparkCell,
 			E('td', { 'style': td+';text-align:right;font-weight:600'}, String(r.total)),
 			E('td', { 'style': td+';text-align:right;color:'+C.proto }, String(r.tcp)),
 			E('td', { 'style': td+';text-align:right;color:'+C.stateClose }, String(r.udp)),
@@ -557,16 +607,26 @@ function buildExtendedStatsPanel(ip, shapeMap, dropMap, speedMap) {
 	var spd = speedMap[ip];
 
 	var panelStyle = 'background:var(--tm-bg-subtle);border:1px solid var(--tm-border);border-radius:4px;padding:12px 16px;font-size:13px;margin:8px 0';
-	var rowStyle = 'display:flex;justify-content:space-between;align-items:baseline;padding:4px 0;border-bottom:1px dotted var(--tm-border)';
-	var labelStyle = 'color:var(--tm-text-mute);font-size:12px';
-	var valueStyle = 'font-family:monospace;font-weight:600;color:var(--tm-text);font-size:13px';
+	var td = 'padding:5px 12px;border-bottom:1px solid var(--tm-border);font-size:13px';
+	var tooltips = {
+		'Drops': _('packets dropped by queue overflow'),
+		'Overlimits': _('rate exceeded events'),
+		'ECN marks': _('congestion signals without drop'),
+		'Flows': _('active concurrent connections in queue'),
+		'Queue memory': _('bytes allocated by the queue discipline'),
+		'Lended / Borrowed': _('own-rate vs parent-rate packets'),
+		'Utilization': _('current speed as percentage of rate limit'),
+		'Packets dropped': _('traffic discarded by nft policer'),
+		'Bytes dropped': _('traffic discarded by nft policer'),
+		'Drop ratio': _('percentage of total traffic that was dropped')
+	};
 	var rows = [];
 
 	function addRow(label, value, color) {
-		var vs = color ? valueStyle + ';color:' + color : valueStyle;
-		rows.push(E('div', { 'style': rowStyle }, [
-			E('span', { 'style': labelStyle }, label),
-			E('span', { 'style': vs }, value)
+		var tip = tooltips[label] || '';
+		rows.push(E('tr', { 'class': 'tm-row' }, [
+			E('td', { 'style': td + ';color:var(--tm-text-mute)', 'title': tip }, label),
+			E('td', { 'style': td + ';text-align:right;font-family:monospace;font-weight:600' + (color ? ';color:' + color : '') }, value)
 		]));
 	}
 
@@ -575,11 +635,11 @@ function buildExtendedStatsPanel(ip, shapeMap, dropMap, speedMap) {
 		if (sm.overlimits != null) addRow(_('Overlimits'), String(sm.overlimits), sm.overlimits > 0 ? 'var(--tm-rate-fg)' : null);
 		if (sm.ecn_mark != null) addRow(_('ECN marks'), String(sm.ecn_mark), sm.ecn_mark > 0 ? 'var(--tm-rate-fg)' : null);
 		if (sm.new_flows != null || sm.old_flows != null) {
-			addRow(_('Flows'), (sm.new_flows || 0) + ' ' + _('new') + ' / ' + (sm.old_flows || 0) + ' ' + _('old'));
+			addRow(_('Flows'), (sm.new_flows || 0) + ' ' + _('new') + ' / ' + (sm.old_flows || 0) + ' ' + _('old'), null);
 		}
-		if (sm.memory_used != null) addRow(_('Queue memory'), fmtBytes(sm.memory_used));
+		if (sm.memory_used != null) addRow(_('Queue memory'), fmtBytes(sm.memory_used), null);
 		if (sm.lended != null || sm.borrowed != null) {
-			addRow(_('Lended') + ' / ' + _('Borrowed'), (sm.lended || 0) + ' / ' + (sm.borrowed || 0));
+			addRow(_('Lended') + ' / ' + _('Borrowed'), (sm.lended || 0) + ' / ' + (sm.borrowed || 0), null);
 		}
 		if (spd && sm.rate_kbit > 0) {
 			var currentBps = spd.current || 0;
@@ -600,29 +660,17 @@ function buildExtendedStatsPanel(ip, shapeMap, dropMap, speedMap) {
 	}
 
 	if (rows.length === 0) {
-		rows.push(E('div', { 'style': 'padding:4px 0;color:var(--tm-text-mute)' }, _('No extended stats available for this device.')));
+		return E('div', { 'style': panelStyle + ';color:var(--tm-text-mute)' }, _('No extended stats available for this device.'));
 	}
 
-	var content = E('div', { 'style': panelStyle }, [
-		E('div', { 'style': 'margin-bottom:8px;font-weight:600;font-size:14px;color:var(--tm-text)' }, _('Extended Statistics')),
-		E('div', { 'style': 'display:flex;flex-direction:column' }, rows),
-		E('details', { 'style': 'margin-top:10px;font-size:13px;color:var(--tm-text-mute)' }, [
-			E('summary', { 'style': 'cursor:pointer;font-weight:600;font-size:13px;color:var(--tm-text)' }, _('What do these stats mean?')),
-			E('div', { 'style': 'padding:8px 0 2px 0;line-height:1.8' }, [
-				E('div', {}, [E('b', {}, _('Drops')), ' — ' + _('packets dropped by queue overflow')]),
-				E('div', {}, [E('b', {}, _('Overlimits')), ' — ' + _('rate exceeded events')]),
-				E('div', {}, [E('b', {}, _('ECN marks')), ' — ' + _('congestion signals without drop')]),
-				E('div', {}, [E('b', {}, _('Flows')), ' — ' + _('active concurrent connections in queue')]),
-				E('div', {}, [E('b', {}, _('Queue memory')), ' — ' + _('bytes allocated by the queue discipline')]),
-				E('div', {}, [E('b', {}, _('Lended') + '/' + _('Borrowed')), ' — ' + _('own-rate vs parent-rate packets')]),
-				E('div', {}, [E('b', {}, _('Utilization')), ' — ' + _('current speed as percentage of rate limit')]),
-				E('div', {}, [E('b', {}, _('Packets dropped') + '/' + _('Bytes dropped')), ' — ' + _('traffic discarded by nft policer')]),
-				E('div', {}, [E('b', {}, _('Drop ratio')), ' — ' + _('percentage of total traffic that was dropped')])
-			])
-		])
+	var tbl = E('table', { 'style': 'width:100%;border-collapse:collapse;border:1px solid var(--tm-border);border-radius:4px;overflow:hidden' }, [
+		E('tbody', {}, rows)
 	]);
 
-	return content;
+	return E('div', { 'style': panelStyle }, [
+		E('div', { 'style': 'margin-bottom:8px;font-weight:600;font-size:14px;color:var(--tm-text)' }, _('Extended Statistics')),
+		tbl
+	]);
 }
 
 function buildExtendedStatsLegend(shapeMap, dropMap) {
@@ -903,6 +951,12 @@ return view.extend({
 		}
 
 		function updateSpeedCells() {
+			var globalMax = 0;
+			Object.keys(self._speedHistory).forEach(function(ip) {
+				var hist = self._speedHistory[ip];
+				if (hist) hist.forEach(function(h) { if (h.speed > globalMax) globalMax = h.speed; });
+			});
+
 			Object.keys(self._speedMap).forEach(function(ip) {
 				var s = self._speedMap[ip];
 				var cell = connsDiv.querySelector('td[data-speed-ip="'+ip+'"]');
@@ -914,6 +968,13 @@ return view.extend({
 				}
 				cell.textContent = fmtSpeed(s.current);
 				cell.title = _('Avg')+': '+fmtSpeed(s.avg)+' / '+_('Max')+': '+fmtSpeed(s.max);
+
+				var sparkCell = connsDiv.querySelector('td[data-spark-ip="'+ip+'"]');
+				if (sparkCell) {
+					while (sparkCell.firstChild) sparkCell.removeChild(sparkCell.firstChild);
+					var svg = renderSparkline(self._speedHistory[ip], globalMax, 60, 20);
+					if (svg) sparkCell.appendChild(svg);
+				}
 			});
 		}
 
@@ -1080,7 +1141,7 @@ return view.extend({
 					statsDiv.innerHTML = (data.blocked
 						? '<b>⛔ ' + _('BLOCKED') + '</b> — '+data.block_packets+' pkts, '+fmtBytes(data.block_bytes)+' ' + _('dropped') + ' &nbsp;|&nbsp; '
 						: '') + parts.join(' &nbsp;|&nbsp; ') + wifiPart +
-						' &nbsp;<span style="color:'+C.textFaint+';font-size:11px">'+escHtml(data.timestamp)+'</span>';
+						' &nbsp;<span style="color:'+C.textFaint+';font-size:11px">'+new Date(data.timestamp * 1000).toLocaleTimeString()+'</span>';
 				}
 
 				blockBtn.disabled   = data.blocked;
@@ -1239,7 +1300,8 @@ return view.extend({
 						},
 						self._speedMap,
 						self._dropMap,
-						self._shapeMap
+						self._shapeMap,
+						self._speedHistory
 					);
 					connsDiv.appendChild(E('div',{'style':'overflow-x:auto'},[tbl]));
 					connsDiv.appendChild(E('p',{'style':'color:'+C.textFaint+';font-size:11px;margin-top:6px'},
