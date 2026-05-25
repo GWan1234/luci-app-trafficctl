@@ -42,6 +42,7 @@ save_shape() {
 
     local lockf="/tmp/trafficctl_shapes.lock"
     local tmpf="/tmp/shapes_rebuild.$$"
+    # shellcheck disable=SC2064
     trap "rm -f '$tmpf' '$lockf'" EXIT
 
     # Simple file lock (wait up to 5 seconds)

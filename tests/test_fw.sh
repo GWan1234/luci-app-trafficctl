@@ -1,6 +1,5 @@
-#!/bin/sh
+#!/bin/bash
 # Unit tests for trafficctl-fw.sh helper functions.
-# Runs on any POSIX shell (no OpenWrt required).
 
 PASS=0
 FAIL=0
@@ -19,7 +18,7 @@ assert_eq() {
 uci() { echo ""; }
 nft() { return 1; }
 command() { return 1; }
-export -f uci nft command 2>/dev/null
+export -f uci nft command
 
 # Source the firewall library (will fall back to iptables mode)
 . "$(dirname "$0")/../root/usr/local/bin/trafficctl-fw.sh"

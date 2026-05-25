@@ -37,6 +37,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Shell unit tests
-        run: sh tests/test_fw.sh
+        run: bash tests/test_fw.sh
       - name: IPK build test
-        run: sh tests/test_build_ipk.sh
+        run: bash tests/test_build_ipk.sh
