@@ -58,7 +58,7 @@ The package contains no compiled code (all shell scripts and JavaScript), so it 
 |---------|---------|------|
 | `tc-full` | Traffic control utility | ~180 KB |
 | `kmod-sched-core` | Kernel scheduler framework | ~20 KB |
-| `kmod-sched-cake` | CAKE qdisc (optional, for future use) | ~30 KB |
+| `kmod-sched-htb` | HTB qdisc kernel module | ~15 KB |
 
 If `tc` is not installed, the shaping feature gracefully degrades: the UI still works but shaper actions return an error message explaining what to install.
 
@@ -70,11 +70,16 @@ If `tc` is not installed, the shaping feature gracefully degrades: the UI still 
 
 Without `bind-dig`, reverse DNS lookups silently return empty hostnames.
 
+### For Interface Detection (optional)
+
+| Package | Purpose | Notes |
+|---------|---------|-------|
+| `iw-full` | WiFi station dump, channel info | Shows WiFi band per device |
+
 ### For JSON Processing
 
 | Package | Purpose | Notes |
 |---------|---------|-------|
-| `jq` | JSON generation in scripts | Usually pre-installed on 22.03+ |
 | `jsonfilter` | JSON parsing in hotplug | Part of OpenWrt base system |
 
 ---
@@ -124,7 +129,7 @@ In practice, both achieve the same result (excess packets are dropped), but the 
 
 6. **No flowtable flush** -- When blocking a device on fw3, existing established connections may continue until they time out naturally. On fw4, the flowtable is flushed to force immediate enforcement.
 
-7. **No drop counters for rate limiter** -- The `ratelimit-stats.sh` script parses nft output. On iptables, drop counters are not exposed in the same format, so the "Dropped" column will always show "--".
+7. **No drop counters for rate limiter** -- The `trafficctl-ratelimit-stats.sh` script parses nft output. On iptables, drop counters are not exposed in the same format, so the "Dropped" column will always show "--".
 
 ### Traffic Shaping
 

@@ -9,63 +9,86 @@ This document describes the internal architecture of luci-app-trafficctl.
 1. **No daemon** -- All operations are on-demand. No background process runs when the UI is closed.
 2. **No compiled code** -- Pure shell scripts and JavaScript. Runs on any architecture without compilation.
 3. **Firewall agnostic** -- Automatically detects nftables or iptables at runtime. The same package works on OpenWrt 21.02 (fw3) through 23.05+ (fw4).
-4. **Minimal dependencies** -- Only requires `conntrack` and `luci-base`. Traffic shaping requires `tc-full` and `kmod-sched-core` (optional).
+4. **Minimal dependencies** -- Only requires `conntrack` and `luci-base`. Traffic shaping requires `tc-full` and `kmod-sched-htb` (optional).
 
 ---
 
 ## Component Diagram
 
 ```mermaid
-graph TB
+graph TD
     subgraph "Browser (Client)"
-        JS["trafficmon.js<br/>LuCI view.extend()"]
-        LS["localStorage<br/>(user preferences)"]
+        JS["status.js<br/>LuCI view.extend()"]
+        LS["localStorage<br/>(user preferences, poll interval)"]
         JS <--> LS
     end
 
     subgraph "Router (Server)"
         subgraph "rpcd + uhttpd"
-            ACL["luci-app-trafficmon.json<br/>(ACL definitions)"]
-            RPC["fs.exec_direct()<br/>JSON-RPC endpoint"]
+            ACL["luci-app-trafficctl.json<br/>(ACL definitions)"]
+            RPC["/usr/libexec/rpcd/trafficctl<br/>(JSON-RPC dispatch)"]
         end
 
-        subgraph "Backend Scripts (/usr/local/bin/)"
-            direction LR
-            QUERY["Query Scripts<br/>traffic-summary.sh<br/>traffic-by-ip.sh<br/>ratelimit-stats.sh<br/>shape-stats.sh<br/>rdns-lookup.sh"]
-            ACTION["Action Scripts<br/>block-device.sh<br/>unblock-device.sh<br/>ratelimit-device.sh<br/>shape-device.sh<br/>macfilter-add.sh<br/>macfilter-remove.sh"]
+        subgraph "Query Scripts — /usr/local/bin/"
+            SUM["trafficctl-summary.sh<br/>(all active devices)"]
+            DEV["trafficctl-device.sh<br/>(per-device connections)"]
+            BYT["trafficctl-bytes.sh<br/>(conntrack byte counters)"]
+            RLS["trafficctl-ratelimit-stats.sh<br/>(nft drop counters)"]
+            SHS["trafficctl-shape-stats.sh<br/>(tc class stats)"]
+            RDNS["trafficctl-rdns.sh<br/>(reverse DNS lookup)"]
         end
 
-        subgraph "Abstraction Layer"
-            FWSH["trafficctl-fw.sh<br/>(sourced by action scripts)"]
+        subgraph "Action Scripts — /usr/local/bin/"
+            BLK["trafficctl-block.sh"]
+            UBK["trafficctl-unblock.sh"]
+            RL["trafficctl-ratelimit.sh"]
+            SH["trafficctl-shape.sh"]
+            MFA["trafficctl-macfilter-add.sh"]
+            MFR["trafficctl-macfilter-remove.sh"]
+        end
+
+        subgraph "Firewall Abstraction Layer"
+            FWSH["trafficctl-fw.sh<br/>(sourced by all scripts)"]
         end
 
         subgraph "Kernel Subsystems"
-            NFT["nftables<br/>(inet fw4, netdev tm_ratelimit)"]
+            NFT["nftables<br/>(inet fw4 forward,<br/>netdev tm_ratelimit)"]
             IPT["iptables<br/>(mangle FORWARD)"]
             TC["tc<br/>(HTB qdisc on br-lan)"]
-            CTMOD["conntrack<br/>(connection tracking)"]
-            HOSTAPD["hostapd<br/>(WiFi MAC ACLs)"]
+            CTMOD["/proc/net/nf_conntrack"]
+            IW["iw + brctl<br/>(WiFi/bridge detection)"]
+            HOSTAPD["hostapd<br/>(WiFi MAC ACLs via uci)"]
         end
 
         subgraph "Persistence"
             SHAPES["/etc/trafficmon/shapes.json"]
-            HOTPLUG["/etc/hotplug.d/iface/99-shaperestore"]
+            HOTPLUG["/etc/hotplug.d/iface/<br/>99-trafficctl-shapes"]
         end
     end
 
     JS -->|"HTTP POST<br/>JSON-RPC"| RPC
     RPC -->|"ACL check"| ACL
-    RPC -->|"exec"| QUERY
-    RPC -->|"exec"| ACTION
-    ACTION --> FWSH
+    RPC --> SUM & DEV & BYT & RLS & SHS & RDNS
+    RPC --> BLK & UBK & RL & SH & MFA & MFR
+
+    SUM --> CTMOD
+    SUM --> IW
+    DEV --> CTMOD
+    DEV --> IW
+    BYT --> CTMOD
+
+    BLK & UBK --> FWSH
+    RL --> FWSH
     FWSH -->|"fw4 detected"| NFT
     FWSH -->|"fw3 detected"| IPT
-    ACTION -->|"shape-device.sh"| TC
-    ACTION -->|"macfilter-*.sh"| HOSTAPD
-    QUERY -->|"conntrack -L"| CTMOD
-    QUERY -->|"nft list / tc -s"| NFT & TC
-    ACTION -->|"save_state()"| SHAPES
-    HOTPLUG -->|"on ifup lan"| ACTION
+
+    SH --> TC
+    SHS --> TC
+
+    MFA & MFR --> HOSTAPD
+
+    SH -->|"save_shape()"| SHAPES
+    HOTPLUG -->|"on ifup lan"| SH
 ```
 
 ---
@@ -74,62 +97,89 @@ graph TB
 
 ### Dashboard (All Devices View)
 
-```
-Browser                  Router
-  |                        |
-  |-- traffic-summary.sh ->|-- conntrack -L (all connections)
-  |                        |-- nft list chain inet fw4 forward (block status)
-  |                        |-- nft list chain netdev tm_ratelimit dl (rate limits)
-  |                        |-- tc class show dev br-lan (shaping status)
-  |                        |-- /tmp/dhcp.leases (device names + MACs)
-  |                        |-- uci show wireless (WiFi deny lists)
-  |<-- JSON array ---------|
-  |                        |
-  |-- traffic-bytes.sh --->|-- iptables/nft byte counters (every 2s)
-  |<-- JSON array ---------|
-  |                        |
-  |-- ratelimit-stats.sh ->|-- nft counter parsing (every 5s)
-  |<-- JSON array ---------|
-  |                        |
-  |-- shape-stats.sh ----->|-- tc -s class show dev br-lan (every 5s)
-  |<-- JSON array ---------|
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant R as rpcd
+    participant S as trafficctl-summary.sh
+    participant BY as trafficctl-bytes.sh
+
+    B->>R: summary()
+    R->>S: exec
+    S->>S: read /proc/net/nf_conntrack
+    S->>S: iw station dump (WiFi MACs)
+    S->>S: brctl showmacs (bridge ports)
+    S->>S: check nft/iptables block status
+    S->>S: check tc class (shape status)
+    S-->>B: JSON array of devices
+
+    loop Every N seconds (poll)
+        B->>R: bytes()
+        R->>BY: exec
+        BY->>BY: parse /proc/net/nf_conntrack
+        BY-->>B: [{ip, bytes_in, bytes_out}]
+        B->>B: calculate speed = delta_bytes / delta_time
+    end
 ```
 
 ### Per-Device View
 
-```
-Browser                  Router
-  |                        |
-  |-- traffic-by-ip.sh --->|-- conntrack -L -s <IP>
-  |     [ip, --proto tcp]  |-- nft list (block + rate check)
-  |                        |-- tc class show (shaper check)
-  |                        |-- /tmp/dhcp.leases (name + MAC)
-  |                        |-- uci show wireless (WiFi status)
-  |<-- JSON object --------|
-  |                        |
-  |-- rdns-lookup.sh ----->|-- dig -x <IP> (optional, per external IP)
-  |<-- {"ip","host"} ------|
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant R as rpcd
+    participant D as trafficctl-device.sh
+    participant DNS as trafficctl-rdns.sh
+
+    B->>R: device(ip, proto)
+    R->>D: exec ip proto
+    D->>D: conntrack grep src=ip
+    D->>D: iw station dump (conn_type)
+    D->>D: brctl showmacs (port name)
+    D->>D: nft/iptables check (block status)
+    D->>D: tc class check (shape status)
+    D-->>B: {ip, name, mac, conn_type, connections[], ...}
+
+    par rDNS resolution (if enabled)
+        B->>R: rdns(dst_ip_1)
+        R->>DNS: dig -x dst_ip_1
+        DNS-->>B: {ip, host}
+    and
+        B->>R: rdns(dst_ip_2)
+        R->>DNS: dig -x dst_ip_2
+        DNS-->>B: {ip, host}
+    end
 ```
 
 ### Action Flow (Example: Apply Shaper)
 
-```
-Browser                  Router
-  |                        |
-  |-- shape-device.sh ---->|
-  |   [add, ip, 10000, n]  |-- tc qdisc replace dev br-lan root handle 1: htb ...
-  |                        |-- tc class replace dev br-lan parent 1:1 classid 1:XX htb rate 10000kbit
-  |                        |-- tc qdisc replace dev br-lan parent 1:XX handle XX: fq_codel
-  |                        |-- tc filter replace dev br-lan parent 1: ... match ip dst <IP>/32
-  |                        |-- save to /etc/trafficmon/shapes.json
-  |<-- {"ok":true} --------|
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant R as rpcd
+    participant SH as trafficctl-shape.sh
+    participant TC as tc kernel
+    participant FS as shapes.json
+
+    B->>R: shape_add(ip, 10000, label)
+    R->>SH: exec add ip 10000 label
+    SH->>TC: ensure root HTB qdisc
+    SH->>TC: tc class add ... rate 10000kbit
+    SH->>TC: tc qdisc add ... fq_codel
+    SH->>TC: tc filter add ... match ip dst
+    SH->>FS: write {ip, rate_kbit} to shapes.json
+    SH-->>B: {"ok":true, "msg":"..."}
+
+    Note over TC,FS: On reboot...
+    FS->>SH: hotplug reads shapes.json
+    SH->>TC: restore all tc classes
 ```
 
 ---
 
 ## Firewall Abstraction Layer
 
-The file `trafficctl-fw.sh` is sourced by action scripts. It provides a unified API regardless of the firewall backend:
+The file `trafficctl-fw.sh` is sourced by all scripts. It provides a unified API regardless of the firewall backend:
 
 ```sh
 . /usr/local/bin/trafficctl-fw.sh
@@ -158,7 +208,7 @@ else:
 | `tctl_is_blocked` | grep nft forward chain | grep iptables FORWARD chain |
 | `tctl_get_wan_device` | `uci get network.wan.device` (fallback to `.ifname`) | Same |
 | `tctl_get_lan_device` | `uci get network.lan.device` (fallback to `.ifname`) | Same |
-| `tctl_validate_ip` | regex match | Same |
+| `tctl_validate_ip` | regex + octet range check | Same |
 | `tctl_get_wifi_interfaces` | `uci show wireless` parsing | Same |
 
 ---
@@ -169,16 +219,25 @@ Traffic shaping uses a single HTB qdisc on the LAN bridge egress (br-lan). This 
 
 ```mermaid
 graph TD
-    ROOT["root qdisc<br/>handle 1: htb<br/>default fffe"]
-    ROOT_CLASS["class 1:1<br/>htb rate 1000mbit<br/>(root class)"]
-    DEFAULT["class 1:fffe<br/>htb rate 1000mbit prio 0<br/>(unshaped traffic)"]
-    FQ_DEFAULT["qdisc fffe: fq_codel"]
-    
-    DEV_A["class 1:XX<br/>htb rate Nkbit ceil Nkbit prio 5<br/>(device A - shaped)"]
-    FQ_A["qdisc XX: fq_codel"]
-    
-    DEV_B["class 1:YY<br/>htb rate Mkbit ceil Mkbit prio 5<br/>(device B - shaped)"]
-    FQ_B["qdisc YY: fq_codel"]
+    ROOT["root qdisc<br/>handle 1: htb<br/>default fffe<br/>r2q 10"]
+
+    ROOT_CLASS["class 1:1<br/>htb rate 1000mbit<br/>ceil 1000mbit<br/>(root class)"]
+
+    DEFAULT["class 1:fffe<br/>htb rate 1000mbit<br/>prio 0<br/>(unshaped traffic)"]
+
+    FQ_DEFAULT["qdisc fq_codel<br/>(fair queuing)"]
+
+    DEV_A["class 1:164<br/>htb rate 10000kbit<br/>ceil 10000kbit<br/>(192.168.1.100)"]
+
+    FQ_A["qdisc fq_codel"]
+
+    DEV_B["class 1:165<br/>htb rate 5000kbit<br/>ceil 5000kbit<br/>(192.168.1.101)"]
+
+    FQ_B["qdisc fq_codel"]
+
+    FILTER_A["filter u32<br/>match ip dst 192.168.1.100/32<br/>flowid 1:164"]
+
+    FILTER_B["filter u32<br/>match ip dst 192.168.1.101/32<br/>flowid 1:165"]
 
     ROOT --> ROOT_CLASS
     ROOT_CLASS --> DEFAULT
@@ -187,6 +246,8 @@ graph TD
     DEFAULT --> FQ_DEFAULT
     DEV_A --> FQ_A
     DEV_B --> FQ_B
+    FILTER_A -.->|"classify"| DEV_A
+    FILTER_B -.->|"classify"| DEV_B
 ```
 
 ### Class ID Encoding
@@ -214,33 +275,59 @@ This means:
 A u32 filter routes packets to the correct class:
 
 ```
-tc filter ... protocol ip prio <decimal_id> u32 match ip dst <IP>/32 flowid 1:<hex_id>
+tc filter add dev br-lan parent 1:0 prio 10 protocol ip u32 \
+    match ip dst <IP>/32 flowid 1:<hex_id>
+```
+
+---
+
+## Interface Detection
+
+The system detects how each device is connected (WiFi band or LAN port):
+
+```mermaid
+graph LR
+    MAC["Device MAC"]
+
+    subgraph "WiFi check"
+        IW["iw dev <iface> station dump"]
+        CH["iw dev <iface> info → channel"]
+        BAND["ch ≤ 14 → 2.4G<br/>ch ≤ 177 → 5G<br/>else → 6G"]
+    end
+
+    subgraph "Bridge check (fallback)"
+        BRCTL["brctl showmacs br-lan"]
+        SYSFS["/sys/class/net/br-lan/brif/*/port_no"]
+        PORT["port_no → interface name<br/>(lan2, lan3, lan4)"]
+    end
+
+    MAC --> IW
+    IW -->|"found"| CH --> BAND
+    IW -->|"not found"| BRCTL --> SYSFS --> PORT
 ```
 
 ---
 
 ## Polling Architecture
 
-The frontend uses three independent polling loops when in dashboard (all-devices) mode:
+The frontend uses independent polling loops:
 
 | Poll | Interval | Script | Purpose |
 |------|----------|--------|---------|
-| Bytes | 2 seconds | `traffic-bytes.sh` | Bandwidth speed calculation (delta bytes / delta time) |
-| Drops | 5 seconds | `ratelimit-stats.sh` | nft drop counter for rate-limited devices |
-| Shapes | 5 seconds | `shape-stats.sh` | tc backlog and byte counters for shaped devices |
+| Bytes | Configurable (2s–60s, or off) | `trafficctl-bytes.sh` | Bandwidth speed = delta bytes / delta time |
+| Summary | On-demand / auto-refresh | `trafficctl-summary.sh` | Full device list refresh |
 
-All polling stops when:
+Polling stops when:
 - The browser tab is hidden (`document.hidden === true`).
-- The user switches to per-device view.
-- The user navigates away from the page.
-
-The main device list refresh uses the configurable auto-refresh interval (off, 5s, 10s, 30s, 60s).
+- The user switches to per-device view (only device-specific polls run).
+- The user sets poll to "Off".
+- The user navigates away (timers cleared in `handleTeardown()`).
 
 ---
 
-## WiFi Interface Detection
+## WiFi MAC Filtering
 
-WiFi MAC filtering does not hardcode interface names. Instead, it dynamically discovers all wifi-iface sections:
+WiFi MAC filtering does not hardcode interface names. It dynamically discovers all wifi-iface sections:
 
 ```sh
 uci show wireless | grep '=wifi-iface' | cut -d= -f1
@@ -251,54 +338,29 @@ This returns paths like `wireless.default_radio0`, `wireless.default_radio1`, et
 2. Add/remove the target MAC from each interface's `maclist`.
 3. Run `wifi reload` to apply changes without a full restart.
 
-This approach works regardless of:
-- Number of radios (single, dual, tri-band).
-- Interface naming conventions.
-- Whether interfaces are bridged or isolated.
-
 ---
 
-## Persistence Mechanism
+## Persistence
 
-Only traffic shaping rules are persisted across reboots. The design is intentional:
+Only traffic shaping rules are persisted across reboots:
 
 | Feature | Persisted | Rationale |
 |---------|-----------|-----------|
-| Shaping (tc/HTB) | Yes | Long-term bandwidth allocation, e.g., kids' devices |
-| Rate limiting (nft policer) | No | Temporary throttle, meant to be short-lived |
+| Shaping (tc/HTB) | Yes (`shapes.json`) | Long-term bandwidth allocation |
+| Rate limiting (nft policer) | No | Temporary throttle, short-lived |
 | Internet blocking | No | Emergency block, should require re-confirmation |
-| WiFi MAC filtering | Yes (via uci) | Changes are committed to `/etc/config/wireless` |
+| WiFi MAC filtering | Yes (via `uci commit wireless`) | Committed to `/etc/config/wireless` |
 
-### Persistence Flow
-
-```mermaid
-sequenceDiagram
-    participant UI as Browser
-    participant SD as shape-device.sh
-    participant TC as tc (kernel)
-    participant FS as /etc/trafficmon/shapes.json
-    participant HP as 99-shaperestore (hotplug)
-
-    UI->>SD: add 192.168.1.100 10000
-    SD->>TC: tc class replace ... rate 10000kbit
-    SD->>FS: jq write {ip, rate_kbit}
-    SD-->>UI: {"ok":true}
-
-    Note over TC: --- REBOOT ---
-
-    HP->>FS: read shapes.json
-    HP->>SD: shape-device.sh add <ip> <rate>
-    SD->>TC: tc class replace ...
-```
-
-The hotplug script triggers on `ACTION=ifup` and `INTERFACE=lan`, ensuring tc rules are applied only after the bridge interface is ready.
+The hotplug script triggers on `ACTION=ifup` and `INTERFACE=lan`, with a readiness loop (waits up to 10s for tc to be available on the bridge device).
 
 ---
 
 ## Security Model
 
-- All script execution is gated by rpcd ACLs defined in `luci-app-trafficmon.json`.
+- All script execution is gated by rpcd ACLs (`luci-app-trafficctl.json`).
 - Only authenticated LuCI admin users can invoke scripts.
-- All scripts validate IP input with a regex before any operation.
-- No user-supplied strings are passed to shell eval -- all parameters use positional arguments.
-- The `comment` fields in nft rules use sanitized identifiers (IP with dots replaced by dashes).
+- IP validation: regex + octet range (0–255) before any operation.
+- Label/comment sanitization: `tr -cd 'a-zA-Z0-9_.-'` strips injection characters.
+- Protocol parameter: `case` whitelist (`tcp|udp|all`), not interpolated.
+- No user-supplied strings are passed to shell eval.
+- File locking for concurrent `shapes.json` writes.

@@ -122,45 +122,81 @@ When a device is WiFi-blocked:
 
 ## Architecture
 
-```
-                         Browser
-                  ┌─────────────────────┐
-                  │    status.js         │
-                  │  (LuCI view.extend)  │
-                  └────────┬────────────┘
-                           │ JSON-RPC (ubus)
-                           ▼
-                  ┌─────────────────────┐
-                  │  rpcd/trafficctl    │
-                  │  (ACL-gated exec)   │
-                  └────────┬────────────┘
-                           │ exec
-            ┌──────────────┼──────────────────────────┐
-            ▼              ▼              ▼            ▼
-    ┌──────────────┐ ┌──────────┐ ┌───────────┐ ┌─────────────┐
-    │ summary.sh   │ │ device.sh│ │ shape.sh  │ │ bytes.sh    │
-    │ (all devices)│ │ (detail) │ │ (tc/HTB)  │ │ (conntrack) │
-    └──────┬───────┘ └────┬─────┘ └─────┬─────┘ └──────┬──────┘
-           │              │             │               │
-           ▼              ▼             ▼               ▼
-    ┌──────────────┐ ┌──────────┐ ┌───────────┐ ┌─────────────┐
-    │ block.sh     │ │ rdns.sh  │ │ratelimit.sh│ │macfilter-*.sh│
-    │ unblock.sh   │ │          │ │            │ │             │
-    └──────┬───────┘ └──────────┘ └─────┬─────┘ └──────┬──────┘
-           │                            │               │
-           ▼                            ▼               ▼
-    ┌─────────────────────────────────────────────────────────┐
-    │                    trafficctl-fw.sh                      │
-    │         (firewall abstraction: nft vs iptables)         │
-    └──────┬────────────────┬───────────────────┬─────────────┘
-           ▼                ▼                   ▼
-    ┌────────────┐   ┌────────────┐      ┌───────────┐
-    │ nftables / │   │  tc / HTB  │      │ cfg80211  │
-    │ iptables   │   │ + fq_codel │      │ (hostapd) │
-    └────────────┘   └────────────┘      └───────────┘
-           │                │                   │
-           └────────────────┴───────────────────┘
-                    Linux Kernel
+```mermaid
+graph TD
+    subgraph Browser
+        UI["status.js — LuCI view.extend()"]
+        LS["localStorage<br/>(user preferences)"]
+        UI <--> LS
+    end
+
+    subgraph "rpcd — ACL-gated"
+        RPC["rpcd/trafficctl<br/>(JSON-RPC dispatch)"]
+    end
+
+    subgraph "Query Scripts"
+        SUM["trafficctl-summary.sh"]
+        DEV["trafficctl-device.sh"]
+        BYT["trafficctl-bytes.sh"]
+        RLS["trafficctl-ratelimit-stats.sh"]
+        SHS["trafficctl-shape-stats.sh"]
+        RDNS["trafficctl-rdns.sh"]
+    end
+
+    subgraph "Action Scripts"
+        BLK["trafficctl-block.sh<br/>trafficctl-unblock.sh"]
+        RL["trafficctl-ratelimit.sh"]
+        SH["trafficctl-shape.sh"]
+        MF["trafficctl-macfilter-add.sh<br/>trafficctl-macfilter-remove.sh"]
+    end
+
+    subgraph "Abstraction Layer"
+        FW["trafficctl-fw.sh<br/>(nft vs iptables auto-detect)"]
+    end
+
+    subgraph "Kernel / System"
+        NFT["nftables / iptables"]
+        TC["tc — HTB + fq_codel<br/>(on br-lan)"]
+        CT["/proc/net/nf_conntrack"]
+        IW["iw + brctl<br/>(interface detection)"]
+        WIFI["cfg80211 / hostapd<br/>(WiFi MAC filter)"]
+    end
+
+    subgraph "Persistence"
+        SHAPES["/etc/trafficmon/shapes.json"]
+        HP["99-trafficctl-shapes<br/>(hotplug restore on boot)"]
+    end
+
+    UI -->|"JSON-RPC / ubus"| RPC
+
+    RPC --> SUM
+    RPC --> DEV
+    RPC --> BYT
+    RPC --> RLS
+    RPC --> SHS
+    RPC --> RDNS
+    RPC --> BLK
+    RPC --> RL
+    RPC --> SH
+    RPC --> MF
+
+    SUM --> CT
+    SUM --> IW
+    DEV --> CT
+    DEV --> IW
+    BYT --> CT
+
+    BLK --> FW
+    RL --> FW
+    FW --> NFT
+
+    SH --> TC
+    SHS --> TC
+
+    MF --> WIFI
+
+    SH -->|"save state"| SHAPES
+    HP -->|"restore on ifup lan"| SH
 ```
 
 ### Data Flow
