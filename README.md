@@ -254,6 +254,17 @@ luci-app-trafficctl/
 
 ---
 
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Component diagram, data flow sequences, tc/HTB hierarchy, security model |
+| [API.md](docs/API.md) | All rpcd methods, script arguments, JSON output formats |
+| [COMPATIBILITY.md](docs/COMPATIBILITY.md) | OpenWrt version matrix, nft/iptables feature parity, known limitations |
+| [DEVELOPMENT.md](docs/DEVELOPMENT.md) | Dev setup, deploy commands, code style, debugging |
+
+---
+
 ## Contributing
 
 Contributions are welcome. Please:
