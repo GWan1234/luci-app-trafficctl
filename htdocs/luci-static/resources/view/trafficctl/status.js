@@ -729,13 +729,13 @@ function buildExtendedStatsLegend(shapeMap, dropMap) {
 
 function buildSearchSelect(devices, placeholder, onSelect) {
 	var selectedValue = '__all__';
-	var wrapper = E('div', { 'style': 'position:relative;display:inline-block;min-width:320px' });
+	var wrapper = E('div', { 'style': 'position:relative;display:inline-block;width:100%;max-width:480px' });
 	var input = E('input', {
 		'type': 'text',
 		'class': 'cbi-input-text',
 		'placeholder': placeholder,
 		'autocomplete': 'off',
-		'style': 'width:100%;padding:5px 28px 5px 8px;font-size:13px'
+		'style': 'width:100%;padding:8px 32px 8px 12px;font-size:14px;border:2px solid var(--tm-border);border-radius:6px'
 	});
 	var clearBtn = E('span', {
 		'style': 'position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;color:var(--tm-text-mute);font-size:16px;display:none;line-height:1'
@@ -922,7 +922,7 @@ return view.extend({
 
 		var extStatsDiv = E('div', { 'style': opts.extendedStats ? '' : 'display:none' });
 
-		var refreshSel = E('select', { 'class': 'cbi-input-select' }, [
+		var refreshSel = E('select', { 'class': 'cbi-input-select', 'style': 'width:60px' }, [
 			E('option',{'value':'0'}, _('Off')), E('option',{'value':'5'},'5s'),
 			E('option',{'value':'10'},'10s'), E('option',{'value':'30'},'30s'),
 			E('option',{'value':'60'},'60s')
@@ -934,7 +934,7 @@ return view.extend({
 			var o = loadOpts(); o.refresh = parseInt(this.value); saveOpts(o); updateUrlParams(o); self._setupTimer();
 		});
 
-		var pollIntervalSel = E('select', { 'class': 'cbi-input-select' }, [
+		var pollIntervalSel = E('select', { 'class': 'cbi-input-select', 'style': 'width:52px' }, [
 			E('option',{'value':'1'},'1s'),
 			E('option',{'value':'2'},'2s'),
 			E('option',{'value':'5'},'5s')
@@ -947,7 +947,7 @@ return view.extend({
 			self._restartBytesPoll();
 		});
 
-		var avgWindowSel = E('select', { 'class': 'cbi-input-select' }, [
+		var avgWindowSel = E('select', { 'class': 'cbi-input-select', 'style': 'width:56px' }, [
 			E('option',{'value':'5'},'5s'),
 			E('option',{'value':'15'},'15s'),
 			E('option',{'value':'30'},'30s'),
@@ -960,7 +960,7 @@ return view.extend({
 			var o = loadOpts(); o.avgWindow = parseInt(this.value); saveOpts(o); updateUrlParams(o);
 		});
 
-		var avgMethodSel = E('select', { 'class': 'cbi-input-select' }, [
+		var avgMethodSel = E('select', { 'class': 'cbi-input-select', 'style': 'width:76px' }, [
 			E('option',{'value':'simple'}, _('Simple')),
 			E('option',{'value':'ewma'}, _('EWMA'))
 		]);
@@ -1575,16 +1575,33 @@ return view.extend({
 		var savedHidden = opts.hiddenCols || {};
 		self._hiddenCols = savedHidden;
 
-		var colToggles = [
-			{key:'mac', label:'MAC'}, {key:'tcp', label:'TCP'}, {key:'udp', label:'UDP'},
+		var colChipDefs = [
+			{key:'name', label:_('Device')}, {key:'ip', label:'IP'}, {key:'mac', label:'MAC'},
+			{key:'_speed', label:_('Speed')}, {key:'_spark', label:_('Graph')},
+			{key:'total', label:_('Conns')}, {key:'tcp', label:'TCP'}, {key:'udp', label:'UDP'},
+			{key:'blocked', label:_('Inet')}, {key:'conn_type', label:_('Link')},
+			{key:'_throttle_kbit', label:_('Throttle')},
 			{key:'_drop_packets', label:_('Drops')}, {key:'_backlog', label:_('Queue')}
-		].map(function(ct) {
-			return mkToggle('tm-col-'+ct.key, ct.label, !savedHidden[ct.key], function() {
-				if (this.checked) { delete self._hiddenCols[ct.key]; }
-				else { self._hiddenCols[ct.key] = true; }
+		];
+		var chipBase = 'display:inline-block;padding:3px 10px;border-radius:12px;font-size:11px;cursor:pointer;user-select:none;margin:2px;transition:all .15s;font-weight:500';
+		var chipOn = chipBase + ';background:var(--tm-proto);color:#fff;border:1px solid var(--tm-proto)';
+		var chipOff = chipBase + ';background:var(--tm-bg);color:var(--tm-text-mute);border:1px solid var(--tm-border)';
+
+		var colChipsContainer = E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:0;margin-bottom:8px'}, [
+			E('span', {'style':'color:var(--tm-text-mute);font-size:11px;margin-right:6px'}, _('Columns') + ':')
+		]);
+		colChipDefs.forEach(function(ct) {
+			var chip = E('span', {
+				'style': savedHidden[ct.key] ? chipOff : chipOn,
+				'title': _('Click to toggle column visibility')
+			}, ct.label);
+			chip.addEventListener('click', function() {
+				if (self._hiddenCols[ct.key]) { delete self._hiddenCols[ct.key]; chip.style.cssText = chipOn; }
+				else { self._hiddenCols[ct.key] = true; chip.style.cssText = chipOff; }
 				var o = loadOpts(); o.hiddenCols = self._hiddenCols; saveOpts(o);
 				if (isAllMode()) runAll();
 			});
+			colChipsContainer.appendChild(chip);
 		});
 
 		var ob = 'border:1px solid '+C.optsBorder+';background:'+C.optsBg;
@@ -1592,30 +1609,27 @@ return view.extend({
 		var optRow1 = E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:6px'}, [
 			showStats, showConns, extStatsCheck, rdnsCheck
 		]);
-		var optRow2 = E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:6px'}, [
+		var optRow2 = E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:6px'}, [
 			mkLabel(_('Refresh')+':'), refreshSel, sep(),
 			mkLabel(_('Poll')+':'), pollIntervalSel, sep(),
 			mkLabel(_('Avg')+':'), avgWindowSel,
 			mkLabel(_('Method')+':'), avgMethodSel
 		]);
-		var optRow3 = E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:6px'}, [
-			mkLabel(_('Columns')+':')
-		].concat(colToggles));
 
 		return E('div', {'class':'cbi-map', 'style':'color:'+C.hostname}, [
 			E('h2', {'style':'color:'+C.hostname}, _('Traffic Control')),
 			E('div', {'class':'cbi-section'}, [
-				E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:6px'},
-					[searchSelect.el]),
+				E('div', {'style':'margin-bottom:10px'}, [searchSelect.el]),
 				actionRow,
 				rateLimitRow,
 				statusDiv,
-				E('div', {'style':'padding:8px 12px;border-radius:4px;margin-bottom:12px;'+ob}, [
-					optRow1, optRow2, optRow3
+				E('div', {'style':'padding:8px 12px;border-radius:4px;margin-bottom:10px;'+ob}, [
+					optRow1, optRow2
 				]),
 				perDeviceOpts,
 				statsDiv,
 				extStatsDiv,
+				colChipsContainer,
 				connsDiv
 			])
 		]);
