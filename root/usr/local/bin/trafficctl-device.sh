@@ -221,8 +221,11 @@ if [ "$DO_RDNS" = "1" ] && command -v dig >/dev/null 2>&1; then
     RDNS_MAP="/tmp/trafficctl_rdns_$$"
     : > "$RDNS_MAP"
     for dip in $DST_IPS; do
-        host=$(dig +short +time=1 +tries=1 -x "$dip" 2>/dev/null | head -1 | sed 's/\.$//')
-        [ -n "$host" ] && echo "$dip $host" >> "$RDNS_MAP"
+        host=$(dig +short +time=1 +tries=1 -x "$dip" 2>/dev/null | grep -v '^;;' | head -1 | sed 's/\.$//')
+        case "$host" in
+            *[!a-zA-Z0-9._-]*|"") continue ;;
+        esac
+        echo "$dip $host" >> "$RDNS_MAP"
     done
     if [ -s "$RDNS_MAP" ]; then
         # Build sed expression from map
