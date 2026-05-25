@@ -1,0 +1,14 @@
+#!/bin/sh
+# Restore tc/HTB shaping rules after LAN interface comes up
+[ "$ACTION" = "ifup" ] && [ "$INTERFACE" = "lan" ] || exit 0
+
+STATE_FILE="/etc/trafficmon/shapes.json"
+[ -f "$STATE_FILE" ] || exit 0
+
+. /usr/local/bin/trafficctl-fw.sh
+
+jsonfilter -i "$STATE_FILE" -e '@[*].ip' 2>/dev/null | while read -r ip; do
+    rate=$(jsonfilter -i "$STATE_FILE" -e "@[@.ip='$ip'].rate_kbit" 2>/dev/null)
+    [ -n "$rate" ] && [ "$rate" != "0" ] && \
+        /usr/local/bin/trafficctl-shape.sh add "$ip" "$rate" 2>/dev/null
+done

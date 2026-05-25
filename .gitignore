@@ -1,0 +1,5 @@
+*.o
+*.ipk
+/build/
+/tmp/
+.DS_Store

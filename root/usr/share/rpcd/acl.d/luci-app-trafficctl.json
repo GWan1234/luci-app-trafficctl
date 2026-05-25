@@ -1,0 +1,27 @@
+{
+	"luci-app-trafficctl": {
+		"description": "Traffic Control - monitor, limit, shape, and block devices",
+		"read": {
+			"cgi-io": [ "exec" ],
+			"ubus": {
+				"file": [ "read" ]
+			},
+			"uci": [ "wireless", "network" ],
+			"file": {
+				"/tmp/dhcp.leases": [ "read" ],
+				"/usr/local/bin/trafficctl-summary.sh":          [ "exec" ],
+				"/usr/local/bin/trafficctl-device.sh *":         [ "exec" ],
+				"/usr/local/bin/trafficctl-block.sh *":          [ "exec" ],
+				"/usr/local/bin/trafficctl-unblock.sh *":        [ "exec" ],
+				"/usr/local/bin/trafficctl-macfilter-add.sh *":  [ "exec" ],
+				"/usr/local/bin/trafficctl-macfilter-remove.sh *": [ "exec" ],
+				"/usr/local/bin/trafficctl-ratelimit.sh *":      [ "exec" ],
+				"/usr/local/bin/trafficctl-ratelimit-stats.sh":  [ "exec" ],
+				"/usr/local/bin/trafficctl-shape.sh *":          [ "exec" ],
+				"/usr/local/bin/trafficctl-shape-stats.sh":      [ "exec" ],
+				"/usr/local/bin/trafficctl-rdns.sh *":           [ "exec" ],
+				"/usr/local/bin/trafficctl-bytes.sh":            [ "exec" ]
+			}
+		}
+	}
+}
