@@ -38,11 +38,11 @@ tctl_ratelimit_remove() {
 
     if [ "$TCTL_FW" = "nft" ]; then
         for h in $(nft -a list chain netdev tm_ratelimit dl 2>/dev/null \
-                   | grep "$comment" | grep -o 'handle [0-9]*' | awk '{print $2}'); do
+                   | grep "daddr $ip " | grep -o 'handle [0-9]*' | awk '{print $2}'); do
             nft delete rule netdev tm_ratelimit dl handle "$h"
         done
     else
-        while iptables -t mangle -D FORWARD -m comment --comment "$comment" 2>/dev/null; do :; done
+        while iptables -t mangle -D FORWARD -d "$ip" -m comment --comment "$comment" 2>/dev/null; do :; done
     fi
 }
 
