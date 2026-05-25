@@ -7,6 +7,9 @@
 
 SCRIPTS="/usr/local/bin"
 
+# Strip unsafe chars from label (allow alphanumeric, dash, underscore, dot)
+sanitize_label() { echo "$1" | tr -cd 'a-zA-Z0-9_.-'; }
+
 case "$1" in
 list)
 	printf '{'
@@ -42,10 +45,10 @@ call)
 		if [ -z "$ip" ]; then
 			echo '{"ok":false,"msg":"ip required"}'
 		else
-			params="$ip"
-			[ -n "$proto" ] && [ "$proto" != "all" ] && params="$params --proto $proto"
-			# shellcheck disable=SC2086
-			"$SCRIPTS/trafficctl-device.sh" $params
+			case "$proto" in
+				tcp|udp) "$SCRIPTS/trafficctl-device.sh" "$ip" --proto "$proto" ;;
+				*) "$SCRIPTS/trafficctl-device.sh" "$ip" ;;
+			esac
 		fi
 		;;
 	bytes)
@@ -56,7 +59,7 @@ call)
 	block)
 		read -r input
 		ip=$(echo "$input" | jsonfilter -e '@.ip' 2>/dev/null)
-		label=$(echo "$input" | jsonfilter -e '@.label' 2>/dev/null)
+		label=$(sanitize_label "$(echo "$input" | jsonfilter -e '@.label' 2>/dev/null)")
 		if [ -z "$ip" ]; then
 			echo '{"ok":false,"msg":"ip required"}'
 		else
@@ -66,7 +69,7 @@ call)
 	unblock)
 		read -r input
 		ip=$(echo "$input" | jsonfilter -e '@.ip' 2>/dev/null)
-		label=$(echo "$input" | jsonfilter -e '@.label' 2>/dev/null)
+		label=$(sanitize_label "$(echo "$input" | jsonfilter -e '@.label' 2>/dev/null)")
 		if [ -z "$ip" ]; then
 			echo '{"ok":false,"msg":"ip required"}'
 		else
@@ -95,7 +98,7 @@ call)
 		read -r input
 		ip=$(echo "$input" | jsonfilter -e '@.ip' 2>/dev/null)
 		rate=$(echo "$input" | jsonfilter -e '@.rate_kbit' 2>/dev/null)
-		label=$(echo "$input" | jsonfilter -e '@.label' 2>/dev/null)
+		label=$(sanitize_label "$(echo "$input" | jsonfilter -e '@.label' 2>/dev/null)")
 		if [ -z "$ip" ]; then
 			echo '{"ok":false,"msg":"ip required"}'
 		else
@@ -111,7 +114,7 @@ call)
 		read -r input
 		ip=$(echo "$input" | jsonfilter -e '@.ip' 2>/dev/null)
 		rate=$(echo "$input" | jsonfilter -e '@.rate_kbit' 2>/dev/null)
-		label=$(echo "$input" | jsonfilter -e '@.label' 2>/dev/null)
+		label=$(sanitize_label "$(echo "$input" | jsonfilter -e '@.label' 2>/dev/null)")
 		if [ -z "$ip" ] || [ -z "$rate" ]; then
 			echo '{"ok":false,"msg":"ip and rate_kbit required"}'
 		else

@@ -14,7 +14,7 @@ LAN_PREFIX=$(echo "$LAN_SUBNET" | cut -d. -f1-3)
 cat /proc/net/nf_conntrack 2>/dev/null | awk -v prefix="$LAN_PREFIX" '
 BEGIN { printf "[" }
 {
-    src=""; dst=""; bytes_in=0; bytes_out=0
+    src=""; bytes_orig=0; bytes_reply=0; bc=0
     for (i=1; i<=NF; i++) {
         if ($i ~ /^src=/) {
             v = substr($i, 5)
@@ -22,14 +22,15 @@ BEGIN { printf "[" }
         }
         if ($i ~ /^bytes=/) {
             v = substr($i, 7) + 0
-            if (src != "" && bytes_in == 0) bytes_in = v
-            else if (src != "" && bytes_out == 0) bytes_out = v
+            bc++
+            if (src != "" && bc == 1) bytes_orig = v
+            else if (src != "" && bc == 2) bytes_reply = v
         }
     }
     if (src != "" && src ~ "^"prefix"\\.") {
         key = src
-        in_total[key] += bytes_out
-        out_total[key] += bytes_in
+        in_total[key] += bytes_reply
+        out_total[key] += bytes_orig
     }
 }
 END {

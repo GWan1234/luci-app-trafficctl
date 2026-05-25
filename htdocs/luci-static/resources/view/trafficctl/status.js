@@ -919,6 +919,7 @@ return view.extend({
 	_sumCol:     '_speed',
 	_sumDir:     'desc',
 	_hiddenCols: {},
+	_queryGen:   0,
 
 	load: function() {
 		return fs.read('/tmp/dhcp.leases').catch(function() { return ''; });
@@ -1261,6 +1262,17 @@ return view.extend({
 				var avgMethod = o.avgMethod || 'simple';
 				var maxSamples = Math.max(2, Math.round(avgWindow / pollInterval));
 
+				var activeIps = {};
+				data.forEach(function(d) { activeIps[d.ip] = true; });
+				Object.keys(self._speedHistory).forEach(function(ip) {
+					if (!activeIps[ip]) {
+						delete self._speedHistory[ip];
+						delete self._speedMap[ip];
+						delete self._speedEwma[ip];
+						delete self._bytesHistory[ip];
+					}
+				});
+
 				data.forEach(function(d) {
 					var prev = self._bytesHistory[d.ip];
 					if (prev) {
@@ -1316,6 +1328,8 @@ return view.extend({
 		function runSingle(ip) {
 			var o = loadOpts();
 			var proto = (o.proto && o.proto !== 'all') ? o.proto : '';
+			self._queryGen++;
+			var gen = self._queryGen;
 
 			setStatus(statusDiv, 'loading', _('Running…'));
 
@@ -1435,6 +1449,7 @@ return view.extend({
 								if (PRIVATE_RE.test(dst)) return;
 								seen[dst] = true;
 								callRdns(dst).then(function(res) {
+									if (gen !== self._queryGen) return;
 									var host = (res && res.host) ? res.host : null;
 									Array.prototype.forEach.call(
 										connsDiv.querySelectorAll('td[data-dst="'+dst+'"]'),
@@ -1448,6 +1463,7 @@ return view.extend({
 										}
 									);
 								}).catch(function() {
+									if (gen !== self._queryGen) return;
 									Array.prototype.forEach.call(
 										connsDiv.querySelectorAll('td[data-dst="'+dst+'"]'),
 										function(cell) { cell.innerHTML = '<span style="color:'+C.textFaint+'">—</span>'; }
@@ -1753,5 +1769,10 @@ return view.extend({
 
 	handleSaveApply: null,
 	handleSave: null,
-	handleReset: null
+	handleReset: null,
+
+	handleTeardown: function() {
+		if (this._timer) { clearInterval(this._timer); this._timer = null; }
+		this._stopBytesPoll && this._stopBytesPoll();
+	}
 });

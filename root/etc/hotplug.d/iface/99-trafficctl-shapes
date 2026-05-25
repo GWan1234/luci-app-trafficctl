@@ -8,8 +8,18 @@ STATE_FILE="/etc/trafficmon/shapes.json"
 
 . /usr/local/bin/trafficctl-fw.sh
 
+# Wait for tc to be ready (up to 10 seconds)
+tries=0
+while ! tc qdisc show dev "$(tctl_get_lan_device)" >/dev/null 2>&1; do
+    tries=$((tries + 1))
+    [ "$tries" -ge 20 ] && exit 1
+    sleep 0.5 2>/dev/null || sleep 1
+done
+
 jsonfilter -i "$STATE_FILE" -e '@[*].ip' 2>/dev/null | while read -r ip; do
     rate=$(jsonfilter -i "$STATE_FILE" -e "@[@.ip='$ip'].rate_kbit" 2>/dev/null)
-    [ -n "$rate" ] && [ "$rate" != "0" ] && \
-        /usr/local/bin/trafficctl-shape.sh add "$ip" "$rate" 2>/dev/null
+    if [ -n "$rate" ] && [ "$rate" != "0" ]; then
+        /usr/local/bin/trafficctl-shape.sh add "$ip" "$rate" || \
+            logger -t trafficctl "Failed to restore shape for $ip (${rate}kbit)"
+    fi
 done

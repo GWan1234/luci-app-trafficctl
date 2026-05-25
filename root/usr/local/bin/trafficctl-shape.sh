@@ -40,62 +40,36 @@ save_shape() {
     mkdir -p "$(dirname "$SHAPES_FILE")"
     [ ! -f "$SHAPES_FILE" ] && echo "[]" > "$SHAPES_FILE"
 
-    # Build new JSON: keep all entries except this IP, then add if rate>0
+    local lockf="/tmp/trafficctl_shapes.lock"
     local tmpf="/tmp/shapes_rebuild.$$"
-    awk -v ip="$ip" -v rate="$rate" '
-    BEGIN {
-        n = 0
-    }
-    {
-        # Read entire file as one string
-        content = content $0
-    }
-    END {
-        # Extract existing entries
-        while (match(content, /\{"ip":"([^"]+)","rate_kbit":([0-9]+)\}/, arr)) {
-            if (arr[1] != ip) {
-                entries[n] = sprintf("{\"ip\":\"%s\",\"rate_kbit\":%s}", arr[1], arr[2])
-                n++
-            }
-            content = substr(content, RSTART + RLENGTH)
-        }
-        # Add new entry if rate > 0
-        if (rate + 0 > 0) {
-            entries[n] = sprintf("{\"ip\":\"%s\",\"rate_kbit\":%s}", ip, rate)
-            n++
-        }
-        # Output
-        printf "["
-        for (i = 0; i < n; i++) {
-            if (i > 0) printf ","
-            printf "%s", entries[i]
-        }
-        printf "]"
-    }
-    ' "$SHAPES_FILE" > "$tmpf"
+    trap "rm -f '$tmpf' '$lockf'" EXIT
 
-    # Fallback if awk match() with arrays is not available (busybox)
-    if [ ! -s "$tmpf" ]; then
-        local old_entries
-        old_entries=$(grep -oE '\{"ip":"[^"]+","rate_kbit":[0-9]+\}' "$SHAPES_FILE" 2>/dev/null || true)
-        # Filter out current IP and rebuild
-        local filtered
-        filtered=$(echo "$old_entries" | grep -v "\"ip\":\"$ip\"" || true)
-        # Add new entry if rate > 0
-        if [ "$rate" -gt 0 ] 2>/dev/null; then
-            if [ -n "$filtered" ]; then
-                filtered=$(printf "%s\n%s" "$filtered" "{\"ip\":\"$ip\",\"rate_kbit\":$rate}")
-            else
-                filtered="{\"ip\":\"$ip\",\"rate_kbit\":$rate}"
-            fi
+    # Simple file lock (wait up to 5 seconds)
+    local tries=0
+    while [ -f "$lockf" ] && [ "$tries" -lt 50 ]; do
+        tries=$((tries + 1))
+        sleep 0.1 2>/dev/null || sleep 1
+    done
+    echo $$ > "$lockf"
+
+    # Portable: extract entries with grep, filter, rebuild JSON
+    local old_entries
+    old_entries=$(grep -oE '\{"ip":"[^"]+","rate_kbit":[0-9]+\}' "$SHAPES_FILE" 2>/dev/null || true)
+    local filtered
+    filtered=$(echo "$old_entries" | grep -v "\"ip\":\"$ip\"" || true)
+    if [ "$rate" -gt 0 ] 2>/dev/null; then
+        if [ -n "$filtered" ]; then
+            filtered=$(printf "%s\n%s" "$filtered" "{\"ip\":\"$ip\",\"rate_kbit\":$rate}")
+        else
+            filtered="{\"ip\":\"$ip\",\"rate_kbit\":$rate}"
         fi
-        # Join with commas
-        printf "[" > "$tmpf"
-        echo "$filtered" | awk 'NF{if(n++)printf ",";printf "%s",$0}' >> "$tmpf"
-        printf "]" >> "$tmpf"
     fi
+    printf "[" > "$tmpf"
+    echo "$filtered" | awk 'NF{if(n++)printf ",";printf "%s",$0}' >> "$tmpf"
+    printf "]" >> "$tmpf"
 
     mv "$tmpf" "$SHAPES_FILE"
+    rm -f "$lockf"
 }
 
 remove_shape() {
@@ -120,10 +94,16 @@ do_add() {
     [ "$burst_bytes" -lt 1600 ] && burst_bytes=1600
 
     # Add class and filter
-    tc class add dev "$LAN_DEV" parent 1:1 classid "$classid" htb \
-        rate "${RATE}kbit" ceil "${RATE}kbit" burst "${burst_bytes}b" cburst "${burst_bytes}b"
+    if ! tc class add dev "$LAN_DEV" parent 1:1 classid "$classid" htb \
+        rate "${RATE}kbit" ceil "${RATE}kbit" burst "${burst_bytes}b" cburst "${burst_bytes}b" 2>&1; then
+        echo "{\"ok\":false,\"msg\":\"tc class add failed for $IP\"}"
+        return 1
+    fi
     tc qdisc add dev "$LAN_DEV" parent "$classid" fq_codel 2>/dev/null
-    tc filter add dev "$LAN_DEV" parent 1:0 prio 10 protocol ip u32 match ip dst "$IP"/32 flowid "$classid"
+    if ! tc filter add dev "$LAN_DEV" parent 1:0 prio 10 protocol ip u32 match ip dst "$IP"/32 flowid "$classid" 2>&1; then
+        echo "{\"ok\":false,\"msg\":\"tc filter add failed for $IP\"}"
+        return 1
+    fi
 
     save_shape "$IP" "$RATE"
     echo "{\"ok\":true,\"msg\":\"shape ${RATE} kbit/s applied to $IP (class $classid)\"}"

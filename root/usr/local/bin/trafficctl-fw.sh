@@ -108,7 +108,9 @@ tctl_get_lan_device() {
 }
 
 tctl_validate_ip() {
-    echo "$1" | grep -qE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'
+    echo "$1" | grep -qE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$' || return 1
+    local IFS='.'; set -- $1
+    [ "$1" -le 255 ] && [ "$2" -le 255 ] && [ "$3" -le 255 ] && [ "$4" -le 255 ] 2>/dev/null
 }
 
 tctl_get_wifi_interfaces() {
