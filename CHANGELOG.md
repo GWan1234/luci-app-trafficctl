@@ -27,7 +27,7 @@ All notable changes to luci-app-trafficctl since v1.0.0.
   opkg install https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk
   ```
 - Install via LuCI web UI — **System → Software → Upload Package**
-- Stable download URLs: `luci-app-trafficctl.ipk`, `luci-app-trafficctl_all.ipk`, `luci-app-trafficctl_latest_all.ipk`
+- Stable download URLs: [`luci-app-trafficctl.ipk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk), [`luci-app-trafficctl_all.ipk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl_all.ipk), [`luci-app-trafficctl_latest_all.ipk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl_latest_all.ipk)
 
 ---
 
