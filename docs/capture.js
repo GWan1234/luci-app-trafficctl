@@ -232,26 +232,32 @@ async function collapseSection(page, titleFragment) {
   await page.waitForTimeout(400);
 }
 
-// Click the Apply button, scrolling into view and retrying via DOM if needed
+// Click the Apply button via DOM evaluate (bypasses Playwright visibility checks entirely)
 async function clickApply(page) {
-  const btn = page.locator('button:has-text("Apply")');
-  try {
-    await btn.scrollIntoViewIfNeeded({ timeout: 3000 });
-    await btn.click({ timeout: 5000 });
-  } catch (e) {
-    // Fallback: click via DOM evaluate
-    const clicked = await page.evaluate(() => {
-      for (const b of document.querySelectorAll('button')) {
-        if (b.textContent.includes('Apply') && !b.disabled) {
-          b.scrollIntoView();
-          b.click();
-          return true;
-        }
+  // Wait briefly for the button to appear
+  await page.waitForTimeout(500);
+  const clicked = await page.evaluate(() => {
+    for (const b of document.querySelectorAll('button')) {
+      if (b.textContent.trim() === 'Apply') {
+        b.scrollIntoView();
+        b.click();
+        return true;
       }
-      return false;
-    });
-    if (!clicked) throw new Error('Apply button not found in DOM');
+    }
+    // Also try partial match
+    for (const b of document.querySelectorAll('button')) {
+      if (b.textContent.includes('Apply') && !b.disabled) {
+        b.scrollIntoView();
+        b.click();
+        return true;
+      }
+    }
+    return false;
+  });
+  if (!clicked) {
+    console.log('    ⚠ Apply button not found, skipping');
   }
+  await page.waitForTimeout(300);
 }
 
 // Find best candidate device — prefers Eugene-Asus, vivo-X200, or any phone-like device
@@ -644,7 +650,12 @@ async function captureTheme(page, dark, device) {
   // Re-select device to ensure clean state after WiFi block/unblock
   await selectDevice(page, device.ip);
   await closeSettings(page);
-  await page.waitForTimeout(1000);
+  // Wait for rate limit picker to appear (dashed span)
+  await page.waitForFunction(() => {
+    const spans = document.querySelectorAll('span[style*="dashed"]');
+    return spans.length > 0;
+  }, { timeout: 10000 }).catch(() => console.log('    ⚠ Rate limit picker not found'));
+  await page.waitForTimeout(500);
   clearFrames();
   counter.i = 0;
 
