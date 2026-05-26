@@ -25,7 +25,12 @@ jobs:
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Build .ipk
-        run: ./build-ipk.sh "${{ steps.version.outputs.version }}" 1
+        run: |
+          ./build-ipk.sh "${{ steps.version.outputs.version }}" 1
+          SRC=$(echo dist/luci-app-trafficctl_*_all.ipk)
+          for name in luci-app-trafficctl_latest_all.ipk luci-app-trafficctl_all.ipk luci-app-trafficctl.ipk; do
+            ln -f "$SRC" "dist/$name"
+          done
 
       - name: Create release
         uses: softprops/action-gh-release@v3
