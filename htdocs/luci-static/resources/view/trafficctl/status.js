@@ -4,6 +4,22 @@
 'require fs';
 
 var STORAGE_KEY = 'trafficctl_opts';
+var RECENT_KEY = 'trafficctl_recent';
+var MAX_RECENT = 6;
+
+function getRecentDevices() {
+	try { return JSON.parse(window.localStorage.getItem(RECENT_KEY) || '[]'); }
+	catch(e) { return []; }
+}
+function saveRecentDevices(arr) {
+	try { window.localStorage.setItem(RECENT_KEY, JSON.stringify(arr)); } catch(e) {}
+}
+function addRecentDevice(ip) {
+	var recent = getRecentDevices().filter(function(r) { return r !== ip; });
+	recent.unshift(ip);
+	if (recent.length > MAX_RECENT) recent.length = MAX_RECENT;
+	saveRecentDevices(recent);
+}
 
 var SERVICE_PORTS = {
 	20:'ftp-data', 21:'ftp', 22:'ssh', 23:'telnet', 25:'smtp',
@@ -953,7 +969,7 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 
 		var cells = visibleCols.map(function(c) { return cellMap[c.key]; });
 		var row = E('tr', { 'class': 'tm-row', 'title': _('Click to inspect') + ' ' + r.name }, cells);
-		row.addEventListener('click', function() { onSelect(r.ip, r.name); });
+		row.addEventListener('click', function() { addRecentDevice(r.ip); onSelect(r.ip, r.name); });
 		return row;
 	}));
 
@@ -1577,22 +1593,7 @@ return view.extend({
 			searchSelect.setValue(savedIp, matchDev ? matchDev.name + '  —  ' + matchDev.ip : savedIp);
 		}
 
-		// Recent devices stored in localStorage
-		var RECENT_KEY = 'trafficctl_recent';
-		var MAX_RECENT = 6;
-		function getRecentDevices() {
-			try { return JSON.parse(window.localStorage.getItem(RECENT_KEY) || '[]'); }
-			catch(e) { return []; }
-		}
-		function saveRecentDevices(arr) {
-			try { window.localStorage.setItem(RECENT_KEY, JSON.stringify(arr)); } catch(e) {}
-		}
-		function addRecentDevice(ip) {
-			var recent = getRecentDevices().filter(function(r) { return r !== ip; });
-			recent.unshift(ip);
-			if (recent.length > MAX_RECENT) recent.length = MAX_RECENT;
-			saveRecentDevices(recent);
-		}
+		// Recent devices — functions defined at top level
 
 		// Quick-access bar: [All devices] + recent device chips
 		var quickBar = E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:6px'});
