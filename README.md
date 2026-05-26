@@ -1,6 +1,8 @@
 # luci-app-trafficctl
 
-[![CI](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/ci.yml/badge.svg)](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/ci.yml)
+[![ShellCheck](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/shellcheck.yml/badge.svg)](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/shellcheck.yml)
+[![ESLint](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/eslint.yml/badge.svg)](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/eslint.yml)
+[![Tests](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/tests.yml/badge.svg)](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/tests.yml)
 [![Release](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/release.yml/badge.svg)](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/release.yml)
 [![CodeQL](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/YusDyr/luci-app-trafficctl/security/code-scanning)
 [![Latest Release](https://img.shields.io/github/v/release/YusDyr/luci-app-trafficctl)](https://github.com/YusDyr/luci-app-trafficctl/releases/latest)

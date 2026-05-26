@@ -1,0 +1,25 @@
+name: ShellCheck
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@2.0.0
+        with:
+          scandir: root/usr/local/bin
+          additional_files: root/etc/hotplug.d/iface/99-trafficctl-shapes root/usr/libexec/rpcd/luci.trafficctl root/etc/init.d/trafficctl-telegram
+        env:
+          SHELLCHECK_OPTS: -x -e SC1091
