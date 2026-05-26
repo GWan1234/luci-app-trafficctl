@@ -227,7 +227,7 @@ function mkEthIcon(size) {
 	return svg;
 }
 
-function renderSparkline(history, globalMax, width, height) {
+function renderSparkline(history, globalMax, width, height, limitKbit) {
 	if (!history || history.length < 2) return null;
 	var maxVal = globalMax || 1;
 	var w = width || 60;
@@ -244,18 +244,33 @@ function renderSparkline(history, globalMax, width, height) {
 	svg.setAttribute('height', h);
 	svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
 	svg.style.cssText = 'display:block;margin:0 auto';
-	var polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-	polyline.setAttribute('points', points.join(' '));
-	polyline.setAttribute('fill', 'none');
-	polyline.setAttribute('stroke', 'var(--tm-speed)');
-	polyline.setAttribute('stroke-width', '1.5');
-	polyline.setAttribute('stroke-linejoin', 'round');
 	var area = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
 	area.setAttribute('points', '0,' + h + ' ' + points.join(' ') + ' ' + (w - 0) + ',' + h);
 	area.setAttribute('fill', 'var(--tm-speed)');
 	area.setAttribute('opacity', '0.1');
 	area.setAttribute('stroke', 'none');
 	svg.appendChild(area);
+	// Rate limit line (dashed, red/orange)
+	if (limitKbit && limitKbit > 0) {
+		var limitBps = limitKbit * 1000 / 8;
+		if (limitBps < maxVal) {
+			var ly = (h - (limitBps / maxVal) * (h - 2) - 1).toFixed(1);
+			var line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+			line.setAttribute('x1', '0'); line.setAttribute('x2', String(w));
+			line.setAttribute('y1', ly); line.setAttribute('y2', ly);
+			line.setAttribute('stroke', 'var(--tm-rate-fg)');
+			line.setAttribute('stroke-width', '1');
+			line.setAttribute('stroke-dasharray', '3,2');
+			line.setAttribute('opacity', '0.7');
+			svg.appendChild(line);
+		}
+	}
+	var polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+	polyline.setAttribute('points', points.join(' '));
+	polyline.setAttribute('fill', 'none');
+	polyline.setAttribute('stroke', 'var(--tm-speed)');
+	polyline.setAttribute('stroke-width', '1.5');
+	polyline.setAttribute('stroke-linejoin', 'round');
 	svg.appendChild(polyline);
 	return svg;
 }
@@ -566,8 +581,9 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		if (sd && sd.current > 1024) { cellMap._speed.className = 'tm-speed-active'; cellMap._speed.textContent = fmtSpeed(sd.current); }
 		else { cellMap._speed.className = 'tm-speed-idle'; cellMap._speed.textContent = sd ? fmtSpeed(sd.current) : '—'; }
 
-		cellMap._spark = E('td', { 'style': td+';text-align:center;padding:2px 4px', 'data-spark-ip': r.ip });
-		var sparkSvg = renderSparkline(speedHistory[r.ip], globalSpeedMax, 60, 20);
+		var sparkTip = r._throttle_kbit > 0 ? (_('Limit') + ': ' + fmtRate(r._throttle_kbit)) : '';
+		cellMap._spark = E('td', { 'style': td+';text-align:center;padding:2px 4px', 'data-spark-ip': r.ip, 'data-tip': sparkTip || undefined });
+		var sparkSvg = renderSparkline(speedHistory[r.ip], globalSpeedMax, 60, 20, r._throttle_kbit);
 		if (sparkSvg) cellMap._spark.appendChild(sparkSvg);
 
 		cellMap.conns = E('td', { 'style': td+';text-align:right;font-weight:600' }, String(r.conns||0));
@@ -994,8 +1010,8 @@ return view.extend({
 	_speedEwma:    {},
 	_sortCol:    'bytes',
 	_sortDir:    'desc',
-	_sumCol:     '_speed',
-	_sumDir:     'desc',
+	_sumCol:     'name',
+	_sumDir:     'asc',
 	_hiddenCols: {},
 	_queryGen:   0,
 
@@ -1099,6 +1115,28 @@ return view.extend({
 			return { el: wrapper, getValue: function() { return selectedValue; }, setValue: function(v) { selectedValue = v; updateDisplay(); } };
 		}
 
+		function mkChipPick(options, currentValue, onChange) {
+			var wrapper = E('span', {'style':'display:inline-flex;flex-wrap:wrap;gap:2px;align-items:center'});
+			var selected = currentValue;
+			var chips = [];
+			var csNorm = 'padding:3px 8px;border-radius:10px;font-size:11px;cursor:pointer;transition:all .15s;' +
+				'border:1px solid var(--tm-border);background:var(--tm-bg);color:var(--tm-text)';
+			var csActive = 'padding:3px 8px;border-radius:10px;font-size:11px;cursor:pointer;transition:all .15s;' +
+				'border:1px solid var(--tm-proto);background:var(--tm-proto);color:#fff;font-weight:600';
+			options.forEach(function(opt) {
+				var chip = E('span', {'style': opt.v === selected ? csActive : csNorm}, opt.l);
+				chip.addEventListener('click', function() {
+					selected = opt.v;
+					chips.forEach(function(c) { c.style.cssText = c._v === selected ? csActive : csNorm; });
+					onChange(opt.v);
+				});
+				chip._v = opt.v;
+				chips.push(chip);
+				wrapper.appendChild(chip);
+			});
+			return { el: wrapper, getValue: function() { return selected; }, setValue: function(v) { selected = v; chips.forEach(function(c) { c.style.cssText = c._v === v ? csActive : csNorm; }); } };
+		}
+
 		var showStats = mkToggle('tm-stats', _('Stats'), opts.showStats !== false, function() {
 			var o = loadOpts(); o.showStats = this.checked; saveOpts(o); updateUrlParams(o);
 			statsDiv.style.display = this.checked ? '' : 'none';
@@ -1127,38 +1165,38 @@ return view.extend({
 		var extStatsDiv = E('div', { 'style': opts.extendedStats ? '' : 'display:none' });
 		var activityDiv = E('div', { 'style': opts.showActivity ? '' : 'display:none' });
 
-		var refreshPick = mkInlinePick([
+		var refreshPick = mkChipPick([
 			{v:'0',l:_('Off')},{v:'5',l:'5s'},{v:'10',l:'10s'},{v:'30',l:'30s'},{v:'60',l:'60s'}
 		], String(opts.refresh||0), function(v) {
 			var o = loadOpts(); o.refresh = parseInt(v); saveOpts(o); updateUrlParams(o); self._setupTimer();
 		});
 
-		var pollIntervalPick = mkInlinePick([
+		var pollIntervalPick = mkChipPick([
 			{v:'0',l:_('Off')},{v:'1',l:'1s'},{v:'2',l:'2s'},{v:'5',l:'5s'}
-		], String(opts.pollInterval||0), function(v) {
+		], String(opts.pollInterval !== undefined ? opts.pollInterval : 2), function(v) {
 			var o = loadOpts(); o.pollInterval = parseInt(v); saveOpts(o); updateUrlParams(o);
 			self._restartBytesPoll();
 		});
 
-		var avgWindowPick = mkInlinePick([
+		var avgWindowPick = mkChipPick([
 			{v:'5',l:'5s'},{v:'15',l:'15s'},{v:'30',l:'30s'},{v:'60',l:'60s'}
 		], String(opts.avgWindow||15), function(v) {
 			var o = loadOpts(); o.avgWindow = parseInt(v); saveOpts(o); updateUrlParams(o);
 		});
 
-		var avgMethodPick = mkInlinePick([
+		var avgMethodPick = mkChipPick([
 			{v:'simple',l:_('Simple')},{v:'ewma',l:_('EWMA')}
 		], opts.avgMethod||'simple', function(v) {
 			var o = loadOpts(); o.avgMethod = v; saveOpts(o); updateUrlParams(o);
 		});
 
-		var protoPick = mkInlinePick([
+		var protoPick = mkChipPick([
 			{v:'all',l:_('All')},{v:'tcp',l:'TCP'},{v:'udp',l:'UDP'}
 		], opts.proto||'all', function(v) {
 			var o = loadOpts(); o.proto = v; saveOpts(o);
 		});
 
-		var groupPick = mkInlinePick(
+		var groupPick = mkChipPick(
 			GROUP_OPTS, opts.groupBy||'none', function(v) {
 			var o = loadOpts(); o.groupBy = v; saveOpts(o); runQuery();
 		});
@@ -1413,7 +1451,9 @@ return view.extend({
 				var sparkCell = connsDiv.querySelector('td[data-spark-ip="'+ip+'"]');
 				if (sparkCell) {
 					while (sparkCell.firstChild) sparkCell.removeChild(sparkCell.firstChild);
-					var svg = renderSparkline(self._speedHistory[ip], globalMax, 60, 20);
+					var sm = self._shapeMap[ip], dm = self._dropMap[ip];
+					var lk = (sm && sm.rate_kbit > 0) ? sm.rate_kbit : ((dm && dm.rate_kbit > 0) ? dm.rate_kbit : 0);
+					var svg = renderSparkline(self._speedHistory[ip], globalMax, 60, 20, lk);
 					if (svg) sparkCell.appendChild(svg);
 				}
 			});
@@ -1880,7 +1920,7 @@ return view.extend({
 		this._startBytesPoll = function() {
 			if (self._bytesTimer) return;
 			var o = loadOpts();
-			var pollMs = (o.pollInterval || 0) * 1000;
+			var pollMs = (o.pollInterval !== undefined ? o.pollInterval : 2) * 1000;
 			if (pollMs <= 0) return;
 			pollBytes();
 			self._bytesTimer = setInterval(pollBytes, pollMs);
