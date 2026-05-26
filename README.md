@@ -178,21 +178,30 @@ I hope it turns out as useful for you as it has been for me.
 
 ## Compatibility
 
-| OpenWrt Version | Firewall | Status |
-|-----------------|----------|--------|
-| 23.05+          | fw4 / nftables | Fully supported |
-| 22.03           | fw4 / nftables | Fully supported |
-| 21.02           | fw3 / iptables | Supported (auto-detected) |
+[![OpenWrt Compatibility](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/compat.yml/badge.svg)](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/compat.yml)
 
 Runs on all architectures (no compiled code, pure shell + LuCI JavaScript).
 
-**CI-tested** — each cell is a live badge for that version × architecture combination:
+| OpenWrt Version | Firewall | Status |
+|-----------------|----------|--------|
+| 25.12 (latest)  | fw4 / nftables | Fully supported |
+| 24.10           | fw4 / nftables | Fully supported |
+| 23.05           | fw4 / nftables | Fully supported |
+| 22.03           | fw4 / nftables | Fully supported |
+| 21.02           | fw3 / iptables | Supported (auto-detected) |
 
-| | x86‑64 | aarch64 | arm\_a15 | armvirt‑32 |
-|---|---|---|---|---|
-| **21.02** | [![](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/compat-2102-x86_64.yml/badge.svg)](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/compat-2102-x86_64.yml) | [![](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/compat-2102-aarch64.yml/badge.svg)](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/compat-2102-aarch64.yml) | [![](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/compat-2102-arm_a15.yml/badge.svg)](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/compat-2102-arm_a15.yml) | [![](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/compat-2102-armvirt32.yml/badge.svg)](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/compat-2102-armvirt32.yml) |
-| **22.03** | [![](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/compat-2203-x86_64.yml/badge.svg)](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/compat-2203-x86_64.yml) | [![](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/compat-2203-aarch64.yml/badge.svg)](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/compat-2203-aarch64.yml) | [![](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/compat-2203-arm_a15.yml/badge.svg)](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/compat-2203-arm_a15.yml) | [![](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/compat-2203-armvirt32.yml/badge.svg)](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/compat-2203-armvirt32.yml) |
-| **snapshot** | [![](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/compat-snapshot-x86_64.yml/badge.svg)](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/compat-snapshot-x86_64.yml) | [![](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/compat-snapshot-aarch64.yml/badge.svg)](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/compat-snapshot-aarch64.yml) | [![](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/compat-snapshot-arm_a15.yml/badge.svg)](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/compat-snapshot-arm_a15.yml) | [![](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/compat-snapshot-armvirt32.yml/badge.svg)](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/compat-snapshot-armvirt32.yml) |
+**CI-tested on 52 combinations** — every push is verified against real OpenWrt rootfs containers:
+
+| | x86‑64 | x86‑generic | mips\_24kc | aarch64 | arm\_a9 | arm\_a15 | armsr | i386 |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| **21.02.6** | ✓ | | | ✓ | | ✓ | | |
+| **22.03.7** | ✓ | | | ✓ | | ✓ | | |
+| **23.05.6** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **24.10.1** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **24.10.6** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **25.12.0** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **25.12.4** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **snapshot** | ✓ | | ✓ | ✓ | | | ✓ | |
 
 Each test builds the `.ipk`, runs `opkg install --force-depends` inside the real OpenWrt rootfs container for that version/arch, then verifies all files are present and all scripts pass `ash -n` syntax check.
 
