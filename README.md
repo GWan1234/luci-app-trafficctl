@@ -8,6 +8,22 @@
 
 Per-device traffic monitoring and control for OpenWrt routers. Monitor connections, limit bandwidth, shape traffic, block internet access, and manage WiFi MAC filtering -- all from a single LuCI page.
 
+---
+
+I built this plugin because I needed a fast, reliable way to block internet access for my kids — and the existing options are surprisingly bad at it. Most firewall tools don't account for already-established connections, so blocking a device mid-session doesn't actually cut it off. Others require too many clicks spread across multiple UI screens.
+
+I started with a few custom scripts. That worked, but then I wanted more: to see who was the heaviest user right now, what they were downloading, which interface they were on. So I added a traffic table. Then protocol breakdowns. Then per-connection detail. One thing led to another.
+
+Since I was already blocking internet, I figured a blunt drop rule wasn't ideal — sometimes you just want to slow things down rather than cut them off entirely. So I added rate limiting and traffic shaping via tc/HTB.
+
+From there (with a lot of help from Claude), the focus shifted to convenience: a recent-devices bar for one-click access, live bandwidth sparklines, column visibility toggles, a searchable device picker.
+
+The most recent addition is Telegram integration — instant notifications when a new device joins the network, and the ability to block, unblock, or throttle any device directly from a Telegram message.
+
+I hope it turns out to be as useful for you as it has been for me.
+
+---
+
 | | |
 |---|---|
 | **Monitoring** | Live bandwidth sparklines · TCP state breakdown · Per-connection detail · rDNS lookup |
