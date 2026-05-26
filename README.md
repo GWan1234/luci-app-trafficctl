@@ -23,25 +23,41 @@ Per-device traffic monitoring and control for OpenWrt routers. Monitor connectio
 </tr>
 <tr>
 <td align="center"><b>Rate Limiting &amp; Traffic Shaping</b></td>
-<td align="center"><b>Per-device connections</b></td>
+<td align="center"><b>Interactive speed graph popup</b></td>
 </tr>
 <tr>
 <td><img src="docs/img/rate-limit-dark.gif" alt="Rate limiting" width="480"/></td>
-<td><img src="docs/img/dark/02-device-detail.png" alt="Device detail" width="480"/></td>
+<td><img src="docs/img/graph-popup-dark.gif" alt="Graph popup" width="480"/></td>
 </tr>
 </table>
 
 <details>
-<summary>More screenshots — light theme, search, extended stats…</summary>
+<summary>More screenshots — light theme, settings, column toggles…</summary>
 <br/>
 
 <table>
 <tr>
 <td align="center"><b>Overview — light theme</b></td>
-<td align="center"><b>Searchable device picker</b></td>
+<td align="center"><b>Per-device connections</b></td>
 </tr>
 <tr>
 <td><img src="docs/img/light/01-overview.png" alt="Overview light" width="480"/></td>
+<td><img src="docs/img/dark/02-device-detail.png" alt="Device detail" width="480"/></td>
+</tr>
+<tr>
+<td align="center"><b>Settings walkthrough</b></td>
+<td align="center"><b>Column toggles</b></td>
+</tr>
+<tr>
+<td><img src="docs/img/settings-walkthrough-dark.gif" alt="Settings walkthrough" width="480"/></td>
+<td><img src="docs/img/column-toggle-dark.gif" alt="Column toggle" width="480"/></td>
+</tr>
+<tr>
+<td align="center"><b>Telegram Bot toggle</b></td>
+<td align="center"><b>Searchable device picker</b></td>
+</tr>
+<tr>
+<td><img src="docs/img/telegram-toggle-dark.gif" alt="Telegram toggle" width="480"/></td>
 <td><img src="docs/img/dark/16-search-filter.png" alt="Search" width="480"/></td>
 </tr>
 <tr>
@@ -54,7 +70,7 @@ Per-device traffic monitoring and control for OpenWrt routers. Monitor connectio
 </tr>
 <tr>
 <td align="center"><b>Group connections by service</b></td>
-<td align="center"><b>Settings &amp; column toggles</b></td>
+<td align="center"><b>Settings &amp; subsections</b></td>
 </tr>
 <tr>
 <td><img src="docs/img/dark/14-group-by-service.png" alt="Group by service" width="480"/></td>

@@ -227,6 +227,58 @@ set -x
 
 ---
 
+## Screenshots & GIF Capture
+
+The `docs/capture.js` script automates screenshot and GIF generation using Playwright (Chromium CDP).
+
+### Prerequisites
+
+```sh
+npm install playwright
+# Requires ffmpeg for GIF generation
+brew install ffmpeg  # macOS
+```
+
+### Running
+
+1. Open the LuCI page in Chrome/Chromium with remote debugging:
+   ```sh
+   /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+     --remote-debugging-port=9222 "https://router.local/cgi-bin/luci/admin/status/trafficctl"
+   ```
+2. Run the capture script:
+   ```sh
+   node docs/capture.js
+   ```
+
+### Output
+
+| File | Content |
+|------|---------|
+| `docs/img/dark/*.png` | Static screenshots (dark theme) |
+| `docs/img/light/*.png` | Static screenshots (light theme) |
+| `docs/img/speed-graph-{dark,light}.gif` | Live speed sparklines |
+| `docs/img/graph-popup-{dark,light}.gif` | Graph popup hover with crosshair |
+| `docs/img/block-internet-{dark,light}.gif` | Block/unblock internet sequence |
+| `docs/img/rate-limit-{dark,light}.gif` | Limiter → shaper → off sequence |
+| `docs/img/column-toggle-{dark,light}.gif` | Column visibility toggle demo |
+| `docs/img/telegram-toggle-{dark,light}.gif` | Telegram bot enable/disable |
+| `docs/img/settings-walkthrough-{dark,light}.gif` | All settings subsections |
+
+### Privacy Masking
+
+The script automatically masks sensitive data before every screenshot:
+- **MAC addresses**: replaced with `XX:XX:XX:XX` (keeps first 2 octets for OUI)
+- **Router hostname**: replaced with `router.local`
+
+No manual redaction needed.
+
+### Device Selection
+
+The script auto-detects a target device from the overview table, preferring (in order): `Eugene-Asus`, `vivo-X200`, any phone-like device, any WiFi device.
+
+---
+
 ## Contributing
 
 1. Fork the repo, create a feature branch.
