@@ -37,7 +37,7 @@ jobs:
             BUMP="major"
           elif echo "$COMMITS" | grep -qE '^feat(\(.+\))?:'; then
             BUMP="minor"
-          elif echo "$COMMITS" | grep -qE '^fix(\(.+\))?:|^perf(\(.+\))?:|^refactor(\(.+\))?:|^ci(\(.+\))?:'; then
+          elif echo "$COMMITS" | grep -qE '^fix(\(.+\))?:|^perf(\(.+\))?:'; then
             BUMP="patch"
           fi
           echo "bump=$BUMP" >> "$GITHUB_OUTPUT"
