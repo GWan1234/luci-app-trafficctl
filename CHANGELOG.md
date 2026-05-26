@@ -4,7 +4,7 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
-## [Unreleased] — since v1.1.0
+## [1.2.0] — 2026-05-26
 
 ### New Features
 
