@@ -1,6 +1,7 @@
 #!/bin/sh
 # shellcheck shell=dash
 # Remove device WiFi MAC filter (unblock from wifi deny list).
+# Uses hostapd beacon update — no wifi reload, other clients stay connected.
 # Usage: trafficctl-macfilter-remove.sh <ip>
 
 . /usr/local/bin/trafficctl-fw.sh
@@ -24,7 +25,6 @@ if [ -f /tmp/dhcp.leases ]; then
 fi
 
 if [ -z "$MAC" ]; then
-    # Try ARP table
     MAC=$(ip neigh show "$IP" 2>/dev/null | grep -oE '[0-9a-fA-F:]{17}' | head -1 | tr 'a-f' 'A-F')
 fi
 
@@ -54,7 +54,9 @@ done
 
 if [ "$CHANGED" = "1" ]; then
     uci commit wireless
-    wifi reload 2>/dev/null || wifi up 2>/dev/null
+    # Remove from runtime deny ACL — client can reassociate immediately
+    tctl_hostapd_allow_mac "$MAC"
 fi
 
+tctl_log "wifi_unblock" "$IP" "MAC=$MAC" "${TCTL_VIA:-cli}" "${TCTL_SRC:-local}"
 echo "{\"ok\":true,\"msg\":\"MAC $MAC removed from wifi filter for $IP\"}"

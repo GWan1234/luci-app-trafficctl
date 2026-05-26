@@ -1,6 +1,7 @@
 #!/bin/sh
 # shellcheck shell=dash
 # Block device WiFi access by adding its MAC to deny maclist on all interfaces.
+# Uses hostapd to deauth only the target client — no wifi reload needed.
 # Usage: trafficctl-macfilter-add.sh <ip>
 
 . /usr/local/bin/trafficctl-fw.sh
@@ -24,7 +25,6 @@ if [ -f /tmp/dhcp.leases ]; then
 fi
 
 if [ -z "$MAC" ]; then
-    # Try ARP table
     MAC=$(ip neigh show "$IP" 2>/dev/null | grep -oE '[0-9a-fA-F:]{17}' | head -1 | tr 'a-f' 'A-F')
 fi
 
@@ -45,25 +45,24 @@ fi
 
 CHANGED=0
 for iface in $IFACES; do
-    # Ensure macfilter is set to deny
     current_filter=$(uci -q get "wireless.${iface}.macfilter")
     if [ "$current_filter" != "deny" ]; then
         uci set "wireless.${iface}.macfilter=deny"
         CHANGED=1
     fi
 
-    # Check if MAC already in maclist
     existing=$(uci -q get "wireless.${iface}.maclist")
     echo "$existing" | grep -qi "$MAC" && continue
 
-    # Add MAC to maclist
     uci add_list "wireless.${iface}.maclist=$MAC"
     CHANGED=1
 done
 
 if [ "$CHANGED" = "1" ]; then
     uci commit wireless
-    wifi reload 2>/dev/null || wifi up 2>/dev/null
+    # Apply at runtime: add to deny ACL + deauth this client only
+    tctl_hostapd_deny_mac "$MAC"
 fi
 
+tctl_log "wifi_block" "$IP" "MAC=$MAC" "${TCTL_VIA:-cli}" "${TCTL_SRC:-local}"
 echo "{\"ok\":true,\"msg\":\"MAC $MAC blocked on wifi for $IP\"}"

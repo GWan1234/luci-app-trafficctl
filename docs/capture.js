@@ -189,10 +189,9 @@ async function cleanPhone(page, ip) {
 
   const unblockWifi = page.locator('button:has-text("Unblock WiFi")');
   if (await unblockWifi.isVisible().catch(() => false)) {
-    console.log('    Unblocking WiFi (will trigger wifi reload)…');
+    console.log('    Unblocking WiFi…');
     await unblockWifi.click();
     await waitForButton(page, 'Block WiFi', 30000);
-    await page.waitForTimeout(10000); // wifi reload disconnects all clients briefly
   }
 
   await page.waitForTimeout(1500);
@@ -252,8 +251,7 @@ async function captureTheme(page, dark, phone) {
   }
   makeGif('bi_%03d.png', path.join(IMG_GIF, `block-internet-${label}.gif`), 2);
 
-  // 6–7. Block / Unblock WiFi
-  // WARNING: wifi reload disconnects ALL wifi clients for several seconds
+  // 6–7. Block / Unblock WiFi (no wifi reload — only target MAC is affected)
   const wifiBlockBtn = page.locator('button:has-text("Block WiFi")');
   if (await wifiBlockBtn.isVisible().catch(() => false)) {
     console.log('  [05-06] Block/Unblock WiFi…');
@@ -261,10 +259,8 @@ async function captureTheme(page, dark, phone) {
     await waitForButton(page, 'Unblock WiFi');
     await shot(page, path.join(DIR, '05-wifi-blocked.png'));
     await page.locator('button:has-text("Unblock WiFi")').click();
-    // wifi reload takes ~10-15s and disconnects all WiFi clients
-    console.log('    Waiting for WiFi reconnect after reload…');
     await waitForButton(page, 'Block WiFi', 30000);
-    await page.waitForTimeout(10000); // wait for WiFi clients to reassociate
+    await page.waitForTimeout(1000);
     await shot(page, path.join(DIR, '06-wifi-unblocked.png'));
   } else {
     console.log('  (WiFi button not visible for this device)');

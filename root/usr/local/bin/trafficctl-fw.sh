@@ -119,6 +119,30 @@ tctl_get_wifi_interfaces() {
     uci show wireless 2>/dev/null | grep '=wifi-iface' | cut -d. -f2 | cut -d= -f1
 }
 
+# Get running WiFi interface names (e.g. wlan0, wlan1)
+tctl_get_hostapd_ifaces() {
+    ubus list 2>/dev/null | grep '^hostapd\.' | cut -d. -f2
+}
+
+# Add MAC to hostapd deny ACL at runtime + deauth the client (no wifi reload)
+tctl_hostapd_deny_mac() {
+    local mac="$1"
+    local iface
+    for iface in $(tctl_get_hostapd_ifaces); do
+        hostapd_cli -i "$iface" deny_acl ADD_MAC "$mac" 2>/dev/null
+        hostapd_cli -i "$iface" deauthenticate "$mac" 2>/dev/null
+    done
+}
+
+# Remove MAC from hostapd deny ACL at runtime (client can reassociate immediately)
+tctl_hostapd_allow_mac() {
+    local mac="$1"
+    local iface
+    for iface in $(tctl_get_hostapd_ifaces); do
+        hostapd_cli -i "$iface" deny_acl DEL_MAC "$mac" 2>/dev/null
+    done
+}
+
 # ── Persistence ───────────────────────────────────────────────────────────
 
 TCTL_RULES_FILE="/etc/trafficmon/rules.json"
