@@ -4,6 +4,33 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.2.1] — 2026-05-26
+
+### Bug Fixes
+
+- **Fix broken IPK format** — package was built with Debian `ar` format instead of OpenWrt's gzip-tar format; `opkg` rejected it with `Malformed package file` on all devices ([#1](https://github.com/YusDyr/luci-app-trafficctl/issues/1))
+- **Fix rpcd binary path** — binary was installed as `trafficctl` but rpcd expects `luci.trafficctl`
+- **Fix ShellCheck SC2086** — unquoted variable in `uci` call in `trafficctl-fw.sh`
+- **Fix ESLint no-redeclare** — duplicate `chipActiveStyle` declaration in `status.js`
+
+### CI
+
+- Per-test badges: ShellCheck, ESLint, Tests each have their own status badge
+- Release is blocked from publishing if any test fails
+- OpenWrt compatibility matrix: tested across 3 versions (21.02, 22.03, snapshot) × 4 architectures (x86-64, aarch64, arm\_a15, armvirt-32)
+- All CI jobs moved to GitHub-hosted runners
+
+### Installation
+
+- Install directly on the router without `scp`:
+  ```sh
+  opkg install https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk
+  ```
+- Install via LuCI web UI — **System → Software → Upload Package**
+- Stable download URLs: `luci-app-trafficctl.ipk`, `luci-app-trafficctl_all.ipk`, `luci-app-trafficctl_latest_all.ipk`
+
+---
+
 ## [1.2.0] — 2026-05-26
 
 ### New Features
