@@ -344,10 +344,16 @@ async function captureTheme(page, dark, phone) {
   });
   await page.waitForTimeout(300);
 
-  await closeSettings(page);
-
-  // 16. Column toggle: hide Graph, then restore
+  // 16. Column toggle: hide MAC, then restore
+  // Must open settings + Connections table section to make chips visible
   console.log('  [11] Column toggle…');
+  await openSettings(page);
+  await page.evaluate(() => {
+    const labels = document.querySelectorAll('div[style*="font-weight:600"]');
+    for (const el of labels) {
+      if (el.textContent.includes('Connections table')) { el.click(); break; }
+    }
+  });
   await page.waitForTimeout(500);
   const chips = page.locator('span[style*="border-radius:12px"]');
   const count = await chips.count();
@@ -360,6 +366,7 @@ async function captureTheme(page, dark, phone) {
       break;
     }
   }
+  await closeSettings(page);
 
   // Helper: toggle #tm-extended via DOM click (works even when panel is collapsed)
   const setExtended = async (on) => {
