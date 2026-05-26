@@ -46,7 +46,7 @@ for f in \
   [ -f "$f" ] || { echo "MISSING: $f"; exit 1; }
 done
 
-# Verify shell scripts have valid syntax and are executable
+# Verify syntax for all shell scripts
 for s in \
   /usr/local/bin/trafficctl-*.sh \
   /usr/libexec/rpcd/luci.trafficctl \
@@ -54,6 +54,13 @@ for s in \
   /etc/hotplug.d/iface/99-trafficctl-shapes \
   /etc/init.d/trafficctl-telegram; do
   ash -n "$s" || { echo "SYNTAX ERROR: $s"; exit 1; }
+done
+
+# Verify execute bit on files that are called directly (not via sh)
+for s in \
+  /usr/local/bin/trafficctl-*.sh \
+  /usr/libexec/rpcd/luci.trafficctl \
+  /etc/init.d/trafficctl-telegram; do
   [ -x "$s" ] || { echo "NOT EXECUTABLE: $s"; exit 1; }
 done
 
