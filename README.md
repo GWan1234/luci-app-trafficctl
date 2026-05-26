@@ -8,6 +8,14 @@
 
 Per-device traffic monitoring and control for OpenWrt routers. Monitor connections, limit bandwidth, shape traffic, block internet access, and manage WiFi MAC filtering -- all from a single LuCI page.
 
+| | |
+|---|---|
+| **Monitoring** | Live bandwidth sparklines · TCP state breakdown · Per-connection detail · rDNS lookup |
+| **Control** | Internet block · WiFi MAC deny · Rate limiter (nft policer) · Traffic shaper (tc/HTB) |
+| **Visibility** | WiFi band (2.4G/5G/6G) · LAN port detection · Reachability indicator · Extended stats |
+| **UX** | Searchable device picker · Column toggles · Colorblind-safe · Dark + light theme |
+| **Automation** | Telegram bot · Activity logging · Boot persistence · DHCP hotplug new-device alerts |
+
 ---
 
 ## Screenshots
@@ -32,7 +40,7 @@ Per-device traffic monitoring and control for OpenWrt routers. Monitor connectio
 </table>
 
 <details>
-<summary>More screenshots — light theme, settings, column toggles…</summary>
+<summary>More screenshots — light theme, settings, Telegram, activity log…</summary>
 <br/>
 
 <table>
@@ -45,6 +53,38 @@ Per-device traffic monitoring and control for OpenWrt routers. Monitor connectio
 <td><img src="docs/img/dark/02-device-detail.png" alt="Device detail" width="480"/></td>
 </tr>
 <tr>
+<td align="center"><b>WiFi blocked</b></td>
+<td align="center"><b>Link / band column</b></td>
+</tr>
+<tr>
+<td><img src="docs/img/dark/05-wifi-blocked.png" alt="WiFi blocked" width="480"/></td>
+<td><img src="docs/img/dark/17-link-band.png" alt="Link band column" width="480"/></td>
+</tr>
+<tr>
+<td align="center"><b>Extended statistics (all devices)</b></td>
+<td align="center"><b>Extended statistics (per device)</b></td>
+</tr>
+<tr>
+<td><img src="docs/img/dark/12-extended-stats-all.png" alt="Extended stats all" width="480"/></td>
+<td><img src="docs/img/dark/13-extended-stats-device.png" alt="Extended stats device" width="480"/></td>
+</tr>
+<tr>
+<td align="center"><b>Group connections by service</b></td>
+<td align="center"><b>Group connections by hostname</b></td>
+</tr>
+<tr>
+<td><img src="docs/img/dark/14-group-by-service.png" alt="Group by service" width="480"/></td>
+<td><img src="docs/img/dark/15-group-by-host.png" alt="Group by hostname" width="480"/></td>
+</tr>
+<tr>
+<td align="center"><b>Searchable device picker</b></td>
+<td align="center"><b>Unreachable device indicator</b></td>
+</tr>
+<tr>
+<td><img src="docs/img/dark/16-search-filter.png" alt="Search" width="480"/></td>
+<td><img src="docs/img/dark/18-unreachable-tooltip.png" alt="Unreachable tooltip" width="480"/></td>
+</tr>
+<tr>
 <td align="center"><b>Settings walkthrough</b></td>
 <td align="center"><b>Column toggles</b></td>
 </tr>
@@ -53,28 +93,20 @@ Per-device traffic monitoring and control for OpenWrt routers. Monitor connectio
 <td><img src="docs/img/column-toggle-dark.gif" alt="Column toggle" width="480"/></td>
 </tr>
 <tr>
-<td align="center"><b>Telegram Bot toggle</b></td>
-<td align="center"><b>Searchable device picker</b></td>
+<td align="center"><b>Telegram Bot — configure &amp; toggle</b></td>
+<td align="center"><b>Telegram Bot settings</b></td>
 </tr>
 <tr>
 <td><img src="docs/img/telegram-toggle-dark.gif" alt="Telegram toggle" width="480"/></td>
-<td><img src="docs/img/dark/16-search-filter.png" alt="Search" width="480"/></td>
+<td><img src="docs/img/dark/19-telegram-settings.png" alt="Telegram settings" width="480"/></td>
 </tr>
 <tr>
-<td align="center"><b>WiFi blocked</b></td>
-<td align="center"><b>Extended statistics</b></td>
+<td align="center"><b>Logging &amp; Persistence settings</b></td>
+<td align="center"><b>Activity Log panel</b></td>
 </tr>
 <tr>
-<td><img src="docs/img/dark/05-wifi-blocked.png" alt="WiFi blocked" width="480"/></td>
-<td><img src="docs/img/dark/13-extended-stats-device.png" alt="Extended stats" width="480"/></td>
-</tr>
-<tr>
-<td align="center"><b>Group connections by service</b></td>
-<td align="center"><b>Settings &amp; subsections</b></td>
-</tr>
-<tr>
-<td><img src="docs/img/dark/14-group-by-service.png" alt="Group by service" width="480"/></td>
-<td><img src="docs/img/dark/10-settings.png" alt="Settings" width="480"/></td>
+<td><img src="docs/img/dark/20-logging-settings.png" alt="Logging settings" width="480"/></td>
+<td><img src="docs/img/dark/22-activity-log.png" alt="Activity log" width="480"/></td>
 </tr>
 </table>
 
