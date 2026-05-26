@@ -24,6 +24,8 @@ COMMENT="rl_ratelimit_${LABEL}"
 
 if [ "$RATE" = "0" ]; then
     if tctl_ratelimit_remove "$IP" "$COMMENT"; then
+        tctl_persist_enabled && tctl_persist_remove "ratelimit" "$IP"
+        tctl_log "ratelimit_remove" "$IP" "" "${TCTL_VIA:-cli}" "${TCTL_SRC:-local}"
         echo "{\"ok\":true,\"msg\":\"rate limit removed for $IP\"}"
     else
         echo "{\"ok\":false,\"msg\":\"failed to remove rate limit for $IP\"}"
@@ -32,6 +34,8 @@ if [ "$RATE" = "0" ]; then
 else
     tctl_ratelimit_remove "$IP" "$COMMENT" 2>/dev/null
     if tctl_ratelimit_add "$IP" "$RATE" "$COMMENT"; then
+        tctl_persist_enabled && tctl_persist_save "ratelimit" "$IP" "$RATE"
+        tctl_log "ratelimit_set" "$IP" "${RATE}kbit" "${TCTL_VIA:-cli}" "${TCTL_SRC:-local}"
         echo "{\"ok\":true,\"msg\":\"rate limit set to ${RATE} kbit/s for $IP\"}"
     else
         echo "{\"ok\":false,\"msg\":\"failed to set rate limit for $IP\"}"

@@ -1,6 +1,18 @@
 config trafficctl 'main'
 	option enabled '1'
 	option default_mode 'limiter'
+	option persist_rules '0'
+
+config logging 'logging'
+	option enabled '1'
+	option log_file '/tmp/trafficctl/activity.log'
+	option max_lines '500'
+	option syslog '1'
+	option log_blocks '1'
+	option log_ratelimits '1'
+	option log_shapes '1'
+	option log_telegram '1'
+	option log_config '1'
 
 config telegram 'telegram'
 	option enabled '0'

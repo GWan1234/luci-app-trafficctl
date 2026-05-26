@@ -21,6 +21,8 @@ fi
 COMMENT="tctl_block_${LABEL}"
 
 if tctl_block_remove "$IP" "$COMMENT"; then
+    tctl_persist_enabled && tctl_persist_remove "block" "$IP"
+    tctl_log "unblock" "$IP" "$LABEL" "${TCTL_VIA:-cli}" "${TCTL_SRC:-local}"
     echo "{\"ok\":true,\"msg\":\"internet unblocked for $IP\"}"
 else
     echo "{\"ok\":false,\"msg\":\"failed to unblock $IP\"}"

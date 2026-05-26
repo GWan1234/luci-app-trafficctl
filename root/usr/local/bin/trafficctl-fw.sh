@@ -116,6 +116,117 @@ tctl_validate_ip() {
 }
 
 tctl_get_wifi_interfaces() {
-    # Returns all WiFi interface names (radio0, radio1, etc.)
     uci show wireless 2>/dev/null | grep '=wifi-iface' | cut -d. -f2 | cut -d= -f1
+}
+
+# ── Persistence ───────────────────────────────────────────────────────────
+
+TCTL_RULES_FILE="/etc/trafficmon/rules.json"
+
+tctl_persist_enabled() {
+    [ "$(uci -q get trafficctl.main.persist_rules 2>/dev/null)" = "1" ]
+}
+
+tctl_persist_save() {
+    local type="$1" ip="$2" param="$3"
+    [ -d "$(dirname "$TCTL_RULES_FILE")" ] || mkdir -p "$(dirname "$TCTL_RULES_FILE")"
+    [ -f "$TCTL_RULES_FILE" ] || echo '[]' > "$TCTL_RULES_FILE"
+    local tmp="${TCTL_RULES_FILE}.tmp"
+    # Remove existing entry for same ip+type, append new one
+    awk -v ip="$ip" -v t="$type" -v p="$param" '
+    BEGIN { found=0 }
+    {
+        gsub(/^\[|\]$/,"")
+        n=split($0, items, /},{/)
+        printf "["
+        first=1
+        for (i=1; i<=n; i++) {
+            gsub(/^{|}$/,"",items[i])
+            if (items[i] ~ "\"ip\":\"" ip "\"" && items[i] ~ "\"type\":\"" t "\"") continue
+            if (!first) printf ","
+            printf "{%s}", items[i]
+            first=0
+        }
+        if (!first) printf ","
+        printf "{\"type\":\"%s\",\"ip\":\"%s\",\"param\":\"%s\"}]", t, ip, p
+    }' "$TCTL_RULES_FILE" > "$tmp"
+    mv "$tmp" "$TCTL_RULES_FILE"
+}
+
+tctl_persist_remove() {
+    local type="$1" ip="$2"
+    [ -f "$TCTL_RULES_FILE" ] || return 0
+    local tmp="${TCTL_RULES_FILE}.tmp"
+    awk -v ip="$ip" -v t="$type" '
+    {
+        gsub(/^\[|\]$/,"")
+        n=split($0, items, /},{/)
+        printf "["
+        first=1
+        for (i=1; i<=n; i++) {
+            gsub(/^{|}$/,"",items[i])
+            if (items[i] ~ "\"ip\":\"" ip "\"" && items[i] ~ "\"type\":\"" t "\"") continue
+            if (!first) printf ","
+            printf "{%s}", items[i]
+            first=0
+        }
+        printf "]"
+    }' "$TCTL_RULES_FILE" > "$tmp"
+    mv "$tmp" "$TCTL_RULES_FILE"
+}
+
+# ── Activity Logging ──────────────────────────────────────────────────────
+
+TCTL_LOG_TAG="trafficctl"
+
+tctl_log_enabled() {
+    [ "$(uci -q get trafficctl.logging.enabled 2>/dev/null)" = "1" ]
+}
+
+tctl_log_category_enabled() {
+    local cat="$1"
+    [ "$(uci -q get trafficctl.logging.log_${cat} 2>/dev/null)" != "0" ]
+}
+
+tctl_log() {
+    local action="$1" target="$2" detail="$3" via="${4:-cli}" src="${5:-local}"
+    tctl_log_enabled || return 0
+
+    local category
+    case "$action" in
+        block|unblock) category="blocks" ;;
+        ratelimit*) category="ratelimits" ;;
+        shape*) category="shapes" ;;
+        telegram*) category="telegram" ;;
+        config*) category="config" ;;
+        *) category="config" ;;
+    esac
+    tctl_log_category_enabled "$category" || return 0
+
+    local ts user log_file max_lines
+    ts=$(date '+%Y-%m-%d %H:%M:%S')
+    user="${TCTL_USER:-$(id -un 2>/dev/null || echo unknown)}"
+    log_file=$(uci -q get trafficctl.logging.log_file 2>/dev/null)
+    log_file="${log_file:-/tmp/trafficctl/activity.log}"
+    max_lines=$(uci -q get trafficctl.logging.max_lines 2>/dev/null)
+    max_lines="${max_lines:-500}"
+
+    local entry="[$TCTL_LOG_TAG] $ts src=$src user=$user via=$via action=$action target=$target${detail:+ detail=$detail}"
+
+    [ -d "$(dirname "$log_file")" ] || mkdir -p "$(dirname "$log_file")"
+    echo "$entry" >> "$log_file"
+
+    # Rotate if over max_lines
+    local lc
+    lc=$(wc -l < "$log_file" 2>/dev/null || echo 0)
+    if [ "$lc" -gt "$max_lines" ]; then
+        local keep=$(( max_lines * 3 / 5 ))
+        tail -n "$keep" "$log_file" > "${log_file}.tmp"
+        mv "${log_file}.tmp" "$log_file"
+    fi
+
+    # Duplicate to syslog if configured
+    if [ "$(uci -q get trafficctl.logging.syslog 2>/dev/null)" = "1" ]; then
+        logger -t "$TCTL_LOG_TAG" "$ts src=$src user=$user via=$via action=$action target=$target${detail:+ detail=$detail}"
+    fi
 }

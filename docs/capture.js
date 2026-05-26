@@ -281,16 +281,67 @@ async function captureTheme(page, dark, phone) {
 
   makeGif('bi_%03d.png', path.join(IMG_GIF, `rate-limit-${label}.gif`), 2);
 
-  // 11. Settings panel (all-devices)
+  // 11. Settings panel (all-devices) — open all collapsible sections
   console.log('  [10] Settings panel…');
   await gotoAllDevices(page);
   await setDark(page, dark);
   await page.waitForTimeout(1000);
   await openSettings(page);
   await shot(page, path.join(DIR, '10-settings.png'));
+
+  // 12. Telegram Bot section
+  console.log('  [19] Telegram Bot section…');
+  await page.evaluate(() => {
+    const labels = document.querySelectorAll('div[style*="font-weight:600"]');
+    for (const el of labels) {
+      if (el.textContent.includes('Telegram Bot')) { el.click(); break; }
+    }
+  });
+  await page.waitForTimeout(2000);
+  await shot(page, path.join(DIR, '19-telegram-settings.png'));
+
+  // 13. Logging & Persistence section
+  console.log('  [20] Logging & Persistence section…');
+  await page.evaluate(() => {
+    const labels = document.querySelectorAll('div[style*="font-weight:600"]');
+    for (const el of labels) {
+      if (el.textContent.includes('Logging')) { el.click(); break; }
+    }
+  });
+  await page.waitForTimeout(2000);
+  await shot(page, path.join(DIR, '20-logging-settings.png'));
+
+  // 14. Connections table section
+  console.log('  [21] Connections table section…');
+  await page.evaluate(() => {
+    const labels = document.querySelectorAll('div[style*="font-weight:600"]');
+    for (const el of labels) {
+      if (el.textContent.includes('Connections table')) { el.click(); break; }
+    }
+  });
+  await page.waitForTimeout(500);
+  await shot(page, path.join(DIR, '21-connections-table-settings.png'));
+
+  // 15. Activity Log panel
+  console.log('  [22] Activity Log panel…');
+  await page.evaluate(() => {
+    const cb = document.getElementById('tm-activity');
+    if (cb && !cb.checked) cb.click();
+  });
+  await page.waitForTimeout(2000);
+  await closeSettings(page);
+  await page.waitForTimeout(500);
+  await shot(page, path.join(DIR, '22-activity-log.png'));
+  // Turn off activity for clean subsequent shots
+  await page.evaluate(() => {
+    const cb = document.getElementById('tm-activity');
+    if (cb && cb.checked) cb.click();
+  });
+  await page.waitForTimeout(300);
+
   await closeSettings(page);
 
-  // 12. Column toggle: hide Graph, then restore
+  // 16. Column toggle: hide Graph, then restore
   console.log('  [11] Column toggle…');
   await page.waitForTimeout(500);
   const chips = page.locator('span[style*="border-radius:12px"]');

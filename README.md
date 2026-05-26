@@ -78,7 +78,9 @@ Per-device traffic monitoring and control for OpenWrt routers. Monitor connectio
 - **Reverse DNS** -- Optional hostname resolution for external destination IPs.
 - **Searchable Device Picker** -- Inline search by name, IP, or MAC with filtered dropdown.
 - **Telegram Bot** -- Optional bot for remote control: device list, block/unblock, rate limit, shape traffic, new device notifications. Runs on the router via long polling, no external server needed.
-- **Reboot Persistence** -- Shaping rules survive reboot via a hotplug script that restores tc/HTB classes when the LAN interface comes up.
+- **New Device Detection** -- Discovers new devices via three sources: ARP table, DHCP leases, Wi-Fi station list. Instant DHCP hotplug trigger for near-realtime alerts.
+- **Activity Logging** -- Configurable logging of all actions (blocks, ratelimits, shapes, config changes) to a local file and/or syslog. Includes source IP, username, and trigger (LuCI/Telegram/CLI).
+- **Reboot Persistence** -- Shaping, block, and rate-limit rules optionally survive reboot via hotplug restore. Configurable per UCI option `persist_rules`.
 
 ---
 
@@ -149,7 +151,7 @@ Copy the `root/` tree to the router's filesystem, then restart rpcd:
 ```sh
 scp -r root/* root@router:/
 scp -r htdocs/luci-static root@router:/www/
-ssh root@router 'chmod +x /usr/local/bin/trafficctl-*.sh /usr/libexec/rpcd/trafficctl && /etc/init.d/rpcd restart'
+ssh root@router 'chmod +x /usr/local/bin/trafficctl-*.sh /usr/libexec/rpcd/luci.trafficctl && /etc/init.d/rpcd restart'
 ```
 
 ### Required packages
@@ -202,10 +204,16 @@ opkg install curl
 
 ### Persistence
 
-- Shaping rules are saved to `/etc/trafficmon/shapes.json`.
-- On reboot, the hotplug script at `/etc/hotplug.d/iface/99-trafficctl-shapes` re-applies shaping when the LAN interface comes up.
-- Rate limiter rules (nft policer) are **not** persisted -- they are intended as temporary throttles.
-- Internet block rules are **not** persisted -- they are session-based.
+- Shaping rules are always saved to `/etc/trafficmon/shapes.json` and restored on boot.
+- Block and rate-limit rules are optionally persistent when `persist_rules` is enabled in Settings (saved to `/etc/trafficmon/rules.json`).
+- On reboot, the hotplug script at `/etc/hotplug.d/iface/99-trafficctl-shapes` restores all saved rules when the LAN interface comes up.
+
+### Activity Logging
+
+- All mutable actions are logged with timestamp, source IP, username, trigger (luci/telegram/cli), and target.
+- Log file: `/tmp/trafficctl/activity.log` (volatile; survives until reboot). Path and max lines are configurable via UCI.
+- Optionally duplicates to syslog (`logger -t trafficctl`) for remote log collection.
+- Per-category toggles: blocks, ratelimits, shapes, telegram, config changes.
 
 ### WiFi MAC Filtering
 
@@ -221,14 +229,17 @@ When a device is WiFi-blocked:
 ```mermaid
 flowchart LR
     A((LuCI\nBrowser)) -->|JSON-RPC| B[rpcd backend]
+    T((Telegram)) -->|Bot API| TG[telegram bot]
 
     B --> C{Query or\nAction?}
+    TG --> C
 
     C -->|query| D[/Monitoring/]
     C -->|action| E[/Control/]
 
     D --> F[(conntrack)]
     D --> G[(iw / brctl)]
+    D --> N[(ARP / DHCP)]
 
     E --> H[Firewall\nabstraction]
     E --> I[tc / HTB]
@@ -238,10 +249,16 @@ flowchart LR
     H --> L[(iptables)]
 
     I --> M[(shapes.json)]
+    H --> R[(rules.json)]
     M -.->|boot restore| I
+    R -.->|boot restore| H
+
+    E --> LOG[Activity Log]
+    LOG --> S[(file)]
+    LOG --> SL[(syslog)]
 ```
 
-The frontend talks to a thin rpcd dispatcher over ubus. Backend shell scripts split into two groups: **monitoring** (read-only, pulls data from conntrack and wireless subsystems) and **control** (writes firewall rules, tc classes, or WiFi MAC filters). A firewall abstraction layer auto-detects nft vs iptables at runtime. Shaping state persists across reboots via a hotplug script.
+The frontend talks to a thin rpcd dispatcher over ubus. The Telegram bot provides parallel remote control via long polling. Backend shell scripts split into two groups: **monitoring** (read-only, pulls data from conntrack, ARP, DHCP leases, and wireless subsystems) and **control** (writes firewall rules, tc classes, or WiFi MAC filters). A firewall abstraction layer auto-detects nft vs iptables at runtime. All mutable actions are logged to a local file and optionally syslog. Rules optionally persist across reboots via hotplug scripts.
 
 ---
 
@@ -250,12 +267,13 @@ The frontend talks to a thin rpcd dispatcher over ubus. Backend shell scripts sp
 | Path | Role |
 |------|------|
 | `htdocs/.../view/trafficctl/status.js` | Frontend — single ES5 file, no deps |
-| `root/usr/libexec/rpcd/trafficctl` | rpcd backend — JSON-RPC dispatch |
+| `root/usr/libexec/rpcd/luci.trafficctl` | rpcd backend — JSON-RPC dispatch |
 | `root/usr/local/bin/trafficctl-*.sh` | Backend scripts (monitoring + control) |
 | `root/usr/local/bin/trafficctl-fw.sh` | Firewall abstraction layer (sourced) |
 | `root/usr/local/bin/trafficctl-telegram.sh` | Telegram bot daemon (long polling) |
 | `root/etc/init.d/trafficctl-telegram` | procd init script for the bot |
-| `root/etc/hotplug.d/iface/99-trafficctl-shapes` | Boot persistence for tc rules |
+| `root/etc/hotplug.d/iface/99-trafficctl-shapes` | Boot persistence for tc + block + ratelimit rules |
+| `root/etc/hotplug.d/dhcp/99-trafficctl-newdevice` | Instant new-device detection via DHCP events |
 | `root/usr/share/rpcd/acl.d/` | ACL permissions |
 | `Makefile` | OpenWrt package build |
 | `docs/` | Extended docs (architecture, API, compat) |
@@ -295,4 +313,4 @@ Contributions are welcome. Please:
 
 Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for the full text.
 
-Copyright 2024-2025 Denis Iusupov.
+Copyright 2024-2026 Denis Iusupov.

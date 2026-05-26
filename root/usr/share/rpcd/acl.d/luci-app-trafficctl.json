@@ -6,7 +6,8 @@
 				"luci.trafficctl": [
 					"summary", "device", "bytes",
 					"ratelimit_stats", "shape_stats", "rdns",
-					"config_get", "telegram_config_get"
+					"config_get", "telegram_config_get",
+					"logging_config_get", "activity_log"
 				],
 				"file": [ "read" ]
 			},
@@ -22,7 +23,8 @@
 					"macfilter_add", "macfilter_remove",
 					"ratelimit", "shape_add", "shape_remove", "shape_status",
 					"config_set",
-					"telegram_config_set", "telegram_test"
+					"telegram_config_set", "telegram_test",
+					"logging_config_set"
 				]
 			},
 			"uci": [ "trafficctl" ]

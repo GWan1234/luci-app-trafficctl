@@ -111,6 +111,24 @@ var callTelegramTest = rpc.declare({
 	params: ['bot_token', 'chat_id']
 });
 
+var callLoggingGet = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'logging_config_get'
+});
+
+var callLoggingSet = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'logging_config_set',
+	params: ['enabled', 'log_file', 'max_lines', 'syslog',
+		'log_blocks', 'log_ratelimits', 'log_shapes', 'log_telegram', 'log_config', 'persist_rules']
+});
+
+var callActivityLog = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'activity_log',
+	params: ['lines']
+});
+
 var C = {
 	thBg:          'var(--tm-th-bg)',
 	thFg:          'var(--tm-th-fg)',
@@ -319,7 +337,13 @@ function injectStyles() {
 		'.tm-toggle::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;' +
 		'background:#fff;border-radius:50%;transition:transform .2s;box-shadow:0 1px 2px rgba(0,0,0,.2)}' +
 		'.tm-toggle-input:checked+.tm-toggle{background:var(--tm-proto)}' +
-		'.tm-toggle-input:checked+.tm-toggle::after{transform:translateX(16px)}';
+		'.tm-toggle-input:checked+.tm-toggle::after{transform:translateX(16px)}' +
+		'[data-tip]{position:relative}' +
+		'[data-tip]::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 4px);left:50%;' +
+		'transform:translateX(-50%);padding:4px 8px;border-radius:4px;font-size:11px;font-weight:400;' +
+		'white-space:nowrap;background:var(--tm-th-bg);color:var(--tm-th-fg);' +
+		'pointer-events:none;opacity:0;transition:opacity .1s;z-index:999}' +
+		'[data-tip]:hover::after{opacity:1}';
 	document.head.appendChild(s);
 }
 
@@ -1091,8 +1115,17 @@ return view.extend({
 			extStatsDiv.style.display = this.checked ? '' : 'none';
 			if (this.checked) updateExtendedStats();
 		});
+		var activityCheck = mkToggle('tm-activity', _('Activity'), opts.showActivity, function() {
+			var o = loadOpts(); o.showActivity = this.checked; saveOpts(o);
+			activityDiv.style.display = this.checked ? '' : 'none';
+			if (this.checked && !activityDiv._loaded) {
+				activityDiv._loaded = true;
+				loadActivityPanel(activityDiv);
+			}
+		});
 
 		var extStatsDiv = E('div', { 'style': opts.extendedStats ? '' : 'display:none' });
+		var activityDiv = E('div', { 'style': opts.showActivity ? '' : 'display:none' });
 
 		var refreshPick = mkInlinePick([
 			{v:'0',l:_('Off')},{v:'5',l:'5s'},{v:'10',l:'10s'},{v:'30',l:'30s'},{v:'60',l:'60s'}
@@ -1207,7 +1240,7 @@ return view.extend({
 			return String(Math.round(n));
 		}
 
-		var actionRow = E('div', { 'style': 'display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px;margin-bottom:6px;margin-top:8px' },
+		var actionRow = E('div', { 'style': 'display:flex;flex-wrap:nowrap;align-items:center;gap:8px' },
 			[inetBtn, wifiBtn]);
 
 		function isAllMode() { return searchSelect.getValue() === '__all__'; }
@@ -1797,7 +1830,7 @@ return view.extend({
 		colChipDefs.forEach(function(ct) {
 			var chip = E('span', {
 				'style': savedHidden[ct.key] ? chipOff : chipOn,
-				'title': _('Click to toggle column visibility')
+				'data-tip': _('Click to toggle column visibility')
 			}, ct.label);
 			chip.addEventListener('click', function() {
 				if (self._hiddenCols[ct.key]) { delete self._hiddenCols[ct.key]; chip.style.cssText = chipOn; }
@@ -1810,7 +1843,7 @@ return view.extend({
 
 		var ob = 'border:1px solid '+C.optsBorder+';background:'+C.optsBg;
 		var sep = function() { return E('span',{'style':'border-left:1px solid '+C.border+';height:18px;margin:0 4px'}); };
-		var sectionLabel = function(t) { return E('div', {'style':'font-size:11px;font-weight:600;color:var(--tm-text-mute);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;margin-top:8px'}, t); };
+		var sectionLabel = function(t) { return E('div', {'style':'font-size:12px;font-weight:600;color:var(--tm-text-mute);margin-bottom:4px;margin-top:8px'}, t); };
 
 		var settingsBody = E('div', {'style':'padding:0 14px 10px'});
 		var settingsCollapsed = false;
@@ -1824,54 +1857,29 @@ return view.extend({
 			settingsToggle.firstChild.textContent = settingsCollapsed ? '▸' : '▾';
 		});
 
-		settingsBody.appendChild(E('div', {}, [
-			sectionLabel(_('Display')),
-			E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:6px'}, [
-				showStats, showConns, extStatsCheck, rdnsCheck
-			])
-		]));
-
-		settingsBody.appendChild(E('div', {}, [
-			sectionLabel(_('Speed Monitoring')),
-			E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:6px'}, [
-				E('span', {'title':_('Auto-refresh interval for summary table')}, [mkLabel(_('Refresh')+':'), refreshPick.el]),
-				sep(),
-				E('span', {'title':_('Polling interval for speed measurements')}, [mkLabel(_('Poll')+':'), pollIntervalPick.el]),
-				sep(),
-				E('span', {'title':_('Time window for speed averaging')}, [mkLabel(_('Window')+':'), avgWindowPick.el]),
-				sep(),
-				E('span', {'title':_('Simple = arithmetic mean, EWMA = exponential weighted moving average')}, [mkLabel(_('Method')+':'), avgMethodPick.el])
-			])
-		]));
-
-		settingsBody.appendChild(E('div', {}, [
-			sectionLabel(_('Table Filters')),
-			E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:6px'}, [
-				E('span', {'title':_('Filter connections by protocol')}, [mkLabel(_('Proto')+':'), protoPick.el]),
-				sep(),
-				E('span', {'title':_('Group connections table rows')}, [mkLabel(_('Group')+':'), groupPick.el])
-			])
-		]));
-
-		settingsBody.appendChild(E('div', {}, [
-			sectionLabel(_('Table Columns')),
-			colChipsContainer
-		]));
+		// ── Collapsible subsection helper ──────────────────────────────────
+		function mkCollapsible(title, content, startOpen) {
+			var body = E('div', {'style': startOpen ? '' : 'display:none', 'class': 'tm-collapsible-body'});
+			if (content) body.appendChild(content);
+			var arrow = E('span', {'style':'font-size:11px;color:'+C.textMute}, startOpen ? ' ▾' : ' ▸');
+			var label = sectionLabel(title);
+			label.style.cursor = 'pointer';
+			label.appendChild(arrow);
+			label.addEventListener('click', function() {
+				var open = body.style.display !== 'none';
+				body.style.display = open ? 'none' : '';
+				arrow.textContent = open ? ' ▸' : ' ▾';
+			});
+			return {label: label, body: body, el: E('div', {}, [label, body])};
+		}
 
 		// ── Telegram Bot section (lazy-loaded) ─────────────────────────────
-		var tgBody = E('div', {'style':'display:none;padding-top:6px'});
+		var tgSection = mkCollapsible(_('Telegram Bot'), null, false);
 		var tgLoaded = false;
-		var tgLabel = sectionLabel(_('Telegram Bot'));
-		var tgArrow = E('span', {'style':'cursor:pointer;font-size:11px;color:'+C.textMute}, ' ▸');
-		tgLabel.style.cursor = 'pointer';
-		tgLabel.appendChild(tgArrow);
-		tgLabel.addEventListener('click', function() {
-			var open = tgBody.style.display !== 'none';
-			tgBody.style.display = open ? 'none' : '';
-			tgArrow.textContent = open ? ' ▸' : ' ▾';
-			if (!open && !tgLoaded) {
+		tgSection.label.addEventListener('click', function() {
+			if (!tgLoaded && tgSection.body.style.display !== 'none') {
 				tgLoaded = true;
-				loadTelegramUI(tgBody);
+				loadTelegramUI(tgSection.body);
 			}
 		});
 
@@ -1992,19 +2000,156 @@ return view.extend({
 			});
 		}
 
-		settingsBody.appendChild(E('div', {}, [tgLabel, tgBody]));
+		// ── Assemble settings sections ─────────────────────────────────────
+		settingsBody.appendChild(tgSection.el);
+
+		var displaySection = mkCollapsible(_('Display'), E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding-top:4px'}, [
+			showStats, showConns, extStatsCheck, rdnsCheck, activityCheck
+		]), false);
+		settingsBody.appendChild(displaySection.el);
+
+		var speedSection = mkCollapsible(_('Speed Monitoring'), E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding-top:4px'}, [
+			E('span', {'data-tip':_('Auto-refresh interval for summary table')}, [mkLabel(_('Refresh')+':'), refreshPick.el]),
+			sep(),
+			E('span', {'data-tip':_('Polling interval for per-device speed graph')}, [mkLabel(_('Poll')+':'), pollIntervalPick.el]),
+			sep(),
+			E('span', {'data-tip':_('Time window for speed averaging')}, [mkLabel(_('Window')+':'), avgWindowPick.el]),
+			sep(),
+			E('span', {'data-tip':_('Simple = arithmetic mean, EWMA = exponential weighted moving average')}, [mkLabel(_('Method')+':'), avgMethodPick.el])
+		]), false);
+		settingsBody.appendChild(speedSection.el);
+
+		// ── Logging & Persistence section (lazy-loaded) ────────────────────
+		var loggingSection = mkCollapsible(_('Logging & Persistence'), null, false);
+		var loggingLoaded = false;
+		loggingSection.label.addEventListener('click', function() {
+			if (!loggingLoaded && loggingSection.body.style.display !== 'none') {
+				loggingLoaded = true;
+				loadLoggingUI(loggingSection.body);
+			}
+		});
+
+		function loadLoggingUI(container) {
+			var statusSpan = E('span', {'style':'font-size:12px;color:'+C.textMute}, _('Loading…'));
+			container.appendChild(statusSpan);
+
+			callLoggingGet().then(function(cfg) {
+				while (container.firstChild) container.removeChild(container.firstChild);
+				var gap = 'display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding-top:4px';
+
+				var logEnabled = mkToggle('tm-log-enabled', _('Logging'), cfg.enabled, function() {});
+				var logSyslog = mkToggle('tm-log-syslog', _('Syslog'), cfg.syslog, function() {});
+				var persistRules = mkToggle('tm-persist-rules', _('Persist rules'), cfg.persist_rules, function() {});
+
+				var logBlocks = mkToggle('tm-log-blocks', _('Blocks'), cfg.log_blocks, function() {});
+				var logRatelimits = mkToggle('tm-log-ratelimits', _('Ratelimits'), cfg.log_ratelimits, function() {});
+				var logShapes = mkToggle('tm-log-shapes', _('Shapes'), cfg.log_shapes, function() {});
+				var logTelegram = mkToggle('tm-log-telegram', _('Telegram'), cfg.log_telegram, function() {});
+				var logConfig = mkToggle('tm-log-config', _('Config'), cfg.log_config, function() {});
+
+				var saveResult = E('span', {'style':'font-size:12px;margin-left:8px'});
+				var saveBtn = E('button', {
+					'class': 'cbi-button cbi-button-action',
+					'style': 'font-size:12px;padding:3px 12px'
+				}, _('Save'));
+				saveBtn.addEventListener('click', function() {
+					saveBtn.disabled = true;
+					saveResult.textContent = _('Saving…');
+					callLoggingSet(
+						container.querySelector('#tm-log-enabled').checked,
+						null, null,
+						container.querySelector('#tm-log-syslog').checked,
+						container.querySelector('#tm-log-blocks').checked,
+						container.querySelector('#tm-log-ratelimits').checked,
+						container.querySelector('#tm-log-shapes').checked,
+						container.querySelector('#tm-log-telegram').checked,
+						container.querySelector('#tm-log-config').checked,
+						container.querySelector('#tm-persist-rules').checked
+					).then(function(res) {
+						saveResult.textContent = (res && res.ok) ? '✓ Saved' : '✗ ' + (res && res.msg || 'error');
+						saveResult.style.color = (res && res.ok) ? 'var(--tm-state-ok)' : 'var(--tm-blocked-fg)';
+					}).catch(function(e) {
+						saveResult.textContent = '✗ ' + e.message;
+						saveResult.style.color = 'var(--tm-blocked-fg)';
+					}).then(function() { saveBtn.disabled = false; });
+				});
+
+				container.appendChild(E('div', {'style':gap}, [logEnabled, logSyslog, persistRules]));
+				container.appendChild(E('div', {'style':'margin-top:6px'}, [
+					E('div', {'style':'font-size:11px;color:'+C.textMute+';margin-bottom:4px'}, _('Log categories')),
+					E('div', {'style':gap}, [logBlocks, logRatelimits, logShapes, logTelegram, logConfig])
+				]));
+				container.appendChild(E('div', {'style':'margin-top:8px'}, [saveBtn, saveResult]));
+			}).catch(function(e) {
+				statusSpan.textContent = '✗ ' + e.message;
+				statusSpan.style.color = 'var(--tm-blocked-fg)';
+			});
+		}
+		settingsBody.appendChild(loggingSection.el);
+
+		var tableSection = mkCollapsible(_('Connections table'), E('div', {'style':'padding-top:4px'}, [
+			E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:6px'}, [
+				E('span', {'data-tip':_('Filter connections by protocol')}, [mkLabel(_('Proto')+':'), protoPick.el]),
+				sep(),
+				E('span', {'data-tip':_('Group connections table rows')}, [mkLabel(_('Group')+':'), groupPick.el])
+			]),
+			colChipsContainer
+		]), false);
+		settingsBody.appendChild(tableSection.el);
 
 		var settingsPanel = E('div', {'style':'border-radius:4px;margin-bottom:10px;'+ob}, [
 			settingsToggle, settingsBody
 		]);
 
+		function loadActivityPanel(container) {
+			container.style.cssText = 'margin:8px 0;padding:8px 14px;border-radius:4px;border:1px solid var(--tm-border);background:var(--tm-bg-subtle)';
+			var statusSpan = E('span', {'style':'font-size:12px;color:'+C.textMute}, _('Loading…'));
+			container.appendChild(statusSpan);
+
+			callActivityLog(100).then(function(res) {
+				while (container.firstChild) container.removeChild(container.firstChild);
+				if (!res || !res.lines || !res.lines.length) {
+					container.appendChild(E('div', {'style':'font-size:12px;color:'+C.textMute}, _('No activity recorded yet.')));
+					return;
+				}
+				var logArea = E('div', {
+					'style': 'max-height:250px;overflow-y:auto;font-family:monospace;font-size:11px;' +
+						'background:var(--tm-bg);border:1px solid var(--tm-border);border-radius:4px;padding:6px;' +
+						'white-space:pre-wrap;word-break:break-all;color:var(--tm-text)'
+				});
+				var lines = res.lines.slice().reverse();
+				lines.forEach(function(line) {
+					logArea.appendChild(E('div', {'style':'padding:1px 0;border-bottom:1px solid var(--tm-border)'}, line));
+				});
+				var refreshBtn = E('button', {
+					'class': 'cbi-button',
+					'style': 'font-size:11px;padding:2px 10px;margin-top:6px'
+				}, _('Refresh'));
+				refreshBtn.addEventListener('click', function() {
+					while (container.firstChild) container.removeChild(container.firstChild);
+					container._loaded = false;
+					loadActivityPanel(container);
+				});
+				container.appendChild(logArea);
+				container.appendChild(refreshBtn);
+			}).catch(function(e) {
+				statusSpan.textContent = '✗ ' + e.message;
+				statusSpan.style.color = 'var(--tm-blocked-fg)';
+			});
+		}
+
+		if (opts.showActivity) {
+			activityDiv._loaded = true;
+			loadActivityPanel(activityDiv);
+		}
+
 		return E('div', {'class':'cbi-map', 'style':'color:'+C.hostname}, [
 			E('h2', {'style':'color:'+C.hostname}, _('Traffic Control')),
 			E('div', {'class':'cbi-section'}, [
-				E('div', {'style':'margin-bottom:10px'}, [searchSelect.el]),
-				actionRow,
+				E('div', {'style':'display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap'}, [searchSelect.el, actionRow]),
 				rateLimitRow,
 				statusDiv,
+				activityDiv,
 				statsDiv,
 				extStatsDiv,
 				settingsPanel,

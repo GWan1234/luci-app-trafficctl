@@ -10,6 +10,20 @@ SCRIPTS="/usr/local/bin"
 # Strip unsafe chars from label (allow alphanumeric, dash, underscore, dot)
 sanitize_label() { echo "$1" | tr -cd 'a-zA-Z0-9_.-'; }
 
+# Detect LuCI session peer IP
+get_peer_ip() {
+	local sid
+	sid=$(echo "$HTTP_SID" | tr -cd 'a-f0-9')
+	if [ -n "$sid" ]; then
+		ubus call session info "{\"ubus_rpc_session\":\"$sid\"}" 2>/dev/null | \
+			jsonfilter -e '@.data.peer' 2>/dev/null
+	fi
+}
+
+export TCTL_VIA="luci"
+export TCTL_SRC="${REMOTE_ADDR:-$(get_peer_ip)}"
+export TCTL_USER="${USERNAME:-root}"
+
 case "$1" in
 list)
 	printf '{'
@@ -31,7 +45,10 @@ list)
 	printf '"config_set":{"enabled":"bool","default_mode":"str"},'
 	printf '"telegram_config_get":{},'
 	printf '"telegram_config_set":{"enabled":"bool","bot_token":"str","chat_id":"str","poll_interval":"int","notify_new_device":"bool","notify_known_device":"bool","btn_block_inet":"bool","btn_block_wifi":"bool","btn_limiter":"bool","btn_shaper":"bool"},'
-	printf '"telegram_test":{"bot_token":"str","chat_id":"str"}'
+	printf '"telegram_test":{"bot_token":"str","chat_id":"str"},'
+	printf '"logging_config_get":{},'
+	printf '"logging_config_set":{"enabled":"bool","log_file":"str","max_lines":"int","syslog":"bool","log_blocks":"bool","log_ratelimits":"bool","log_shapes":"bool","log_telegram":"bool","log_config":"bool"},'
+	printf '"activity_log":{"lines":"int"}'
 	printf '}'
 	;;
 call)
@@ -226,6 +243,7 @@ call)
 		done
 		uci commit trafficctl
 		chmod 0600 /etc/config/trafficctl 2>/dev/null
+		tctl_log "telegram_config_change" "" "" "luci" "${TCTL_SRC:-local}"
 		/etc/init.d/trafficctl-telegram reload 2>/dev/null &
 		echo '{"ok":true}'
 		;;
@@ -240,6 +258,67 @@ call)
 			echo '{"ok":false,"msg":"token and chat_id required"}'
 		else
 			"$SCRIPTS/trafficctl-telegram-test.sh" "$token" "$chat_id"
+		fi
+		;;
+	logging_config_get)
+		log_enabled=$(uci -q get trafficctl.logging.enabled)
+		log_file=$(uci -q get trafficctl.logging.log_file)
+		max_lines=$(uci -q get trafficctl.logging.max_lines)
+		log_syslog=$(uci -q get trafficctl.logging.syslog)
+		log_blocks=$(uci -q get trafficctl.logging.log_blocks)
+		log_ratelimits=$(uci -q get trafficctl.logging.log_ratelimits)
+		log_shapes=$(uci -q get trafficctl.logging.log_shapes)
+		log_telegram=$(uci -q get trafficctl.logging.log_telegram)
+		log_config=$(uci -q get trafficctl.logging.log_config)
+		persist=$(uci -q get trafficctl.main.persist_rules)
+		printf '{"enabled":%s,"log_file":"%s","max_lines":%d,"syslog":%s,"log_blocks":%s,"log_ratelimits":%s,"log_shapes":%s,"log_telegram":%s,"log_config":%s,"persist_rules":%s}' \
+			"$([ "${log_enabled:-1}" = "1" ] && echo true || echo false)" \
+			"${log_file:-/tmp/trafficctl/activity.log}" \
+			"${max_lines:-500}" \
+			"$([ "${log_syslog:-1}" = "1" ] && echo true || echo false)" \
+			"$([ "${log_blocks:-1}" != "0" ] && echo true || echo false)" \
+			"$([ "${log_ratelimits:-1}" != "0" ] && echo true || echo false)" \
+			"$([ "${log_shapes:-1}" != "0" ] && echo true || echo false)" \
+			"$([ "${log_telegram:-1}" != "0" ] && echo true || echo false)" \
+			"$([ "${log_config:-1}" != "0" ] && echo true || echo false)" \
+			"$([ "$persist" = "1" ] && echo true || echo false)"
+		;;
+	logging_config_set)
+		read -r input
+		uci -q get trafficctl.logging >/dev/null 2>&1 || uci set trafficctl.logging=logging
+		for opt in enabled syslog log_blocks log_ratelimits log_shapes log_telegram log_config; do
+			val=$(echo "$input" | jsonfilter -e "@.$opt" 2>/dev/null)
+			[ -n "$val" ] && uci set "trafficctl.logging.$opt=$([ "$val" = "true" ] && echo 1 || echo 0)"
+		done
+		val=$(echo "$input" | jsonfilter -e '@.log_file' 2>/dev/null)
+		[ -n "$val" ] && uci set trafficctl.logging.log_file="$val"
+		val=$(echo "$input" | jsonfilter -e '@.max_lines' 2>/dev/null)
+		[ -n "$val" ] && uci set trafficctl.logging.max_lines="$val"
+		val=$(echo "$input" | jsonfilter -e '@.persist_rules' 2>/dev/null)
+		[ -n "$val" ] && uci set "trafficctl.main.persist_rules=$([ "$val" = "true" ] && echo 1 || echo 0)"
+		uci commit trafficctl
+		tctl_log "config_change" "logging" "" "luci" "${TCTL_SRC:-local}"
+		echo '{"ok":true}'
+		;;
+	activity_log)
+		read -r input
+		lines=$(echo "$input" | jsonfilter -e '@.lines' 2>/dev/null)
+		lines="${lines:-50}"
+		log_file=$(uci -q get trafficctl.logging.log_file)
+		log_file="${log_file:-/tmp/trafficctl/activity.log}"
+		if [ -f "$log_file" ]; then
+			printf '{"ok":true,"lines":['
+			tail -n "$lines" "$log_file" | awk '
+			BEGIN { first=1 }
+			{
+				gsub(/\\/, "\\\\"); gsub(/"/, "\\\"")
+				if (!first) printf ","
+				printf "\"%s\"", $0
+				first=0
+			}'
+			printf ']}'
+		else
+			echo '{"ok":true,"lines":[]}'
 		fi
 		;;
 	*)

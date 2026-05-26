@@ -26,6 +26,8 @@ if tctl_is_blocked "$IP"; then
 fi
 
 if tctl_block_add "$IP" "$COMMENT"; then
+    tctl_persist_enabled && tctl_persist_save "block" "$IP" "$LABEL"
+    tctl_log "block" "$IP" "$LABEL" "${TCTL_VIA:-cli}" "${TCTL_SRC:-local}"
     echo "{\"ok\":true,\"msg\":\"internet blocked for $IP\"}"
 else
     echo "{\"ok\":false,\"msg\":\"failed to block $IP\"}"

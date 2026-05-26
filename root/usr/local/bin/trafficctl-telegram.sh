@@ -119,10 +119,23 @@ get_device_field() {
 
 # ── known devices ───────────────────────────────────────────────────────────
 
+seed_known() {
+	local mac info name ip
+	for mac in $(discover_macs); do
+		[ -z "$mac" ] && continue
+		info=$(resolve_mac_info "$mac")
+		name=$(printf '%s' "$info" | cut -f1)
+		ip=$(printf '%s' "$info" | cut -f2)
+		add_known_mac "$mac" "${name:-unknown}" "${ip:-?}"
+	done
+	logger -t trafficctl-tg "Seeded known devices from current state"
+}
+
 load_known() {
-	if [ ! -f "$KNOWN_FILE" ]; then
+	if [ ! -f "$KNOWN_FILE" ] || [ "$(cat "$KNOWN_FILE" 2>/dev/null)" = "[]" ]; then
 		mkdir -p "$(dirname "$KNOWN_FILE")"
-		echo '[]' > "$KNOWN_FILE"
+		[ -f "$KNOWN_FILE" ] || echo '[]' > "$KNOWN_FILE"
+		seed_known
 	fi
 }
 
@@ -155,27 +168,111 @@ add_known_mac() {
 	unlock_known
 }
 
-check_new_devices() {
-	local devices mac name ip conn_type
-	devices=$(get_devices)
-	[ -z "$devices" ] || [ "$devices" = "[]" ] && return
+discover_macs() {
+	local seen_file="/tmp/trafficctl_tg_seen.tmp"
+	: > "$seen_file"
 
-	for mac in $(echo "$devices" | jsonfilter -e '@[*].mac' 2>/dev/null); do
+	# Source 1: ARP table (covers any device that communicated at L2)
+	ip neigh show 2>/dev/null | awk '/lladdr/ {print tolower($5)}' >> "$seen_file"
+
+	# Source 2: DHCP leases (covers any device that requested an IP)
+	if [ -f /tmp/dhcp.leases ]; then
+		awk '{print tolower($2)}' /tmp/dhcp.leases >> "$seen_file"
+	fi
+
+	# Source 3: Wi-Fi associated stations (covers connected Wi-Fi clients even without traffic)
+	for iface in $(iw dev 2>/dev/null | awk '/Interface/{print $2}'); do
+		iw dev "$iface" station dump 2>/dev/null | awk '/Station/{print tolower($2)}'
+	done >> "$seen_file"
+
+	# Deduplicate, filter valid MACs
+	sort -u "$seen_file" | grep -E '^([0-9a-f]{2}:){5}[0-9a-f]{2}$'
+	rm -f "$seen_file"
+}
+
+resolve_mac_info() {
+	local mac="$1" name="" ip="" conn_type="?"
+
+	# Try DHCP leases first
+	if [ -f /tmp/dhcp.leases ]; then
+		ip=$(awk -v m="$mac" 'tolower($2)==m {print $3; exit}' /tmp/dhcp.leases)
+		name=$(awk -v m="$mac" 'tolower($2)==m {print $4; exit}' /tmp/dhcp.leases)
+	fi
+
+	# Fallback: ARP for IP
+	if [ -z "$ip" ]; then
+		ip=$(ip neigh show 2>/dev/null | awk -v m="$mac" 'tolower($5)==m {print $1; exit}')
+	fi
+
+	# Determine connection type
+	for iface in $(iw dev 2>/dev/null | awk '/Interface/{print $2}'); do
+		if iw dev "$iface" station get "$mac" >/dev/null 2>&1; then
+			conn_type="wifi"
+			break
+		fi
+	done
+	if [ "$conn_type" = "?" ] && [ -n "$ip" ]; then
+		conn_type="ethernet"
+	fi
+
+	[ -z "$name" ] || [ "$name" = "*" ] && name="unknown"
+	printf '%s\t%s\t%s' "${name}" "${ip:-?}" "${conn_type}"
+}
+
+ONLINE_STATE_FILE="/tmp/trafficctl_tg_online"
+DHCP_TRIGGER_FILE="/tmp/trafficctl_tg_newdev"
+
+process_dhcp_triggers() {
+	[ -f "$DHCP_TRIGGER_FILE" ] || return 0
+	local tmpf="${DHCP_TRIGGER_FILE}.proc"
+	mv "$DHCP_TRIGGER_FILE" "$tmpf" 2>/dev/null || return 0
+
+	local mac ip name
+	while IFS='	' read -r mac ip name; do
 		[ -z "$mac" ] && continue
-		name=$(echo "$devices" | jsonfilter -e "@[@.mac='$mac'].name" 2>/dev/null)
-		ip=$(echo "$devices" | jsonfilter -e "@[@.mac='$mac'].ip" 2>/dev/null)
-		conn_type=$(echo "$devices" | jsonfilter -e "@[@.mac='$mac'].conn_type" 2>/dev/null)
+		mac=$(printf '%s' "$mac" | tr 'A-F' 'a-f')
 		if ! is_known_mac "$mac"; then
 			add_known_mac "$mac" "${name:-unknown}" "${ip:-?}"
 			if [ "$TG_NOTIFY_NEW" = "1" ]; then
-				tg_send "$(printf '🆕 <b>New device</b>\n%s (%s)\nMAC: %s\nLink: %s' \
+				tg_send "$(printf '🆕 <b>New device</b>\n%s (%s)\nMAC: <code>%s</code>\nLink: dhcp' \
+					"${name:-unknown}" "${ip:-?}" "$mac")"
+			fi
+		fi
+	done < "$tmpf"
+	rm -f "$tmpf"
+}
+
+check_new_devices() {
+	local mac info name ip conn_type
+	local current_macs="/tmp/trafficctl_tg_cur.tmp"
+
+	discover_macs > "$current_macs"
+
+	while read -r mac; do
+		[ -z "$mac" ] && continue
+		if ! is_known_mac "$mac"; then
+			info=$(resolve_mac_info "$mac")
+			name=$(printf '%s' "$info" | cut -f1)
+			ip=$(printf '%s' "$info" | cut -f2)
+			conn_type=$(printf '%s' "$info" | cut -f3)
+			add_known_mac "$mac" "${name:-unknown}" "${ip:-?}"
+			if [ "$TG_NOTIFY_NEW" = "1" ]; then
+				tg_send "$(printf '🆕 <b>New device</b>\n%s (%s)\nMAC: <code>%s</code>\nLink: %s' \
 					"${name:-unknown}" "${ip:-?}" "$mac" "${conn_type:-?}")"
 			fi
 		elif [ "$TG_NOTIFY_KNOWN" = "1" ]; then
-			tg_send "$(printf '📱 <b>Device online</b>\n%s (%s)\nLink: %s' \
-				"${name:-unknown}" "${ip:-?}" "${conn_type:-?}")"
+			if [ -f "$ONLINE_STATE_FILE" ] && ! grep -q "$mac" "$ONLINE_STATE_FILE" 2>/dev/null; then
+				info=$(resolve_mac_info "$mac")
+				name=$(printf '%s' "$info" | cut -f1)
+				ip=$(printf '%s' "$info" | cut -f2)
+				conn_type=$(printf '%s' "$info" | cut -f3)
+				tg_send "$(printf '📱 <b>Device online</b>\n%s (%s)\nLink: %s' \
+					"${name:-unknown}" "${ip:-?}" "${conn_type:-?}")"
+			fi
 		fi
-	done
+	done < "$current_macs"
+
+	mv "$current_macs" "$ONLINE_STATE_FILE"
 }
 
 # ── keyboard builders ───────────────────────────────────────────────────────
@@ -449,6 +546,10 @@ main() {
 	validate_config
 	load_known
 
+	export TCTL_VIA="telegram"
+	export TCTL_SRC="telegram:${TG_CHAT_ID}"
+	export TCTL_USER="telegram-bot"
+
 	logger -t trafficctl-tg "Bot started, chat_id=$TG_CHAT_ID"
 
 	local offset response ok update_count i
@@ -460,6 +561,7 @@ main() {
 
 	while true; do
 		check_new_devices
+		process_dhcp_triggers
 
 		response=$(tg_api "getUpdates" \
 			"$(printf '{"offset":%s,"timeout":%d,"allowed_updates":["message","callback_query"]}' \
