@@ -194,10 +194,11 @@ function fmtBytes(b) {
 }
 function fmtSpeed(bps) {
 	if (!bps || bps < 1) return '—';
-	if (bps < 1024) return bps.toFixed(0) + ' B/s';
-	if (bps < 1048576) return (bps/1024).toFixed(1) + ' KB/s';
-	if (bps < 1073741824) return (bps/1048576).toFixed(2) + ' MB/s';
-	return (bps/1073741824).toFixed(2) + ' GB/s';
+	var bits = bps * 8;
+	if (bits < 1000) return bits.toFixed(0) + ' bit/s';
+	if (bits < 1000000) return (bits/1000).toFixed(1) + ' Kbit/s';
+	if (bits < 1000000000) return (bits/1000000).toFixed(1) + ' Mbit/s';
+	return (bits/1000000000).toFixed(2) + ' Gbit/s';
 }
 function fmtRate(kbit) {
 	if (!kbit || kbit <= 0) return '—';
@@ -272,6 +273,98 @@ function renderSparkline(history, globalMax, width, height, limitKbit) {
 	polyline.setAttribute('stroke-width', '1.5');
 	polyline.setAttribute('stroke-linejoin', 'round');
 	svg.appendChild(polyline);
+	return svg;
+}
+
+function renderFullGraph(history, limitKbit, width, height) {
+	if (!history || history.length < 2) return null;
+	var w = width || 400, h = height || 160;
+	var pad = {top:20, right:12, bottom:28, left:52};
+	var gw = w - pad.left - pad.right, gh = h - pad.top - pad.bottom;
+
+	var maxSpeed = 0;
+	history.forEach(function(p) { if (p.speed > maxSpeed) maxSpeed = p.speed; });
+	var limitBps = limitKbit ? (limitKbit * 1000 / 8) : 0;
+	if (limitBps > maxSpeed) maxSpeed = limitBps * 1.1;
+	if (maxSpeed < 1) maxSpeed = 1;
+	maxSpeed *= 1.15;
+
+	var startTime = history[0].time;
+	var endTime = history[history.length - 1].time;
+	var duration = endTime - startTime || 1;
+
+	var ns = 'http://www.w3.org/2000/svg';
+	var svg = document.createElementNS(ns, 'svg');
+	svg.setAttribute('width', w); svg.setAttribute('height', h);
+	svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+	svg.style.cssText = 'display:block;background:var(--tm-bg);border-radius:6px';
+
+	// Grid lines
+	var gridN = 4;
+	for (var gi = 0; gi <= gridN; gi++) {
+		var gy = pad.top + gh - (gi / gridN) * gh;
+		var gl = document.createElementNS(ns, 'line');
+		gl.setAttribute('x1', pad.left); gl.setAttribute('x2', w - pad.right);
+		gl.setAttribute('y1', gy.toFixed(1)); gl.setAttribute('y2', gy.toFixed(1));
+		gl.setAttribute('stroke', 'var(--tm-border)'); gl.setAttribute('stroke-width', '0.5');
+		svg.appendChild(gl);
+		var lbl = document.createElementNS(ns, 'text');
+		lbl.setAttribute('x', pad.left - 4); lbl.setAttribute('y', (gy + 3).toFixed(1));
+		lbl.setAttribute('text-anchor', 'end');
+		lbl.setAttribute('font-size', '9'); lbl.setAttribute('fill', 'var(--tm-text-mute)');
+		var val = (gi / gridN) * maxSpeed;
+		lbl.textContent = val < 1 ? '' : fmtSpeed(val);
+		svg.appendChild(lbl);
+	}
+
+	// Time axis
+	var ticks = 5;
+	for (var ti = 0; ti <= ticks; ti++) {
+		var tx = pad.left + (ti / ticks) * gw;
+		var tt = startTime + (ti / ticks) * duration;
+		var secs = Math.round((tt - startTime) / 1000);
+		var tl = document.createElementNS(ns, 'text');
+		tl.setAttribute('x', tx.toFixed(1)); tl.setAttribute('y', (h - 6).toFixed(1));
+		tl.setAttribute('text-anchor', 'middle');
+		tl.setAttribute('font-size', '9'); tl.setAttribute('fill', 'var(--tm-text-mute)');
+		tl.textContent = secs + 's';
+		svg.appendChild(tl);
+	}
+
+	// Area + line
+	var points = [];
+	history.forEach(function(p) {
+		var x = pad.left + ((p.time - startTime) / duration) * gw;
+		var y = pad.top + gh - (p.speed / maxSpeed) * gh;
+		points.push(x.toFixed(1) + ',' + y.toFixed(1));
+	});
+	var area = document.createElementNS(ns, 'polyline');
+	area.setAttribute('points', pad.left+','+(pad.top+gh)+' ' + points.join(' ') + ' ' + (pad.left+gw)+','+(pad.top+gh));
+	area.setAttribute('fill', 'var(--tm-speed)'); area.setAttribute('opacity', '0.12'); area.setAttribute('stroke', 'none');
+	svg.appendChild(area);
+	var line = document.createElementNS(ns, 'polyline');
+	line.setAttribute('points', points.join(' '));
+	line.setAttribute('fill', 'none'); line.setAttribute('stroke', 'var(--tm-speed)');
+	line.setAttribute('stroke-width', '2'); line.setAttribute('stroke-linejoin', 'round');
+	svg.appendChild(line);
+
+	// Limit line
+	if (limitBps > 0) {
+		var ly = pad.top + gh - (limitBps / maxSpeed) * gh;
+		var ll = document.createElementNS(ns, 'line');
+		ll.setAttribute('x1', pad.left); ll.setAttribute('x2', w - pad.right);
+		ll.setAttribute('y1', ly.toFixed(1)); ll.setAttribute('y2', ly.toFixed(1));
+		ll.setAttribute('stroke', 'var(--tm-rate-fg)'); ll.setAttribute('stroke-width', '1.5');
+		ll.setAttribute('stroke-dasharray', '6,3'); ll.setAttribute('opacity', '0.8');
+		svg.appendChild(ll);
+		var limLbl = document.createElementNS(ns, 'text');
+		limLbl.setAttribute('x', w - pad.right - 2); limLbl.setAttribute('y', (ly - 4).toFixed(1));
+		limLbl.setAttribute('text-anchor', 'end');
+		limLbl.setAttribute('font-size', '9'); limLbl.setAttribute('fill', 'var(--tm-rate-fg)');
+		limLbl.textContent = fmtRate(limitKbit);
+		svg.appendChild(limLbl);
+	}
+
 	return svg;
 }
 
@@ -564,7 +657,7 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		var compact = c.key === '_spark' || c.key === '_throttle_kbit' || c.key === '_drop_packets' || c.key === '_backlog';
 		var thStyle = TH + (c.key === '_spark' ? ';cursor:default;width:68px' : '') + (compact ? ';white-space:nowrap;width:1%' : '');
 		var attrs = { 'style': thStyle, 'data-col': c.key, 'data-num': c.num ? '1' : '0' };
-		if (c.tip) attrs.title = c.tip;
+		if (c.tip) attrs['data-tip'] = c.tip;
 		var th = E('th', attrs, c.label + arrow);
 		if (c.key !== '_spark') th.addEventListener('click', function() { onSort(c.key, c.num); });
 		return th;
@@ -1013,6 +1106,7 @@ return view.extend({
 	_dropMap:      {},
 	_shapeMap:     {},
 	_speedEwma:    {},
+	_rdnsCache:    {},
 	_sortCol:    'bytes',
 	_sortDir:    'desc',
 	_sumCol:     'name',
@@ -1209,6 +1303,51 @@ return view.extend({
 		var statusDiv = E('div', { 'style': 'display:none' });
 		var statsDiv  = E('div', { 'style': 'margin:8px 0' + (opts.showStats===false?';display:none':'') });
 		var connsDiv  = E('div', { 'style': opts.showConns===false?'display:none':'' });
+
+		// Speed graph popup on spark cell hover
+		var graphPopup = E('div', {'style':'display:none;position:fixed;z-index:500;padding:8px;border-radius:8px;' +
+			'background:var(--tm-bg);border:1px solid var(--tm-border);box-shadow:0 8px 24px rgba(0,0,0,.2);pointer-events:none'});
+		document.body.appendChild(graphPopup);
+		var graphPopupIp = null;
+		var graphPopupTimer = null;
+
+		function showGraphPopup(cell) {
+			var ip = cell.getAttribute('data-spark-ip');
+			if (!ip) return;
+			graphPopupIp = ip;
+			updateGraphPopup();
+			var rect = cell.getBoundingClientRect();
+			graphPopup.style.left = Math.max(8, rect.left - 160) + 'px';
+			graphPopup.style.top = (rect.bottom + 6) + 'px';
+			graphPopup.style.display = '';
+			if (!graphPopupTimer) {
+				graphPopupTimer = setInterval(updateGraphPopup, 2000);
+			}
+		}
+		function updateGraphPopup() {
+			if (!graphPopupIp) return;
+			var hist = self._speedHistory[graphPopupIp];
+			var sm = self._shapeMap[graphPopupIp], dm = self._dropMap[graphPopupIp];
+			var lk = (sm && sm.rate_kbit > 0) ? sm.rate_kbit : ((dm && dm.rate_kbit > 0) ? dm.rate_kbit : 0);
+			while (graphPopup.firstChild) graphPopup.removeChild(graphPopup.firstChild);
+			var svg = renderFullGraph(hist, lk, 380, 150);
+			if (svg) graphPopup.appendChild(svg);
+			else graphPopup.appendChild(E('span', {'style':'color:var(--tm-text-mute);font-size:11px'}, _('Not enough data yet')));
+		}
+		function hideGraphPopup() {
+			graphPopup.style.display = 'none';
+			graphPopupIp = null;
+			if (graphPopupTimer) { clearInterval(graphPopupTimer); graphPopupTimer = null; }
+		}
+
+		connsDiv.addEventListener('mouseenter', function(ev) {
+			var cell = ev.target.closest ? ev.target.closest('td[data-spark-ip]') : null;
+			if (cell) showGraphPopup(cell);
+		}, true);
+		connsDiv.addEventListener('mouseleave', function(ev) {
+			var cell = ev.target.closest ? ev.target.closest('td[data-spark-ip]') : null;
+			if (cell) hideGraphPopup();
+		}, true);
 
 		var BTN_BASE = 'padding:5px 14px;border-radius:3px;cursor:pointer;font-size:13px;min-width:140px;text-align:center;font-weight:500';
 		var BTN_ORANGE = BTN_BASE + ';background:#c05621;color:#fff;border:1px solid #9c4221';
@@ -1718,9 +1857,22 @@ return view.extend({
 								if (!dst || seen[dst]) return;
 								if (PRIVATE_RE.test(dst)) return;
 								seen[dst] = true;
+								// Use cached result if available
+								if (self._rdnsCache[dst] !== undefined) {
+									var cached = self._rdnsCache[dst];
+									Array.prototype.forEach.call(
+										connsDiv.querySelectorAll('td[data-dst="'+dst+'"]'),
+										function(cell) {
+											if (cached) { cell.textContent = cached; cell.style.color = C.hostname; }
+											else { cell.innerHTML = '<span style="color:'+C.textFaint+'">—</span>'; }
+										}
+									);
+									return;
+								}
 								callRdns(dst).then(function(res) {
 									if (gen !== self._queryGen) return;
 									var host = (res && res.host) ? res.host : null;
+									self._rdnsCache[dst] = host || null;
 									Array.prototype.forEach.call(
 										connsDiv.querySelectorAll('td[data-dst="'+dst+'"]'),
 										function(cell) {
@@ -1734,6 +1886,7 @@ return view.extend({
 									);
 								}).catch(function() {
 									if (gen !== self._queryGen) return;
+									self._rdnsCache[dst] = null;
 									Array.prototype.forEach.call(
 										connsDiv.querySelectorAll('td[data-dst="'+dst+'"]'),
 										function(cell) { cell.innerHTML = '<span style="color:'+C.textFaint+'">—</span>'; }
