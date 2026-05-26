@@ -9,6 +9,62 @@ Per-device traffic monitoring and control for OpenWrt routers. Monitor connectio
 
 ---
 
+## Screenshots
+
+<table>
+<tr>
+<td align="center"><b>Dashboard — live speed graph</b></td>
+<td align="center"><b>Block / Unblock Internet</b></td>
+</tr>
+<tr>
+<td><img src="docs/img/speed-graph-dark.gif" alt="Speed graph" width="480"/></td>
+<td><img src="docs/img/block-internet-dark.gif" alt="Block internet" width="480"/></td>
+</tr>
+<tr>
+<td align="center"><b>Rate Limiting &amp; Traffic Shaping</b></td>
+<td align="center"><b>Per-device connections</b></td>
+</tr>
+<tr>
+<td><img src="docs/img/rate-limit-dark.gif" alt="Rate limiting" width="480"/></td>
+<td><img src="docs/img/dark/02-device-detail.png" alt="Device detail" width="480"/></td>
+</tr>
+</table>
+
+<details>
+<summary>More screenshots — light theme, search, extended stats…</summary>
+<br/>
+
+<table>
+<tr>
+<td align="center"><b>Overview — light theme</b></td>
+<td align="center"><b>Searchable device picker</b></td>
+</tr>
+<tr>
+<td><img src="docs/img/light/01-overview.png" alt="Overview light" width="480"/></td>
+<td><img src="docs/img/dark/16-search-filter.png" alt="Search" width="480"/></td>
+</tr>
+<tr>
+<td align="center"><b>WiFi blocked</b></td>
+<td align="center"><b>Extended statistics</b></td>
+</tr>
+<tr>
+<td><img src="docs/img/dark/05-wifi-blocked.png" alt="WiFi blocked" width="480"/></td>
+<td><img src="docs/img/dark/13-extended-stats-device.png" alt="Extended stats" width="480"/></td>
+</tr>
+<tr>
+<td align="center"><b>Group connections by service</b></td>
+<td align="center"><b>Settings &amp; column toggles</b></td>
+</tr>
+<tr>
+<td><img src="docs/img/dark/14-group-by-service.png" alt="Group by service" width="480"/></td>
+<td><img src="docs/img/dark/10-settings.png" alt="Settings" width="480"/></td>
+</tr>
+</table>
+
+</details>
+
+---
+
 ## Features
 
 - **Real-time Per-device Monitoring** -- View active connections per device with TCP/UDP counts, TCP state breakdown, destination IPs, and live bandwidth speed (sparkline graphs).
