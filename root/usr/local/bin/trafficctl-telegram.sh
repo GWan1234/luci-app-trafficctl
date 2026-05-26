@@ -126,6 +126,9 @@ load_known() {
 	fi
 }
 
+lock_known() { while ! mkdir /tmp/.trafficctl_known.lock 2>/dev/null; do sleep 0.1; done; }
+unlock_known() { rmdir /tmp/.trafficctl_known.lock 2>/dev/null; }
+
 is_known_mac() {
 	grep -q "\"$1\"" "$KNOWN_FILE" 2>/dev/null
 }
@@ -134,15 +137,22 @@ add_known_mac() {
 	local mac="$1" name="$2" ip="$3"
 	local now
 	now=$(date +%s)
+	# Sanitize inputs: strip anything that could break JSON or sed
+	mac=$(printf '%s' "$mac" | tr -cd 'a-fA-F0-9:')
+	name=$(printf '%s' "$name" | tr -cd 'a-zA-Z0-9 _.-')
+	ip=$(printf '%s' "$ip" | tr -cd '0-9.')
 	local tmp="${KNOWN_FILE}.tmp"
+	local entry
+	entry=$(printf '{"mac":"%s","name":"%s","ip":"%s","first_seen":%d}' \
+		"$mac" "$name" "$ip" "$now")
+	lock_known
 	if [ "$(cat "$KNOWN_FILE" 2>/dev/null)" = "[]" ]; then
-		printf '[{"mac":"%s","name":"%s","ip":"%s","first_seen":%d}]' \
-			"$mac" "$name" "$ip" "$now" > "$tmp"
+		printf '[%s]' "$entry" > "$tmp"
 	else
-		sed "s/\]$/,{\"mac\":\"$mac\",\"name\":\"$name\",\"ip\":\"$ip\",\"first_seen\":$now}]/" \
-			"$KNOWN_FILE" > "$tmp"
+		awk -v e="$entry" '{sub(/\]$/,","e"]")}1' "$KNOWN_FILE" > "$tmp"
 	fi
 	mv "$tmp" "$KNOWN_FILE"
+	unlock_known
 }
 
 check_new_devices() {
@@ -328,6 +338,18 @@ handle_callback() {
 	verb=$(echo "$data" | cut -d: -f2)
 	ip=$(echo "$data" | cut -d: -f3)
 	param=$(echo "$data" | cut -d: -f4)
+
+	# Validate IP from callback data
+	if [ -n "$ip" ] && [ "$verb" != "back" ]; then
+		if ! echo "$ip" | grep -qE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$'; then
+			tg_answer_cb "$cb_id" "invalid IP"
+			return
+		fi
+	fi
+	# Validate rate param is numeric
+	if [ -n "$param" ]; then
+		case "$param" in *[!0-9]*) tg_answer_cb "$cb_id" "invalid param"; return ;; esac
+	fi
 
 	case "$verb" in
 	menu)

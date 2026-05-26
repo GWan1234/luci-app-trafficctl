@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/ci.yml/badge.svg)](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/ci.yml)
 [![Release](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/release.yml/badge.svg)](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/release.yml)
+[![CodeQL](https://github.com/YusDyr/luci-app-trafficctl/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/YusDyr/luci-app-trafficctl/security/code-scanning)
 [![Latest Release](https://img.shields.io/github/v/release/YusDyr/luci-app-trafficctl)](https://github.com/YusDyr/luci-app-trafficctl/releases/latest)
 [![License](https://img.shields.io/github/license/YusDyr/luci-app-trafficctl)](LICENSE)
 
@@ -80,6 +81,29 @@ Per-device traffic monitoring and control for OpenWrt routers. Monitor connectio
 - **Reboot Persistence** -- Shaping rules survive reboot via a hotplug script that restores tc/HTB classes when the LAN interface comes up.
 
 ---
+
+## System Requirements
+
+### Hardware
+
+|               | Minimum              | Recommended          |
+|---------------|----------------------|----------------------|
+| **RAM**       | 64 MB free           | 128+ MB free         |
+| **Flash**     | 300 KB (package)     | 1 MB (with all deps) |
+| **CPU**       | Any (MIPS/ARM/x86)   | ARM Cortex-A53+      |
+
+### Software
+
+| Package | Required for | Notes |
+|---------|-------------|-------|
+| `conntrack` | Core monitoring | Always required |
+| `luci-base` | Web interface | Always required |
+| `rpcd` | Backend RPC | Always required |
+| `tc-full` + `kmod-sched-core` + `kmod-sched-htb` | Traffic shaping | For HTB/fq_codel queues |
+| `iw-full` | Interface detection | WiFi band identification |
+| `bridge-utils` | Interface detection | LAN port identification (brctl) |
+| `curl` + `jsonfilter` | Telegram bot | jsonfilter is part of base OpenWrt |
+| `bind-dig` | Reverse DNS | Optional, for hostname resolution |
 
 ## Compatibility
 

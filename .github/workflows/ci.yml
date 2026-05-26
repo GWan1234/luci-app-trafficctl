@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   shellcheck:
     name: ShellCheck
@@ -40,5 +43,15 @@ jobs:
         run: bash tests/test_fw.sh
       - name: Telegram unit tests
         run: bash tests/test_telegram.sh
+      - name: Security tests
+        run: bash tests/test_security.sh
       - name: IPK build test
         run: bash tests/test_build_ipk.sh
+
+  openwrt-rootfs:
+    name: OpenWrt Rootfs Test
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test scripts in OpenWrt-like environment
+        run: bash tests/test_openwrt_compat.sh
