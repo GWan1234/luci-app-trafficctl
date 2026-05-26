@@ -29,33 +29,54 @@ jobs:
           - { version: "22.03", arch: "armvirt32",  image: "armvirt-32-v22.03.7" }
           # 23.05
           - { version: "23.05", arch: "x86-64",    image: "x86-64-v23.05.6" }
+          - { version: "23.05", arch: "x86-generic", image: "x86-generic-v23.05.6" }
+          - { version: "23.05", arch: "mips_24kc", image: "mips_24kc-v23.05.6" }
           - { version: "23.05", arch: "aarch64",   image: "aarch64_generic-v23.05.6" }
+          - { version: "23.05", arch: "arm_a9",    image: "arm_cortex-a9_vfpv3-d16-v23.05.6" }
           - { version: "23.05", arch: "arm_a15",   image: "arm_cortex-a15_neon-vfpv4-v23.05.6" }
           - { version: "23.05", arch: "armsr",     image: "armsr-armv8-v23.05.6" }
+          - { version: "23.05", arch: "i386",      image: "i386_pentium4-v23.05.6" }
           # 24.10 (first available)
-          - { version: "24.10.1", arch: "x86-64",  image: "x86-64-v24.10.1" }
-          - { version: "24.10.1", arch: "aarch64", image: "aarch64_generic-v24.10.1" }
-          - { version: "24.10.1", arch: "arm_a15", image: "arm_cortex-a15_neon-vfpv4-v24.10.1" }
-          - { version: "24.10.1", arch: "armsr",   image: "armsr-armv8-v24.10.1" }
+          - { version: "24.10.1", arch: "x86-64",    image: "x86-64-v24.10.1" }
+          - { version: "24.10.1", arch: "x86-generic", image: "x86-generic-v24.10.1" }
+          - { version: "24.10.1", arch: "mips_24kc", image: "mips_24kc-v24.10.1" }
+          - { version: "24.10.1", arch: "aarch64",   image: "aarch64_generic-v24.10.1" }
+          - { version: "24.10.1", arch: "arm_a9",    image: "arm_cortex-a9_vfpv3-d16-v24.10.1" }
+          - { version: "24.10.1", arch: "arm_a15",   image: "arm_cortex-a15_neon-vfpv4-v24.10.1" }
+          - { version: "24.10.1", arch: "armsr",     image: "armsr-armv8-v24.10.1" }
+          - { version: "24.10.1", arch: "i386",      image: "i386_pentium4-v24.10.1" }
           # 24.10 (latest)
-          - { version: "24.10.6", arch: "x86-64",  image: "x86-64-v24.10.6" }
-          - { version: "24.10.6", arch: "aarch64", image: "aarch64_generic-v24.10.6" }
-          - { version: "24.10.6", arch: "arm_a15", image: "arm_cortex-a15_neon-vfpv4-v24.10.6" }
-          - { version: "24.10.6", arch: "armsr",   image: "armsr-armv8-v24.10.6" }
+          - { version: "24.10.6", arch: "x86-64",    image: "x86-64-v24.10.6" }
+          - { version: "24.10.6", arch: "x86-generic", image: "x86-generic-v24.10.6" }
+          - { version: "24.10.6", arch: "mips_24kc", image: "mips_24kc-v24.10.6" }
+          - { version: "24.10.6", arch: "aarch64",   image: "aarch64_generic-v24.10.6" }
+          - { version: "24.10.6", arch: "arm_a9",    image: "arm_cortex-a9_vfpv3-d16-v24.10.6" }
+          - { version: "24.10.6", arch: "arm_a15",   image: "arm_cortex-a15_neon-vfpv4-v24.10.6" }
+          - { version: "24.10.6", arch: "armsr",     image: "armsr-armv8-v24.10.6" }
+          - { version: "24.10.6", arch: "i386",      image: "i386_pentium4-v24.10.6" }
           # 25.12 (first)
-          - { version: "25.12.0", arch: "x86-64",  image: "x86-64-v25.12.0" }
-          - { version: "25.12.0", arch: "aarch64", image: "aarch64_generic-v25.12.0" }
-          - { version: "25.12.0", arch: "arm_a15", image: "arm_cortex-a15_neon-vfpv4-v25.12.0" }
-          - { version: "25.12.0", arch: "armsr",   image: "armsr-armv8-v25.12.0" }
+          - { version: "25.12.0", arch: "x86-64",    image: "x86-64-v25.12.0" }
+          - { version: "25.12.0", arch: "x86-generic", image: "x86-generic-v25.12.0" }
+          - { version: "25.12.0", arch: "mips_24kc", image: "mips_24kc-v25.12.0" }
+          - { version: "25.12.0", arch: "aarch64",   image: "aarch64_generic-v25.12.0" }
+          - { version: "25.12.0", arch: "arm_a9",    image: "arm_cortex-a9_vfpv3-d16-v25.12.0" }
+          - { version: "25.12.0", arch: "arm_a15",   image: "arm_cortex-a15_neon-vfpv4-v25.12.0" }
+          - { version: "25.12.0", arch: "armsr",     image: "armsr-armv8-v25.12.0" }
+          - { version: "25.12.0", arch: "i386",      image: "i386_pentium4-v25.12.0" }
           # 25.12 (latest stable)
-          - { version: "25.12.4", arch: "x86-64",  image: "x86-64-v25.12.4" }
-          - { version: "25.12.4", arch: "aarch64", image: "aarch64_generic-v25.12.4" }
-          - { version: "25.12.4", arch: "arm_a15", image: "arm_cortex-a15_neon-vfpv4-v25.12.4" }
-          - { version: "25.12.4", arch: "armsr",   image: "armsr-armv8-v25.12.4" }
+          - { version: "25.12.4", arch: "x86-64",    image: "x86-64-v25.12.4" }
+          - { version: "25.12.4", arch: "x86-generic", image: "x86-generic-v25.12.4" }
+          - { version: "25.12.4", arch: "mips_24kc", image: "mips_24kc-v25.12.4" }
+          - { version: "25.12.4", arch: "aarch64",   image: "aarch64_generic-v25.12.4" }
+          - { version: "25.12.4", arch: "arm_a9",    image: "arm_cortex-a9_vfpv3-d16-v25.12.4" }
+          - { version: "25.12.4", arch: "arm_a15",   image: "arm_cortex-a15_neon-vfpv4-v25.12.4" }
+          - { version: "25.12.4", arch: "armsr",     image: "armsr-armv8-v25.12.4" }
+          - { version: "25.12.4", arch: "i386",      image: "i386_pentium4-v25.12.4" }
           # snapshot (latest dev)
-          - { version: "snapshot", arch: "x86-64",  image: "x86-64-snapshot" }
-          - { version: "snapshot", arch: "aarch64", image: "aarch64_generic-snapshot" }
-          - { version: "snapshot", arch: "armsr",   image: "armsr-armv8-snapshot" }
+          - { version: "snapshot", arch: "x86-64",    image: "x86-64-snapshot" }
+          - { version: "snapshot", arch: "mips_24kc", image: "mips_24kc-snapshot" }
+          - { version: "snapshot", arch: "aarch64",   image: "aarch64_generic-snapshot" }
+          - { version: "snapshot", arch: "armsr",     image: "armsr-armv8-snapshot" }
     steps:
       - uses: actions/checkout@v6
       - uses: docker/setup-qemu-action@v3
