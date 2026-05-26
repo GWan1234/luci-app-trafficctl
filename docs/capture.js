@@ -232,6 +232,28 @@ async function collapseSection(page, titleFragment) {
   await page.waitForTimeout(400);
 }
 
+// Click the Apply button, scrolling into view and retrying via DOM if needed
+async function clickApply(page) {
+  const btn = page.locator('button:has-text("Apply")');
+  try {
+    await btn.scrollIntoViewIfNeeded({ timeout: 3000 });
+    await btn.click({ timeout: 5000 });
+  } catch (e) {
+    // Fallback: click via DOM evaluate
+    const clicked = await page.evaluate(() => {
+      for (const b of document.querySelectorAll('button')) {
+        if (b.textContent.includes('Apply') && !b.disabled) {
+          b.scrollIntoView();
+          b.click();
+          return true;
+        }
+      }
+      return false;
+    });
+    if (!clicked) throw new Error('Apply button not found in DOM');
+  }
+}
+
 // Find best candidate device — prefers Eugene-Asus, vivo-X200, or any phone-like device
 async function findDevice(page) {
   const result = await page.evaluate(() => {
@@ -277,7 +299,7 @@ async function cleanDevice(page, ip) {
   if (rate !== 'Off') {
     console.log(`    Removing rate limit (${rate})…`);
     await pickOption(page, rate, 'Off');
-    await page.locator('button:has-text("Apply")').click();
+    await clickApply(page);
     await waitDone(page);
   }
 
@@ -619,33 +641,40 @@ async function captureTheme(page, dark, device) {
 
   // 9–11. Rate limit GIF: Off → Limiter 10M → Shaper 10M → Off
   console.log('  [07-09] Rate limit sequence…');
+  // Re-select device to ensure clean state after WiFi block/unblock
+  await selectDevice(page, device.ip);
+  await closeSettings(page);
+  await page.waitForTimeout(1000);
   clearFrames();
   counter.i = 0;
 
-  await maskedFrame(page, 'bi', counter); // frame 0: clean state
+  await maskedFrame(page, 'rl', counter); // frame 0: clean state
 
   await pickOption(page, 'Off', '10 Mbit/s');
   await pickOption(page, 'Shaper (queue)', 'Limiter (drop)');
-  await maskedFrame(page, 'bi', counter); // frame 1: options selected
+  await page.waitForTimeout(500);
+  await maskedFrame(page, 'rl', counter); // frame 1: options selected
 
-  await page.locator('button:has-text("Apply")').click();
+  await clickApply(page);
   await waitDone(page);
-  await maskedFrame(page, 'bi', counter); await maskedFrame(page, 'bi', counter); // frames 2-3
+  await maskedFrame(page, 'rl', counter); await maskedFrame(page, 'rl', counter); // frames 2-3
   await maskedShot(page, path.join(DIR, '07-limiter-applied.png'));
 
   await pickOption(page, 'Limiter (drop)', 'Shaper (queue)');
-  await page.locator('button:has-text("Apply")').click();
+  await page.waitForTimeout(300);
+  await clickApply(page);
   await waitDone(page);
-  await maskedFrame(page, 'bi', counter); // frame 4
+  await maskedFrame(page, 'rl', counter); // frame 4
   await maskedShot(page, path.join(DIR, '08-shaper-applied.png'));
 
   await pickOption(page, '10 Mbit/s', 'Off');
-  await page.locator('button:has-text("Apply")').click();
+  await page.waitForTimeout(300);
+  await clickApply(page);
   await waitDone(page);
-  await maskedFrame(page, 'bi', counter); await maskedFrame(page, 'bi', counter); // frames 5-6
+  await maskedFrame(page, 'rl', counter); await maskedFrame(page, 'rl', counter); // frames 5-6
   await maskedShot(page, path.join(DIR, '09-throttle-removed.png'));
 
-  makeGif('bi_%03d.png', path.join(IMG_GIF, `rate-limit-${label}.gif`), 2);
+  makeGif('rl_%03d.png', path.join(IMG_GIF, `rate-limit-${label}.gif`), 2);
 
   // 12. Settings panel
   console.log('  [10] Settings panel…');
@@ -750,13 +779,13 @@ async function captureTheme(page, dark, device) {
   await closeSettings(page);
   await pickOption(page, 'Off', '10 Mbit/s');
   await pickOption(page, 'Shaper (queue)', 'Limiter (drop)');
-  await page.locator('button:has-text("Apply")').click();
+  await clickApply(page);
   await waitDone(page);
   await page.waitForTimeout(800);
   await setExtended(true);
   await maskedShot(page, path.join(DIR, '13-extended-stats-device.png'));
   await pickOption(page, '10 Mbit/s', 'Off');
-  await page.locator('button:has-text("Apply")').click();
+  await clickApply(page);
   await waitDone(page);
   await setExtended(false);
 
