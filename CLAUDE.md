@@ -32,9 +32,14 @@ root/usr/local/bin/
   trafficctl-shape-stats.sh      — Shaper counters
   trafficctl-bytes.sh            — Per-device byte counters
   trafficctl-rdns.sh             — Reverse DNS lookup
+  trafficctl-telegram.sh         — Telegram bot daemon (long polling)
+  trafficctl-telegram-test.sh    — Send test message to Telegram
 
 root/usr/libexec/rpcd/
   trafficctl             — rpcd/ubus backend (JSON object output, not arrays)
+
+root/etc/init.d/
+  trafficctl-telegram    — procd init script for the bot
 ```
 
 ## JavaScript Conventions

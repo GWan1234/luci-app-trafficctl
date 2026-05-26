@@ -34,6 +34,11 @@ The frontend calls these via `rpc.declare()`:
 | `macfilter_add` | `trafficctl-macfilter-add.sh` | `ip` |
 | `macfilter_remove` | `trafficctl-macfilter-remove.sh` | `ip` |
 | `rdns` | `trafficctl-rdns.sh` | `ip` |
+| `config_get` | (inline) | (none) |
+| `config_set` | (inline) | `enabled`, `default_mode` |
+| `telegram_config_get` | (inline) | (none) |
+| `telegram_config_set` | (inline) | `enabled`, `bot_token`, `chat_id`, `poll_interval`, `notify_new_device`, `notify_known_device`, `btn_block_inet`, `btn_block_wifi`, `btn_limiter`, `btn_shaper` |
+| `telegram_test` | `trafficctl-telegram-test.sh` | `bot_token`, `chat_id` |
 
 ---
 
@@ -275,6 +280,44 @@ Block/unblock a device from WiFi (MAC filter).
 - Sets `macfilter=deny` on all wifi-iface sections.
 - Adds/removes MAC from `maclist`.
 - Runs `wifi reload`.
+
+---
+
+## Telegram Bot
+
+### trafficctl-telegram.sh
+
+Bot daemon using Telegram long polling. Runs under procd.
+
+**Commands:**
+- `/devices` -- inline keyboard with all active devices
+- `/status` -- text summary of blocked/limited devices
+- `/help` -- usage
+
+**Callback data format:** `act:<verb>:<ip>[:<param>]`
+
+| Callback | Action |
+|----------|--------|
+| `act:menu:<ip>` | Show device action buttons |
+| `act:block:<ip>` | Block internet |
+| `act:unblock:<ip>` | Unblock internet |
+| `act:wblock:<ip>` | Block WiFi |
+| `act:wunblock:<ip>` | Unblock WiFi |
+| `act:limit:<ip>:<rate>` | Apply limiter (rate in kbit/s) |
+| `act:unlimit:<ip>` | Remove limiter |
+| `act:shape:<ip>:<rate>` | Apply shaper |
+| `act:unshape:<ip>` | Remove shaper |
+| `act:back` | Return to device list |
+
+**Known devices file:** `/etc/trafficmon/telegram_known.json` -- tracks MACs for new device notifications.
+
+### trafficctl-telegram-test.sh
+
+```
+trafficctl-telegram-test.sh <token> <chat_id>
+```
+
+Validates token format and chat_id, sends a test message. Returns `{"ok":true,"msg":"..."}`.
 
 ---
 

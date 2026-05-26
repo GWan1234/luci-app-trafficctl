@@ -355,6 +355,29 @@ The hotplug script triggers on `ACTION=ifup` and `INTERFACE=lan`, with a readine
 
 ---
 
+## Telegram Bot
+
+Optional long-polling daemon (`trafficctl-telegram.sh`) running under procd.
+
+```
+Telegram API  ←──curl long poll──  trafficctl-telegram.sh (procd)
+                                        │
+                                        ├── trafficctl-summary.sh (device list)
+                                        ├── trafficctl-block.sh / unblock.sh
+                                        ├── trafficctl-macfilter-add/remove.sh
+                                        ├── trafficctl-ratelimit.sh
+                                        └── trafficctl-shape.sh
+```
+
+- **Polling:** `getUpdates?timeout=N` acts as both fetch and sleep — no separate timer needed.
+- **Security:** Only responds to messages from the configured `chat_id`. Unauthorized messages are silently dropped.
+- **Device cache:** Summary output is cached for 5 seconds in `/tmp/trafficctl_tg_devices.json`.
+- **Known devices:** `/etc/trafficmon/telegram_known.json` tracks MACs for new device notifications.
+- **Configuration:** UCI section `trafficctl.telegram` with token, chat_id, notification and button toggles. Token is masked (never returned to the frontend).
+- **Init:** procd `respawn 3600 5 5` + `service_triggers` for auto-reload on UCI commit.
+
+---
+
 ## Security Model
 
 - All script execution is gated by rpcd ACLs (`luci-app-trafficctl.json`).
@@ -364,3 +387,4 @@ The hotplug script triggers on `ACTION=ifup` and `INTERFACE=lan`, with a readine
 - Protocol parameter: `case` whitelist (`tcp|udp|all`), not interpolated.
 - No user-supplied strings are passed to shell eval.
 - File locking for concurrent `shapes.json` writes.
+- Telegram bot token stored in UCI with file mode 0600; token is masked in rpcd responses (`***`).

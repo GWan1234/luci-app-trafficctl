@@ -150,17 +150,20 @@ check_new_devices() {
 	devices=$(get_devices)
 	[ -z "$devices" ] || [ "$devices" = "[]" ] && return
 
-	echo "$devices" | jsonfilter -e '@[*].mac' 2>/dev/null | while read -r mac; do
+	for mac in $(echo "$devices" | jsonfilter -e '@[*].mac' 2>/dev/null); do
 		[ -z "$mac" ] && continue
+		name=$(echo "$devices" | jsonfilter -e "@[@.mac='$mac'].name" 2>/dev/null)
+		ip=$(echo "$devices" | jsonfilter -e "@[@.mac='$mac'].ip" 2>/dev/null)
+		conn_type=$(echo "$devices" | jsonfilter -e "@[@.mac='$mac'].conn_type" 2>/dev/null)
 		if ! is_known_mac "$mac"; then
-			name=$(echo "$devices" | jsonfilter -e "@[@.mac='$mac'].name" 2>/dev/null)
-			ip=$(echo "$devices" | jsonfilter -e "@[@.mac='$mac'].ip" 2>/dev/null)
-			conn_type=$(echo "$devices" | jsonfilter -e "@[@.mac='$mac'].conn_type" 2>/dev/null)
 			add_known_mac "$mac" "${name:-unknown}" "${ip:-?}"
 			if [ "$TG_NOTIFY_NEW" = "1" ]; then
 				tg_send "$(printf '🆕 <b>New device</b>\n%s (%s)\nMAC: %s\nLink: %s' \
 					"${name:-unknown}" "${ip:-?}" "$mac" "${conn_type:-?}")"
 			fi
+		elif [ "$TG_NOTIFY_KNOWN" = "1" ]; then
+			tg_send "$(printf '📱 <b>Device online</b>\n%s (%s)\nLink: %s' \
+				"${name:-unknown}" "${ip:-?}" "${conn_type:-?}")"
 		fi
 	done
 }

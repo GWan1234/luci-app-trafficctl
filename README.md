@@ -76,6 +76,7 @@ Per-device traffic monitoring and control for OpenWrt routers. Monitor connectio
 - **Live Speed Polling** -- Optional polling with configurable interval or off by default; shows sparkline per device.
 - **Reverse DNS** -- Optional hostname resolution for external destination IPs.
 - **Searchable Device Picker** -- Inline search by name, IP, or MAC with filtered dropdown.
+- **Telegram Bot** -- Optional bot for remote control: device list, block/unblock, rate limit, shape traffic, new device notifications. Runs on the router via long polling, no external server needed.
 - **Reboot Persistence** -- Shaping rules survive reboot via a hotplug script that restores tc/HTB classes when the LAN interface comes up.
 
 ---
@@ -141,6 +142,9 @@ opkg install iw-full
 
 # For reverse DNS (optional)
 opkg install bind-dig
+
+# For Telegram bot (optional)
+opkg install curl
 ```
 
 ---
@@ -153,6 +157,13 @@ opkg install bind-dig
 4. Use the search bar to find a device by name, IP, or MAC.
 5. Select a device to see its per-connection detail table.
 6. Use the action buttons to pause internet, block WiFi, or set a speed limit.
+
+### Telegram Bot (optional)
+
+1. Create a bot via [@BotFather](https://t.me/BotFather) and copy the token.
+2. Send any message to your bot and find your chat ID via `https://api.telegram.org/bot<TOKEN>/getUpdates`.
+3. In LuCI, expand **Settings > Telegram Bot**, enter token and chat ID, click **Test**, then **Save**.
+4. In Telegram, send `/devices` to see the device list with action buttons.
 
 ---
 
@@ -218,6 +229,8 @@ The frontend talks to a thin rpcd dispatcher over ubus. Backend shell scripts sp
 | `root/usr/libexec/rpcd/trafficctl` | rpcd backend — JSON-RPC dispatch |
 | `root/usr/local/bin/trafficctl-*.sh` | Backend scripts (monitoring + control) |
 | `root/usr/local/bin/trafficctl-fw.sh` | Firewall abstraction layer (sourced) |
+| `root/usr/local/bin/trafficctl-telegram.sh` | Telegram bot daemon (long polling) |
+| `root/etc/init.d/trafficctl-telegram` | procd init script for the bot |
 | `root/etc/hotplug.d/iface/99-trafficctl-shapes` | Boot persistence for tc rules |
 | `root/usr/share/rpcd/acl.d/` | ACL permissions |
 | `Makefile` | OpenWrt package build |
