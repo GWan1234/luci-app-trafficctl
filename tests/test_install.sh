@@ -1,46 +1,58 @@
 #!/bin/sh
 # Runs INSIDE an OpenWrt rootfs Docker container.
 # Usage: sh /tests/test_install.sh /dist/luci-app-trafficctl_*.ipk
+# Does NOT use opkg — extracts the IPK directly so the test works on any
+# rootfs image regardless of its arch configuration.
 set -e
 
 IPK="$1"
 
-mkdir -p /var/lock /tmp/opkg-lists
+[ -f "$IPK" ] || { echo "IPK not found: $IPK"; exit 1; }
 
-# Ensure opkg recognises "Architecture: all" packages.
-# OpenWrt rootfs images may not list "all" in their arch config, which causes
-# opkg to reject the package with "incompatible with the architectures
-# configured" even though arch:all is universally installable.
-# /etc/opkg/arch.conf is the canonical location since OpenWrt 18.06+; older
-# images use /etc/opkg.conf.  We prepend the entry so it takes lowest priority
-# (priority 1) without disturbing any existing arch entries.
-for f in /etc/opkg/arch.conf /etc/opkg.conf; do
-  if [ -f "$f" ]; then
-    grep -q "^arch all " "$f" || sed -i "1s|^|arch all 1\n|" "$f"
-    break
-  fi
-done
+TMPDIR=$(mktemp -d)
+trap 'rm -rf "$TMPDIR"' EXIT
 
-opkg install --force-depends "$IPK"
+# IPK is a tar.gz containing: debian-binary, control.tar.gz, data.tar.gz
+tar xzf "$IPK" -C "$TMPDIR"
 
+# Install package files directly into the filesystem root
+tar xzf "$TMPDIR/data.tar.gz" -C /
+
+# Verify all expected files are present
 for f in \
   /usr/local/bin/trafficctl-summary.sh \
   /usr/local/bin/trafficctl-fw.sh \
   /usr/local/bin/trafficctl-device.sh \
   /usr/local/bin/trafficctl-telegram.sh \
+  /usr/local/bin/trafficctl-telegram-test.sh \
   /usr/local/bin/trafficctl-block.sh \
   /usr/local/bin/trafficctl-unblock.sh \
   /usr/local/bin/trafficctl-ratelimit.sh \
+  /usr/local/bin/trafficctl-ratelimit-stats.sh \
   /usr/local/bin/trafficctl-shape.sh \
+  /usr/local/bin/trafficctl-shape-stats.sh \
+  /usr/local/bin/trafficctl-bytes.sh \
+  /usr/local/bin/trafficctl-rdns.sh \
+  /usr/local/bin/trafficctl-macfilter-add.sh \
+  /usr/local/bin/trafficctl-macfilter-remove.sh \
   /usr/libexec/rpcd/luci.trafficctl \
   /www/luci-static/resources/view/trafficctl/status.js \
   /usr/share/luci/menu.d/luci-app-trafficctl.json \
   /usr/share/rpcd/acl.d/luci-app-trafficctl.json \
-  /etc/config/trafficctl; do
+  /etc/config/trafficctl \
+  /etc/hotplug.d/dhcp/99-trafficctl-newdevice \
+  /etc/hotplug.d/iface/99-trafficctl-shapes \
+  /etc/init.d/trafficctl-telegram; do
   [ -f "$f" ] || { echo "MISSING: $f"; exit 1; }
 done
 
-for s in /usr/local/bin/trafficctl-*.sh /usr/libexec/rpcd/luci.trafficctl; do
+# Verify shell scripts have valid syntax and are executable
+for s in \
+  /usr/local/bin/trafficctl-*.sh \
+  /usr/libexec/rpcd/luci.trafficctl \
+  /etc/hotplug.d/dhcp/99-trafficctl-newdevice \
+  /etc/hotplug.d/iface/99-trafficctl-shapes \
+  /etc/init.d/trafficctl-telegram; do
   ash -n "$s" || { echo "SYNTAX ERROR: $s"; exit 1; }
   [ -x "$s" ] || { echo "NOT EXECUTABLE: $s"; exit 1; }
 done
