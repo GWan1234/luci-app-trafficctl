@@ -22,7 +22,7 @@ jobs:
 
   openwrt-rootfs:
     name: OpenWrt Rootfs Test
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - name: Test scripts in OpenWrt-like environment
