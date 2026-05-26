@@ -19,12 +19,12 @@ htdocs/luci-static/resources/view/trafficctl/
   status.js              — Main frontend (single-file LuCI view)
 
 root/usr/local/bin/
-  trafficctl-fw.sh       — Shared library (fw detection, validation helpers)
+  trafficctl-fw.sh       — Shared library (fw detection, validation, persistence helpers)
   trafficctl-summary.sh  — All devices summary (JSON array)
   trafficctl-device.sh   — Per-device detail + connections
   trafficctl-block.sh    — Block internet (nft/iptables)
   trafficctl-unblock.sh  — Unblock internet
-  trafficctl-macfilter-add.sh    — WiFi MAC deny
+  trafficctl-macfilter-add.sh    — WiFi MAC deny (hostapd_cli, no wifi reload)
   trafficctl-macfilter-remove.sh — WiFi MAC allow
   trafficctl-ratelimit.sh        — nft policing (drop-based)
   trafficctl-ratelimit-stats.sh  — Limiter counters
@@ -36,10 +36,17 @@ root/usr/local/bin/
   trafficctl-telegram-test.sh    — Send test message to Telegram
 
 root/usr/libexec/rpcd/
-  trafficctl             — rpcd/ubus backend (JSON object output, not arrays)
+  luci.trafficctl        — rpcd/ubus backend (JSON object output, not arrays)
 
 root/etc/init.d/
   trafficctl-telegram    — procd init script for the bot
+
+root/etc/hotplug.d/
+  iface/99-trafficctl-shapes    — Restore shapes+blocks+ratelimits on boot (ifup lan)
+  dhcp/99-trafficctl-newdevice  — New device detection via DHCP events
+
+docs/
+  capture.js             — Playwright screenshot/GIF automation (masks MACs & hostname)
 ```
 
 ## JavaScript Conventions
@@ -76,16 +83,34 @@ ssh root@192.168.0.1 sh -c '"cat > /www/luci-static/resources/view/trafficctl/st
 
 - Traffic data comes from `/proc/net/nf_conntrack` (conntrack parsing)
 - WiFi detection: `iw dev <iface> station dump` → list of connected MACs
+- WiFi MAC filter: `hostapd_cli deny_acl ADD_MAC` + `deauthenticate` (no wifi reload)
 - tc/HTB shaping: classid derived from IP octets (`1:<hex(o3*256+o4)>`)
 - Reserved HTB classids: `1:1` (root), `1:fffe` (default) — skip these
 - Burst calculation for tc: `rate_kbit * 125 / 100` (10ms of data, min 1600 bytes)
 - Persistent shapes stored in `/etc/trafficmon/shapes.json`
+- Persistent blocks/ratelimits stored in `/etc/trafficmon/rules.json` (when `persist_rules` enabled)
+- Speed measurement: conntrack bytes (BEFORE tc shaper), so reported speed may exceed shaped limit
+- Spike filter: cap speed at 125 MB/s (1 Gbit/s), discard anomalous samples
+- Y-axis scaling: 98th percentile, nice ticks (multiples of 100/500 Kbit/s, min 5 gridlines)
+- Speed units: ×1000 (SI network convention), not ×1024
 
 ## UI Design Principles
 
 - Colorblind-safe: blue-orange contrast (no red-green reliance)
 - Inline pickers (mkInlinePick) instead of `<select>` for settings
-- Collapsible settings panel
+- Settings panel collapsed by default (user expands on demand)
 - Pointer cursor on interactive elements
 - iOS-style toggles for boolean options
 - Chip/pill style for column visibility toggles
+- Recent devices quick-access bar (localStorage, MRU order, max 6)
+- Command palette style search (filter by name/IP/MAC)
+- Interactive graph popup on sparkline hover (crosshair, DL+UL, gradient fill, limit line)
+- `fmtSpeed()`: no ".0" for whole numbers, SI units (×1000)
+
+## Capture Script (docs/capture.js)
+
+- Playwright (Chromium CDP on port 9222)
+- Auto-masks MACs (`XX:XX:XX:XX`) and router hostname (`router.local`)
+- Prefers Eugene-Asus / vivo-X200 as test targets
+- Uses `clickApply()` (DOM evaluate) to bypass Playwright visibility limitations
+- `ffmpeg` for GIF generation from frame sequences
