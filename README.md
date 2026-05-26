@@ -38,6 +38,23 @@ I hope it turns out as useful for you as it has been for me.
 
 ---
 
+## Table of Contents
+
+- [Screenshots](#screenshots)
+- [Features](#features)
+- [System Requirements](#system-requirements)
+- [Compatibility](#compatibility)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+- [Architecture](#architecture)
+- [Project Layout](#project-layout)
+- [Documentation](#documentation)
+- [Contributing](#contributing)
+- [License](#license)
+
+---
+
 ## Screenshots
 
 <table>
