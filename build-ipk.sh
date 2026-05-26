@@ -21,7 +21,7 @@ cp htdocs/luci-static/resources/view/trafficctl/status.js "$DATA/www/luci-static
 
 # Ensure scripts are executable
 chmod +x "$DATA/usr/local/bin/trafficctl-"*.sh
-chmod +x "$DATA/usr/libexec/rpcd/trafficctl"
+chmod +x "$DATA/usr/libexec/rpcd/luci.trafficctl"
 [ -d "$DATA/etc/init.d" ] && chmod +x "$DATA/etc/init.d/"*
 
 (cd "$DATA" && tar czf "$WORKDIR/data.tar.gz" .)
@@ -58,12 +58,12 @@ chmod +x "$CTRL/postinst"
 
 (cd "$CTRL" && tar czf "$WORKDIR/control.tar.gz" .)
 
-# Assemble ipk (ar archive: debian-binary + control.tar.gz + data.tar.gz)
+# Assemble ipk: gzip-compressed tar archive (OpenWrt opkg format, NOT Debian ar)
 echo "2.0" > "$WORKDIR/debian-binary"
 
 mkdir -p "$OUTDIR"
 IPK_FILE="$OUTDIR/${PKG_NAME}_${PKG_VERSION}-${PKG_RELEASE}_${PKG_ARCH}.ipk"
 
-(cd "$WORKDIR" && ar cr "$OLDPWD/$IPK_FILE" debian-binary control.tar.gz data.tar.gz)
+(cd "$WORKDIR" && tar --numeric-owner --owner=0 --group=0 -czf "$OLDPWD/$IPK_FILE" ./debian-binary ./control.tar.gz ./data.tar.gz)
 
 echo "$IPK_FILE"

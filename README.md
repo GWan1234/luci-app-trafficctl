@@ -225,13 +225,13 @@ ssh root@router 'chmod +x /usr/local/bin/trafficctl-*.sh /usr/libexec/rpcd/luci.
 
 ```sh
 # Core (always required)
-opkg install conntrack luci-base
+opkg install conntrack luci-base rpcd
 
 # For traffic shaping
 opkg install tc-full kmod-sched-core kmod-sched-htb
 
-# For interface detection
-opkg install iw-full
+# For interface detection (WiFi band + LAN port)
+opkg install iw-full bridge-utils
 
 # For reverse DNS (optional)
 opkg install bind-dig

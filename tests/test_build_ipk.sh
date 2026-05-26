@@ -33,18 +33,18 @@ IPK=$(./build-ipk.sh 0.0.1-test 1)
 
 assert_eq "ipk file exists" "yes" "$([ -f "$IPK" ] && echo yes || echo no)"
 
-# Verify ar structure
-AR_CONTENTS=$(ar t "$IPK" 2>/dev/null)
-assert_contains "has debian-binary" "$AR_CONTENTS" "debian-binary"
-assert_contains "has control.tar.gz" "$AR_CONTENTS" "control.tar.gz"
-assert_contains "has data.tar.gz" "$AR_CONTENTS" "data.tar.gz"
+# Verify tar structure (OpenWrt ipk = gzip-compressed tar, NOT ar)
+TAR_CONTENTS=$(tar tzf "$IPK" 2>/dev/null)
+assert_contains "has debian-binary" "$TAR_CONTENTS" "debian-binary"
+assert_contains "has control.tar.gz" "$TAR_CONTENTS" "control.tar.gz"
+assert_contains "has data.tar.gz" "$TAR_CONTENTS" "data.tar.gz"
 
 # Extract and verify control
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
 cd "$TMPDIR"
-ar x "$OLDPWD/$IPK"
+tar xzf "$OLDPWD/$IPK"
 
 assert_eq "debian-binary is 2.0" "2.0" "$(cat debian-binary)"
 
@@ -59,7 +59,7 @@ assert_contains "version in control" "$(cat control)" "Version: 0.0.1-test-1"
 assert_contains "arch is all" "$(cat control)" "Architecture: all"
 
 DATA_FILES=$(tar tzf data.tar.gz)
-assert_contains "rpcd backend" "$DATA_FILES" "usr/libexec/rpcd/trafficctl"
+assert_contains "rpcd backend" "$DATA_FILES" "usr/libexec/rpcd/luci.trafficctl"
 assert_contains "summary script" "$DATA_FILES" "usr/local/bin/trafficctl-summary.sh"
 assert_contains "frontend js" "$DATA_FILES" "www/luci-static/resources/view/trafficctl/status.js"
 assert_contains "hotplug script" "$DATA_FILES" "etc/hotplug.d/iface/99-trafficctl-shapes"

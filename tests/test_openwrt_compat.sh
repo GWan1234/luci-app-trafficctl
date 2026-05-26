@@ -41,7 +41,7 @@ for script in "$REPO_ROOT"/root/usr/local/bin/trafficctl-*.sh; do
     assert_ok "syntax: $name" $SHELL_CMD -n "$script"
 done
 
-assert_ok "syntax: rpcd/trafficctl" $SHELL_CMD -n "$REPO_ROOT/root/usr/libexec/rpcd/trafficctl"
+assert_ok "syntax: rpcd/trafficctl" $SHELL_CMD -n "$REPO_ROOT/root/usr/libexec/rpcd/luci.trafficctl"
 assert_ok "syntax: hotplug" $SHELL_CMD -n "$REPO_ROOT/root/etc/hotplug.d/iface/99-trafficctl-shapes"
 assert_ok "syntax: init.d/trafficctl-telegram" $SHELL_CMD -n "$REPO_ROOT/root/etc/init.d/trafficctl-telegram"
 
@@ -74,7 +74,7 @@ check_bashism() {
 for script in "$REPO_ROOT"/root/usr/local/bin/trafficctl-*.sh; do
     check_bashism "$script"
 done
-check_bashism "$REPO_ROOT/root/usr/libexec/rpcd/trafficctl"
+check_bashism "$REPO_ROOT/root/usr/libexec/rpcd/luci.trafficctl"
 
 # ── IPK build and structure ────────────────────────────────────────────────
 
@@ -85,7 +85,7 @@ assert_eq "ipk builds" "yes" "$([ -f "$IPK" ] && echo yes || echo no)"
 if [ -f "$IPK" ]; then
     TMPDIR=$(mktemp -d)
     cd "$TMPDIR"
-    ar x "$REPO_ROOT/$IPK"
+    tar xzf "$REPO_ROOT/$IPK"
 
     # Verify all critical files in data.tar.gz
     DATA_FILES=$(tar tzf data.tar.gz)
@@ -125,7 +125,7 @@ fi
 for script in "$REPO_ROOT"/root/usr/local/bin/trafficctl-*.sh; do
     assert_ok "executable: $(basename "$script")" test -x "$script"
 done
-assert_ok "executable: rpcd" test -x "$REPO_ROOT/root/usr/libexec/rpcd/trafficctl"
+assert_ok "executable: rpcd" test -x "$REPO_ROOT/root/usr/libexec/rpcd/luci.trafficctl"
 assert_ok "executable: init.d" test -x "$REPO_ROOT/root/etc/init.d/trafficctl-telegram"
 
 # ── JSON validity ──────────────────────────────────────────────────────────

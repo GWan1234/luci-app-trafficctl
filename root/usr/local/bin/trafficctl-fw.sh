@@ -209,7 +209,7 @@ tctl_log_enabled() {
 
 tctl_log_category_enabled() {
     local cat="$1"
-    [ "$(uci -q get trafficctl.logging.log_${cat} 2>/dev/null)" != "0" ]
+    [ "$(uci -q get "trafficctl.logging.log_${cat}" 2>/dev/null)" != "0" ]
 }
 
 tctl_log() {

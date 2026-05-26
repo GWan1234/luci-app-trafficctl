@@ -1931,7 +1931,7 @@ return view.extend({
 		var chipStyle = 'display:inline-block;padding:4px 10px;margin:2px;border-radius:14px;font-size:12px;' +
 			'font-weight:500;cursor:pointer;transition:all .15s;border:1.5px solid var(--tm-border);' +
 			'background:var(--tm-bg);color:var(--tm-text);user-select:none';
-		var chipActiveStyle = 'display:inline-block;padding:4px 10px;margin:2px;border-radius:14px;font-size:12px;' +
+		var rateChipActiveStyle = 'display:inline-block;padding:4px 10px;margin:2px;border-radius:14px;font-size:12px;' +
 			'font-weight:600;cursor:pointer;transition:all .15s;border:1.5px solid var(--tm-proto);' +
 			'background:var(--tm-proto);color:#fff;user-select:none';
 		var chipOffStyle = 'display:inline-block;padding:4px 10px;margin:2px;border-radius:14px;font-size:12px;' +
@@ -1961,7 +1961,7 @@ return view.extend({
 				if (c._val === '0') {
 					c.style.cssText = c._val === _rateSelected ? chipOffActiveStyle : chipOffStyle;
 				} else {
-					c.style.cssText = c._val === _rateSelected ? chipActiveStyle : chipStyle;
+					c.style.cssText = c._val === _rateSelected ? rateChipActiveStyle : chipStyle;
 				}
 			});
 			if (_rateSelected === 'custom') {
