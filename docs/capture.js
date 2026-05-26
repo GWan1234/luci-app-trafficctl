@@ -345,26 +345,38 @@ async function captureTheme(page, dark, phone) {
   await page.waitForTimeout(300);
 
   // 16. Column toggle: hide MAC, then restore
-  // Must open settings + Connections table section to make chips visible
+  // Chips may be inside a collapsed section — use evaluate to click via DOM directly
   console.log('  [11] Column toggle…');
   await openSettings(page);
+  // Ensure "Connections table" section is expanded
   await page.evaluate(() => {
     const labels = document.querySelectorAll('div[style*="font-weight:600"]');
     for (const el of labels) {
-      if (el.textContent.includes('Connections table')) { el.click(); break; }
+      if (el.textContent.includes('Connections table')) {
+        const next = el.nextElementSibling;
+        if (next && next.style.display === 'none') el.click();
+        break;
+      }
     }
   });
-  await page.waitForTimeout(500);
-  const chips = page.locator('span[style*="border-radius:12px"]');
-  const count = await chips.count();
-  for (let i = 0; i < count; i++) {
-    const chip = chips.nth(i);
-    if ((await chip.textContent()).trim() === 'MAC') {
-      await chip.click(); await page.waitForTimeout(500);
-      await shot(page, path.join(DIR, '11-col-mac-hidden.png'));
-      await chip.click(); await page.waitForTimeout(400);
-      break;
+  await page.waitForTimeout(600);
+  // Click MAC chip via DOM (bypasses Playwright visibility checks)
+  const toggled = await page.evaluate(() => {
+    for (const el of document.querySelectorAll('span[style*="border-radius"]')) {
+      if (el.textContent.trim() === 'MAC') { el.click(); return true; }
     }
+    return false;
+  });
+  if (toggled) {
+    await page.waitForTimeout(500);
+    await shot(page, path.join(DIR, '11-col-mac-hidden.png'));
+    // Restore
+    await page.evaluate(() => {
+      for (const el of document.querySelectorAll('span[style*="border-radius"]')) {
+        if (el.textContent.trim() === 'MAC') { el.click(); return; }
+      }
+    });
+    await page.waitForTimeout(400);
   }
   await closeSettings(page);
 
