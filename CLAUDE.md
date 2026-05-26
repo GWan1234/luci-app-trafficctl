@@ -67,6 +67,35 @@ docs/
 - Use `2>/dev/null` on commands that may fail (nft, tc, iptables)
 - Filter `dig` output: `grep -v '^;;'` to remove error messages
 
+## Releases & Changelog
+
+Release process is automated via **release-please**. Do NOT create tags or edit CHANGELOG.md manually.
+
+**Commit message format (Conventional Commits):**
+
+```
+feat: add per-device DNS override
+fix: handle empty chat_id in telegram bot
+ci: add aarch64 compat test
+refactor: extract rate-limit validation to helper
+docs: update install instructions
+chore: bump ESLint config
+```
+
+- `feat:` → minor version bump, appears in "Features"
+- `fix:` → patch version bump, appears in "Bug Fixes"
+- `feat!:` or `fix!:` (with `!`) → major version bump, appears as breaking change
+- `ci:`, `refactor:`, `perf:` → patch, appear in their sections
+- `docs:`, `chore:`, `style:` → patch, hidden in CHANGELOG
+
+**Release flow:**
+1. Commit to `main` with the prefixes above
+2. release-please creates/updates a "Release PR" with bumped version + CHANGELOG entries
+3. Merge the PR → release-please creates the tag + GitHub Release (with notes from CHANGELOG)
+4. `release.yml` triggers automatically, builds IPK and attaches assets to the release
+
+**Escape hatch:** `release.yml` has `workflow_dispatch` to manually rebuild assets for an existing tag.
+
 ## Deployment
 
 scp does NOT work to the router. Deploy files like this:
