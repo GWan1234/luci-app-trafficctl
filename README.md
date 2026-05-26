@@ -202,13 +202,18 @@ Each test builds the `.ipk`, runs `opkg install --force-depends` inside the real
 
 ### From .ipk (recommended)
 
-Run directly on the router (requires HTTPS support — `libustream-wolfssl` or `libustream-openssl`):
+**Option A — LuCI web UI** (no SSH needed):
+1. Download [`luci-app-trafficctl.ipk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk) to your computer
+2. In LuCI: **System → Software → Upload Package...**
+3. Select the downloaded file and click **OK**
+
+**Option B — SSH, one command on the router** (requires HTTPS support — `libustream-wolfssl` or `libustream-openssl`):
 
 ```sh
 opkg install https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk
 ```
 
-Or from your machine via SSH:
+**Option C — SSH from your machine:**
 
 ```sh
 ssh root@router 'opkg install https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk'
