@@ -92,6 +92,25 @@ var callRdns = rpc.declare({
 	params: ['ip']
 });
 
+var callTelegramGet = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'telegram_config_get'
+});
+
+var callTelegramSet = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'telegram_config_set',
+	params: ['enabled', 'bot_token', 'chat_id', 'poll_interval',
+		'notify_new_device', 'notify_known_device',
+		'btn_block_inet', 'btn_block_wifi', 'btn_limiter', 'btn_shaper']
+});
+
+var callTelegramTest = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'telegram_test',
+	params: ['bot_token', 'chat_id']
+});
+
 var C = {
 	thBg:          'var(--tm-th-bg)',
 	thFg:          'var(--tm-th-fg)',
@@ -1838,6 +1857,142 @@ return view.extend({
 			sectionLabel(_('Table Columns')),
 			colChipsContainer
 		]));
+
+		// ── Telegram Bot section (lazy-loaded) ─────────────────────────────
+		var tgBody = E('div', {'style':'display:none;padding-top:6px'});
+		var tgLoaded = false;
+		var tgLabel = sectionLabel(_('Telegram Bot'));
+		var tgArrow = E('span', {'style':'cursor:pointer;font-size:11px;color:'+C.textMute}, ' ▸');
+		tgLabel.style.cursor = 'pointer';
+		tgLabel.appendChild(tgArrow);
+		tgLabel.addEventListener('click', function() {
+			var open = tgBody.style.display !== 'none';
+			tgBody.style.display = open ? 'none' : '';
+			tgArrow.textContent = open ? ' ▸' : ' ▾';
+			if (!open && !tgLoaded) {
+				tgLoaded = true;
+				loadTelegramUI(tgBody);
+			}
+		});
+
+		function loadTelegramUI(container) {
+			var statusSpan = E('span', {'style':'font-size:12px;margin-left:8px;color:'+C.textMute}, _('Loading…'));
+			container.appendChild(statusSpan);
+
+			callTelegramGet().then(function(cfg) {
+				while (container.firstChild) container.removeChild(container.firstChild);
+
+				var tokenInput = E('input', {
+					'type': 'password',
+					'value': cfg.bot_token || '',
+					'placeholder': cfg.bot_token_set ? '••••••••' : _('Paste bot token'),
+					'style': 'font-size:12px;padding:3px 6px;width:260px;background:var(--tm-bg);color:var(--tm-text);border:1px solid var(--tm-border);border-radius:3px'
+				});
+				var eyeBtn = E('span', {
+					'style': 'cursor:pointer;font-size:14px;margin-left:4px;user-select:none',
+					'title': _('Show/hide token')
+				}, '👁');
+				eyeBtn.addEventListener('click', function() {
+					tokenInput.type = tokenInput.type === 'password' ? 'text' : 'password';
+				});
+
+				var chatInput = E('input', {
+					'type': 'text',
+					'value': cfg.chat_id || '',
+					'placeholder': _('Chat ID'),
+					'style': 'font-size:12px;padding:3px 6px;width:120px;background:var(--tm-bg);color:var(--tm-text);border:1px solid var(--tm-border);border-radius:3px'
+				});
+
+				var testResult = E('span', {'style':'font-size:12px;margin-left:8px'});
+				var testBtn = E('button', {
+					'class': 'cbi-button',
+					'style': 'font-size:11px;padding:2px 10px'
+				}, _('Test'));
+				testBtn.addEventListener('click', function() {
+					testBtn.disabled = true;
+					testResult.textContent = _('Sending…');
+					testResult.style.color = C.textMute;
+					var tk = tokenInput.value || '***';
+					callTelegramTest(tk, chatInput.value).then(function(res) {
+						testResult.textContent = (res && res.ok) ? '✓ ' + (res.msg || 'OK') : '✗ ' + (res && res.msg || 'error');
+						testResult.style.color = (res && res.ok) ? 'var(--tm-state-ok)' : 'var(--tm-blocked-fg)';
+					}).catch(function(e) {
+						testResult.textContent = '✗ ' + e.message;
+						testResult.style.color = 'var(--tm-blocked-fg)';
+					}).then(function() { testBtn.disabled = false; });
+				});
+
+				var tgEnabled = mkToggle('tm-tg-enabled', _('Enabled'), cfg.enabled, function() {});
+				var notifyNew = mkToggle('tm-tg-new', _('New devices'), cfg.notify_new_device, function() {});
+				var notifyKnown = mkToggle('tm-tg-known', _('Known devices'), cfg.notify_known_device, function() {});
+				var btnInet = mkToggle('tm-tg-inet', _('Block Internet'), cfg.btn_block_inet, function() {});
+				var btnWifi = mkToggle('tm-tg-wifi', _('Block WiFi'), cfg.btn_block_wifi, function() {});
+				var btnLimit = mkToggle('tm-tg-limit', _('Limiter'), cfg.btn_limiter, function() {});
+				var btnShape = mkToggle('tm-tg-shape', _('Shaper'), cfg.btn_shaper, function() {});
+
+				var saveResult = E('span', {'style':'font-size:12px;margin-left:8px'});
+				var saveBtn = E('button', {
+					'class': 'cbi-button cbi-button-action',
+					'style': 'font-size:12px;padding:3px 12px'
+				}, _('Save'));
+				saveBtn.addEventListener('click', function() {
+					saveBtn.disabled = true;
+					saveResult.textContent = _('Saving…');
+					saveResult.style.color = C.textMute;
+					var tk = tokenInput.value;
+					if (tk === '' && cfg.bot_token_set) tk = '***';
+					callTelegramSet(
+						container.querySelector('#tm-tg-enabled').checked,
+						tk,
+						chatInput.value,
+						parseInt(cfg.poll_interval) || 3,
+						container.querySelector('#tm-tg-new').checked,
+						container.querySelector('#tm-tg-known').checked,
+						container.querySelector('#tm-tg-inet').checked,
+						container.querySelector('#tm-tg-wifi').checked,
+						container.querySelector('#tm-tg-limit').checked,
+						container.querySelector('#tm-tg-shape').checked
+					).then(function(res) {
+						saveResult.textContent = (res && res.ok) ? '✓ Saved' : '✗ ' + (res && res.msg || 'error');
+						saveResult.style.color = (res && res.ok) ? 'var(--tm-state-ok)' : 'var(--tm-blocked-fg)';
+						if (res && res.ok) {
+							cfg.bot_token_set = !!(tk && tk !== '***') || cfg.bot_token_set;
+							if (tk && tk !== '***') {
+								tokenInput.value = '***';
+								tokenInput.type = 'password';
+							}
+						}
+					}).catch(function(e) {
+						saveResult.textContent = '✗ ' + e.message;
+						saveResult.style.color = 'var(--tm-blocked-fg)';
+					}).then(function() { saveBtn.disabled = false; });
+				});
+
+				var gap = 'display:flex;flex-wrap:wrap;align-items:center;gap:6px';
+
+				container.appendChild(E('div', {'style':gap}, [tgEnabled]));
+				container.appendChild(E('div', {'style':gap+';margin-top:6px'}, [
+					mkLabel(_('Token:')), tokenInput, eyeBtn,
+					E('span', {'style':'margin-left:8px'}),
+					mkLabel(_('Chat ID:')), chatInput,
+					testBtn, testResult
+				]));
+				container.appendChild(E('div', {'style':'margin-top:8px'}, [
+					E('div', {'style':'font-size:11px;color:'+C.textMute+';margin-bottom:4px'}, _('Notifications')),
+					E('div', {'style':gap}, [notifyNew, notifyKnown])
+				]));
+				container.appendChild(E('div', {'style':'margin-top:6px'}, [
+					E('div', {'style':'font-size:11px;color:'+C.textMute+';margin-bottom:4px'}, _('Action buttons in bot')),
+					E('div', {'style':gap}, [btnInet, btnWifi, btnLimit, btnShape])
+				]));
+				container.appendChild(E('div', {'style':'margin-top:8px'}, [saveBtn, saveResult]));
+			}).catch(function(e) {
+				statusSpan.textContent = '✗ ' + e.message;
+				statusSpan.style.color = 'var(--tm-blocked-fg)';
+			});
+		}
+
+		settingsBody.appendChild(E('div', {}, [tgLabel, tgBody]));
 
 		var settingsPanel = E('div', {'style':'border-radius:4px;margin-bottom:10px;'+ob}, [
 			settingsToggle, settingsBody

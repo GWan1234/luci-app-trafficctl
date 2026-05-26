@@ -28,7 +28,10 @@ list)
 	printf '"shape_stats":{},'
 	printf '"rdns":{"ip":"str"},'
 	printf '"config_get":{},'
-	printf '"config_set":{"enabled":"bool","default_mode":"str"}'
+	printf '"config_set":{"enabled":"bool","default_mode":"str"},'
+	printf '"telegram_config_get":{},'
+	printf '"telegram_config_set":{"enabled":"bool","bot_token":"str","chat_id":"str","poll_interval":"int","notify_new_device":"bool","notify_known_device":"bool","btn_block_inet":"bool","btn_block_wifi":"bool","btn_limiter":"bool","btn_shaper":"bool"},'
+	printf '"telegram_test":{"bot_token":"str","chat_id":"str"}'
 	printf '}'
 	;;
 call)
@@ -169,6 +172,75 @@ call)
 		[ -n "$mode" ] && uci set trafficctl.main.default_mode="$mode"
 		uci commit trafficctl
 		echo '{"ok":true}'
+		;;
+	telegram_config_get)
+		uci -q get trafficctl.telegram >/dev/null 2>&1 || {
+			echo '{"enabled":false,"bot_token":"","bot_token_set":false,"chat_id":"","poll_interval":3,"notify_new_device":true,"notify_known_device":false,"btn_block_inet":true,"btn_block_wifi":true,"btn_limiter":true,"btn_shaper":true}'
+			exit 0
+		}
+		tg_enabled=$(uci -q get trafficctl.telegram.enabled)
+		tg_token=$(uci -q get trafficctl.telegram.bot_token)
+		tg_chat_id=$(uci -q get trafficctl.telegram.chat_id)
+		tg_poll=$(uci -q get trafficctl.telegram.poll_interval)
+		tg_nn=$(uci -q get trafficctl.telegram.notify_new_device)
+		tg_nk=$(uci -q get trafficctl.telegram.notify_known_device)
+		tg_bi=$(uci -q get trafficctl.telegram.btn_block_inet)
+		tg_bw=$(uci -q get trafficctl.telegram.btn_block_wifi)
+		tg_bl=$(uci -q get trafficctl.telegram.btn_limiter)
+		tg_bs=$(uci -q get trafficctl.telegram.btn_shaper)
+		tg_token_set=false
+		tg_token_display=""
+		if [ -n "$tg_token" ]; then
+			tg_token_set=true
+			tg_token_display="***"
+		fi
+		printf '{"enabled":%s,"bot_token":"%s","bot_token_set":%s,"chat_id":"%s","poll_interval":%d,"notify_new_device":%s,"notify_known_device":%s,"btn_block_inet":%s,"btn_block_wifi":%s,"btn_limiter":%s,"btn_shaper":%s}' \
+			"$([ "$tg_enabled" = "1" ] && echo true || echo false)" \
+			"$tg_token_display" "$tg_token_set" "${tg_chat_id:-}" \
+			"${tg_poll:-3}" \
+			"$([ "${tg_nn:-1}" != "0" ] && echo true || echo false)" \
+			"$([ "$tg_nk" = "1" ] && echo true || echo false)" \
+			"$([ "${tg_bi:-1}" != "0" ] && echo true || echo false)" \
+			"$([ "${tg_bw:-1}" != "0" ] && echo true || echo false)" \
+			"$([ "${tg_bl:-1}" != "0" ] && echo true || echo false)" \
+			"$([ "${tg_bs:-1}" != "0" ] && echo true || echo false)"
+		;;
+	telegram_config_set)
+		read -r input
+		uci -q get trafficctl.telegram >/dev/null 2>&1 || uci set trafficctl.telegram=telegram
+		val=$(echo "$input" | jsonfilter -e '@.enabled' 2>/dev/null)
+		[ -n "$val" ] && uci set trafficctl.telegram.enabled="$([ "$val" = "true" ] && echo 1 || echo 0)"
+		val=$(echo "$input" | jsonfilter -e '@.bot_token' 2>/dev/null)
+		if [ -n "$val" ] && [ "$val" != "***" ]; then
+			uci set trafficctl.telegram.bot_token="$val"
+		elif [ -z "$val" ]; then
+			uci -q delete trafficctl.telegram.bot_token
+		fi
+		val=$(echo "$input" | jsonfilter -e '@.chat_id' 2>/dev/null)
+		[ -n "$val" ] && uci set trafficctl.telegram.chat_id="$val"
+		val=$(echo "$input" | jsonfilter -e '@.poll_interval' 2>/dev/null)
+		[ -n "$val" ] && uci set trafficctl.telegram.poll_interval="$val"
+		for opt in notify_new_device notify_known_device btn_block_inet btn_block_wifi btn_limiter btn_shaper; do
+			val=$(echo "$input" | jsonfilter -e "@.$opt" 2>/dev/null)
+			[ -n "$val" ] && uci set "trafficctl.telegram.$opt=$([ "$val" = "true" ] && echo 1 || echo 0)"
+		done
+		uci commit trafficctl
+		chmod 0600 /etc/config/trafficctl 2>/dev/null
+		/etc/init.d/trafficctl-telegram reload 2>/dev/null &
+		echo '{"ok":true}'
+		;;
+	telegram_test)
+		read -r input
+		token=$(echo "$input" | jsonfilter -e '@.bot_token' 2>/dev/null)
+		chat_id=$(echo "$input" | jsonfilter -e '@.chat_id' 2>/dev/null)
+		if [ "$token" = "***" ] || [ -z "$token" ]; then
+			token=$(uci -q get trafficctl.telegram.bot_token)
+		fi
+		if [ -z "$token" ] || [ -z "$chat_id" ]; then
+			echo '{"ok":false,"msg":"token and chat_id required"}'
+		else
+			"$SCRIPTS/trafficctl-telegram-test.sh" "$token" "$chat_id"
+		fi
 		;;
 	*)
 		echo '{"error":"unknown method"}'

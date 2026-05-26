@@ -22,6 +22,7 @@ cp htdocs/luci-static/resources/view/trafficctl/status.js "$DATA/www/luci-static
 # Ensure scripts are executable
 chmod +x "$DATA/usr/local/bin/trafficctl-"*.sh
 chmod +x "$DATA/usr/libexec/rpcd/trafficctl"
+[ -d "$DATA/etc/init.d" ] && chmod +x "$DATA/etc/init.d/"*
 
 (cd "$DATA" && tar czf "$WORKDIR/data.tar.gz" .)
 
@@ -32,7 +33,7 @@ mkdir -p "$CTRL"
 cat > "$CTRL/control" <<EOF
 Package: $PKG_NAME
 Version: ${PKG_VERSION}-${PKG_RELEASE}
-Depends: conntrack, luci-base, rpcd
+Depends: conntrack, luci-base, rpcd, curl
 Source: https://github.com/YusDyr/luci-app-trafficctl
 License: Apache-2.0
 Section: luci
@@ -45,6 +46,7 @@ EOF
 cat > "$CTRL/conffiles" <<EOF
 /etc/config/trafficctl
 /etc/trafficmon/shapes.json
+/etc/trafficmon/telegram_known.json
 EOF
 
 cat > "$CTRL/postinst" <<'EOF'
