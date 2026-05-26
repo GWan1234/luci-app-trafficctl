@@ -1,0 +1,14 @@
+name: OpenWrt 21.02 / x86-64
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    uses: ./.github/workflows/_compat-impl.yml
+    with:
+      image: ghcr.io/openwrt/rootfs:x86-64-v21.02.6
+      platform: linux/amd64

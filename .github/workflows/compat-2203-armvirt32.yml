@@ -1,0 +1,14 @@
+name: OpenWrt 22.03 / armvirt-32
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    uses: ./.github/workflows/_compat-impl.yml
+    with:
+      image: ghcr.io/openwrt/rootfs:armvirt-32-v22.03.4
+      platform: linux/arm/v7

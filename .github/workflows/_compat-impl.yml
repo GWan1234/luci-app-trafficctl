@@ -1,0 +1,35 @@
+name: _compat-impl (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      image:
+        description: 'Docker image (ghcr.io/openwrt/rootfs:<arch>-<version>)'
+        type: string
+        required: true
+      platform:
+        description: 'Docker platform string (e.g. linux/amd64, linux/arm64, linux/mips)'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  install-test:
+    name: Install & verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-qemu-action@v3
+      - name: Build IPK
+        run: ./build-ipk.sh 0.0.0-test 1
+      - name: Install and verify in OpenWrt container
+        run: |
+          docker run --rm \
+            --platform "${{ inputs.platform }}" \
+            --entrypoint /bin/sh \
+            -v "$PWD/dist:/dist" \
+            -v "$PWD/tests:/tests" \
+            "${{ inputs.image }}" \
+            /tests/test_install.sh /dist/luci-app-trafficctl_0.0.0-test-1_all.ipk

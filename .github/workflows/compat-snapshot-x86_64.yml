@@ -1,0 +1,14 @@
+name: OpenWrt snapshot / x86-64
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    uses: ./.github/workflows/_compat-impl.yml
+    with:
+      image: ghcr.io/openwrt/rootfs:x86-64-master
+      platform: linux/amd64
