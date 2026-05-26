@@ -7,7 +7,21 @@ IPK="$1"
 
 mkdir -p /var/lock /tmp/opkg-lists
 
-opkg install --force-depends --force-architecture "$IPK"
+# Ensure opkg recognises "Architecture: all" packages.
+# OpenWrt rootfs images may not list "all" in their arch config, which causes
+# opkg to reject the package with "incompatible with the architectures
+# configured" even though arch:all is universally installable.
+# /etc/opkg/arch.conf is the canonical location since OpenWrt 18.06+; older
+# images use /etc/opkg.conf.  We prepend the entry so it takes lowest priority
+# (priority 1) without disturbing any existing arch entries.
+for f in /etc/opkg/arch.conf /etc/opkg.conf; do
+  if [ -f "$f" ]; then
+    grep -q "^arch all " "$f" || sed -i "1s|^|arch all 1\n|" "$f"
+    break
+  fi
+done
+
+opkg install --force-depends "$IPK"
 
 for f in \
   /usr/local/bin/trafficctl-summary.sh \
