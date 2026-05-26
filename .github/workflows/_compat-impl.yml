@@ -27,9 +27,17 @@ jobs:
         run: ./build-ipk.sh 0.0.0-test 1
       - name: Install and verify in OpenWrt container
         run: |
+          IMAGE="${{ inputs.image }}"
+          PLATFORM="${{ inputs.platform }}"
+          # Versioned images have linux/amd64 manifest annotation regardless of arch.
+          # Snapshot (master) images use proper multi-arch manifests and need --platform.
+          if ! docker pull "$IMAGE" 2>/tmp/pull-err; then
+            grep -q "no matching manifest" /tmp/pull-err || { cat /tmp/pull-err >&2; exit 1; }
+            docker pull --platform "$PLATFORM" "$IMAGE"
+          fi
           docker run --rm \
             --entrypoint /bin/sh \
             -v "$PWD/dist:/dist" \
             -v "$PWD/tests:/tests" \
-            "${{ inputs.image }}" \
+            "$IMAGE" \
             /tests/test_install.sh /dist/luci-app-trafficctl_0.0.0-test-1_all.ipk
