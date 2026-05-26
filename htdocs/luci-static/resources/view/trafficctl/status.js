@@ -2714,11 +2714,11 @@ return view.extend({
 		var sep = function() { return E('span',{'style':'border-left:1px solid '+C.border+';height:18px;margin:0 4px'}); };
 		var sectionLabel = function(t) { return E('div', {'style':'font-size:12px;font-weight:600;color:var(--tm-text-mute);margin-bottom:4px;margin-top:8px'}, t); };
 
-		var settingsBody = E('div', {'style':'padding:0 14px 10px'});
-		var settingsCollapsed = false;
+		var settingsBody = E('div', {'style':'padding:0 14px 10px;display:none'});
+		var settingsCollapsed = true;
 		var settingsToggle = E('div', {
 			'style': 'padding:8px 14px;cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--tm-text-mute)'
-		}, [E('span', {'class':'tm-settings-arrow'}, '▾'), E('span', {}, _('Settings'))]);
+		}, [E('span', {'class':'tm-settings-arrow'}, '▸'), E('span', {}, _('Settings'))]);
 
 		settingsToggle.addEventListener('click', function() {
 			settingsCollapsed = !settingsCollapsed;

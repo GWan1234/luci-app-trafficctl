@@ -296,7 +296,6 @@ async function findDevice(page) {
 async function cleanDevice(page, ip) {
   console.log('  Cleaning device state…');
   await selectDevice(page, ip);
-  await closeSettings(page);
 
   const rate = await page.evaluate(() => {
     const el = document.querySelector('span[style*="dashed"]');
@@ -608,7 +607,6 @@ async function captureTheme(page, dark, device) {
   // 4. Device detail
   console.log(`  [02] Device detail → ${device.name} (${device.ip})`);
   await selectDevice(page, device.ip);
-  await closeSettings(page);
   await maskedShot(page, path.join(DIR, '02-device-detail.png'));
 
   // 5–6. Block / Unblock internet + GIF
@@ -649,7 +647,6 @@ async function captureTheme(page, dark, device) {
   console.log('  [07-09] Rate limit sequence…');
   // Re-select device to ensure clean state after WiFi block/unblock
   await selectDevice(page, device.ip);
-  await closeSettings(page);
   // Wait for rate limit picker to appear (dashed span)
   await page.waitForFunction(() => {
     const spans = document.querySelectorAll('span[style*="dashed"]');
@@ -780,14 +777,12 @@ async function captureTheme(page, dark, device) {
   // 21. Extended stats — all-devices view
   console.log('  [12] Extended stats (all devices)…');
   await setExtended(true);
-  await closeSettings(page);
   await page.waitForTimeout(400);
   await maskedShot(page, path.join(DIR, '12-extended-stats-all.png'));
 
   // 22. Extended stats — per-device with active limiter
   console.log('  [13] Extended stats (per device)…');
   await selectDevice(page, device.ip);
-  await closeSettings(page);
   await pickOption(page, 'Off', '10 Mbit/s');
   await pickOption(page, 'Shaper (queue)', 'Limiter (drop)');
   await clickApply(page);
