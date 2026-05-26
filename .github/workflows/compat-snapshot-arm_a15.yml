@@ -11,4 +11,4 @@ jobs:
     uses: ./.github/workflows/_compat-impl.yml
     with:
       image: ghcr.io/openwrt/rootfs:arm_cortex-a15_neon-vfpv4-master
-      platform: linux/arm/v7
+      platform: linux/arm_cortex-a15_neon-vfpv4
