@@ -127,12 +127,15 @@ async function findPhone(page) {
   const result = await page.evaluate(() => {
     const rows = document.querySelectorAll('tr.tm-row');
     const candidates = [];
+    const exclude = ['mbp', 'macbook', 'imac', 'laptop', 'desktop', 'pc', 'server', 'nas',
+                     'work', 'workmb', 'mini', 'air', 'pro'];
     for (const row of rows) {
       const cells = row.querySelectorAll('td');
       if (cells.length < 2) continue;
       const name = cells[0].textContent.toLowerCase();
       const ip   = (cells[1].textContent || '').trim();
       if (!ip.match(/^\d+\.\d+\.\d+\.\d+$/)) continue;
+      if (exclude.some(x => name.includes(x))) continue;
       const isWifi = row.innerHTML.includes('📶');
       const score =
         (name.includes('евген') || name.includes('evgen') || name.includes('eugene') || name.includes('zhenya')) ? 100 :
@@ -145,7 +148,9 @@ async function findPhone(page) {
     return candidates;
   });
   console.log('  Devices:', result.map(r => `${r.name} (${r.ip}) score=${r.score}`).join(', '));
-  return result[0] || null;
+  const pick = result.find(r => r.score >= 50) || null;
+  if (!pick) console.log('  ⚠ No phone-like device found (all scores < 50)');
+  return pick;
 }
 
 // Ensure phone has no rate limit, no WiFi block, no internet block
