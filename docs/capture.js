@@ -89,7 +89,7 @@ async function waitDone(page, timeout = 20000) {
 
 async function selectDevice(page, ip) {
   await page.evaluate(ip => {
-    for (const row of document.querySelectorAll('tr.tm-row')) {
+    for (const row of document.querySelectorAll('tr.tm-row[title^="Click to inspect"]')) {
       const cells = row.querySelectorAll('td');
       if (cells[1] && cells[1].textContent.trim() === ip) { row.click(); return; }
     }
@@ -132,10 +132,11 @@ async function closeSettings(page) {
   }
 }
 
-// Find best candidate phone device in the table
+// Find best candidate phone device in the device overview table
 async function findPhone(page) {
   const result = await page.evaluate(() => {
-    const rows = document.querySelectorAll('tr.tm-row');
+    // Device rows have title="Click to inspect …" — connection rows don't
+    const rows = document.querySelectorAll('tr.tm-row[title^="Click to inspect"]');
     const candidates = [];
     const exclude = ['mbp', 'macbook', 'imac', 'laptop', 'desktop', 'pc', 'server', 'nas',
                      'work', 'workmb', 'mini', 'air', 'pro'];
@@ -499,9 +500,9 @@ async function captureTheme(page, dark, phone) {
   await page.setViewportSize({ width: 1300, height: 820 });
   await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
 
-  // Wait for the device table to populate (RPC calls may take a few seconds)
+  // Wait for the device overview table to populate (RPC calls may take a few seconds)
   await page.waitForFunction(
-    () => document.querySelectorAll('tr.tm-row').length > 0,
+    () => document.querySelectorAll('tr.tm-row[title^="Click to inspect"]').length > 0,
     { timeout: 30000 }
   ).catch(() => {});
   await page.waitForTimeout(1000);
