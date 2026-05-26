@@ -427,8 +427,8 @@ function buildGroupedTable(groups, sortCol, sortDir) {
 	}, [thead, tbody]);
 }
 
-function buildTable(conns, sortCol, sortDir, rdnsMode) {
-	var cols = [
+function buildTable(conns, sortCol, sortDir, rdnsMode, hiddenCols) {
+	var allCols = [
 		{ key:'proto',   label: _('Proto'),    num:false },
 		{ key:'dst',     label: _('Dst IP'),   num:false },
 		{ key:'host',    label: _('Hostname'), num:false },
@@ -437,6 +437,8 @@ function buildTable(conns, sortCol, sortDir, rdnsMode) {
 		{ key:'bytes',   label: _('Bytes'),    num:true  },
 		{ key:'state',   label: _('State'),    num:false }
 	];
+	var hid = hiddenCols || {};
+	var cols = allCols.filter(function(c) { return !hid[c.key]; });
 
 	var sorted = conns.slice().sort(function(a, b) {
 		var av = a[sortCol], bv = b[sortCol];
@@ -471,15 +473,17 @@ function buildTable(conns, sortCol, sortDir, rdnsMode) {
 			hostCell.textContent = '—';
 		}
 
-		return E('tr', { 'class': 'tm-row' }, [
-			E('td', { 'style': td+';color:'+C.proto+';font-weight:600'                     }, r.proto || ''),
-			E('td', { 'style': td+';font-family:monospace'                                 }, dstEl),
-			hostCell,
-			E('td', { 'style': td+';text-align:right;font-family:monospace'                }, String(r.port || '')),
-			E('td', { 'style': td+';color:'+C.service                                      }, escHtml(r.service || (SERVICE_PORTS[r.port]||''))),
-			E('td', { 'style': td+';text-align:right;font-family:monospace;font-weight:500'}, fmtBytes(r.bytes)),
-			E('td', { 'style': td+';color:'+sc+';font-weight:500'                          }, state)
-		]);
+		var cellMap = {
+			proto: E('td', { 'style': td+';color:'+C.proto+';font-weight:600' }, r.proto || ''),
+			dst: E('td', { 'style': td+';font-family:monospace' }, dstEl),
+			host: hostCell,
+			port: E('td', { 'style': td+';text-align:right;font-family:monospace' }, String(r.port || '')),
+			service: E('td', { 'style': td+';color:'+C.service }, escHtml(r.service || (SERVICE_PORTS[r.port]||''))),
+			bytes: E('td', { 'style': td+';text-align:right;font-family:monospace;font-weight:500'}, fmtBytes(r.bytes)),
+			state: E('td', { 'style': td+';color:'+sc+';font-weight:500' }, state)
+		};
+		var cells = cols.map(function(c) { return cellMap[c.key]; });
+		return E('tr', { 'class': 'tm-row' }, cells);
 	}));
 
 	return E('table', {
@@ -493,7 +497,7 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		{ key:'ip',               label:'IP',           num:false, tip: _('Local IP address') },
 		{ key:'mac',              label:'MAC',          num:false, tip: _('Hardware MAC address'), hide:true },
 		{ key:'_speed',           label: _('DL Speed'), num:true,  tip: _('Current download speed (bytes/sec from router to device)') },
-		{ key:'_spark',           label: '',            num:false, tip: _('Speed history graph (shared scale)') },
+		{ key:'_spark',           label: '',            num:false, tip: _('Speed graph. Window = avg time. Orange dashed line = speed limit') },
 		{ key:'conns',            label: _('Conns'),    num:true,  tip: _('Active connections in conntrack') },
 		{ key:'total',            label: _('Bytes'),    num:true,  tip: _('Total bytes transferred (conntrack)'), hide:true },
 		{ key:'tcp',              label:'TCP',          num:true,  tip: _('TCP bytes transferred'), hide:true },
@@ -1427,6 +1431,7 @@ return view.extend({
 			rateLimitRow.style.display  = all ? 'none' : '';
 			rdnsCheck.style.display     = all ? 'none' : '';
 			extStatsCheck.style.display = all ? 'none' : '';
+			if (typeof updateTableSectionMode === 'function') updateTableSectionMode();
 		}
 
 		function updateSpeedCells() {
@@ -1688,7 +1693,7 @@ return view.extend({
 						connsDiv.appendChild(E('p',{'style':'color:'+C.textFaint+';font-size:11px;margin-top:6px'},
 							groups.length + ' ' + _('groups from') + ' ' + data.connections.length + ' ' + _('connections') + '. ' + _('Click header to sort.')));
 					} else {
-						tbl = buildTable(data.connections, self._sortCol, self._sortDir, o.rdns);
+						tbl = buildTable(data.connections, self._sortCol, self._sortDir, o.rdns, self._connHiddenCols);
 						Array.prototype.forEach.call(tbl.querySelectorAll('th'), function(th) {
 							th.addEventListener('click', function() {
 								var col = th.getAttribute('data-col');
@@ -1973,6 +1978,30 @@ return view.extend({
 			colChipsContainer.appendChild(chip);
 		});
 
+		// Per-device connection table column toggles
+		var connColDefs = [
+			{key:'proto', label:_('Proto')}, {key:'dst', label:_('Dst IP')},
+			{key:'host', label:_('Hostname')}, {key:'port', label:_('Port')},
+			{key:'service', label:_('Service')}, {key:'bytes', label:_('Bytes')},
+			{key:'state', label:_('State')}
+		];
+		var savedConnHidden = opts.connHiddenCols || {};
+		self._connHiddenCols = savedConnHidden;
+		var connColChipsContainer = E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:0'});
+		connColDefs.forEach(function(ct) {
+			var chip = E('span', {
+				'style': savedConnHidden[ct.key] ? chipOff : chipOn,
+				'data-tip': _('Click to toggle column visibility')
+			}, ct.label);
+			chip.addEventListener('click', function() {
+				if (self._connHiddenCols[ct.key]) { delete self._connHiddenCols[ct.key]; chip.style.cssText = chipOn; }
+				else { self._connHiddenCols[ct.key] = true; chip.style.cssText = chipOff; }
+				var o = loadOpts(); o.connHiddenCols = self._connHiddenCols; saveOpts(o);
+				if (!isAllMode()) runQuery();
+			});
+			connColChipsContainer.appendChild(chip);
+		});
+
 		var ob = 'border:1px solid '+C.optsBorder+';background:'+C.optsBg;
 		var sep = function() { return E('span',{'style':'border-left:1px solid '+C.border+';height:18px;margin:0 4px'}); };
 		var sectionLabel = function(t) { return E('div', {'style':'font-size:12px;font-weight:600;color:var(--tm-text-mute);margin-bottom:4px;margin-top:8px'}, t); };
@@ -2219,15 +2248,26 @@ return view.extend({
 		}
 		settingsBody.appendChild(loggingSection.el);
 
+		var connFiltersRow = E('div', {'style':'display:none;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:6px'}, [
+			E('span', {'data-tip':_('Filter connections by protocol')}, [mkLabel(_('Proto')+':'), protoPick.el]),
+			sep(),
+			E('span', {'data-tip':_('Group connections table rows')}, [mkLabel(_('Group')+':'), groupPick.el])
+		]);
 		var tableSection = mkCollapsible(_('Connections table'), E('div', {'style':'padding-top:4px'}, [
-			E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:6px'}, [
-				E('span', {'data-tip':_('Filter connections by protocol')}, [mkLabel(_('Proto')+':'), protoPick.el]),
-				sep(),
-				E('span', {'data-tip':_('Group connections table rows')}, [mkLabel(_('Group')+':'), groupPick.el])
-			]),
-			colChipsContainer
+			E('div', {'style':'font-size:11px;color:var(--tm-text-mute);margin-bottom:4px'}, _('Visible columns')),
+			colChipsContainer,
+			connColChipsContainer,
+			connFiltersRow
 		]), false);
 		settingsBody.appendChild(tableSection.el);
+
+		function updateTableSectionMode() {
+			var all = isAllMode();
+			colChipsContainer.style.display = all ? 'flex' : 'none';
+			connColChipsContainer.style.display = all ? 'none' : 'flex';
+			connFiltersRow.style.display = all ? 'none' : 'flex';
+		}
+		updateTableSectionMode();
 
 		var settingsPanel = E('div', {'style':'border-radius:4px;margin-bottom:10px;'+ob}, [
 			settingsToggle, settingsBody
