@@ -10,17 +10,19 @@ Per-device traffic monitoring and control for OpenWrt routers. Monitor connectio
 
 ---
 
-I built this plugin because I needed a fast, reliable way to block internet access for my kids — and the existing options are surprisingly bad at it. Most firewall tools don't account for already-established connections, so blocking a device mid-session doesn't actually cut it off. Others require too many clicks spread across multiple UI screens.
+I built this because I wanted a reliable one-click way to cut my kids off the internet — and found that doing it properly on OpenWrt is surprisingly awkward. Most approaches either miss already-established connections (so the device stays online until the session times out on its own), or require navigating across several LuCI pages just to get something done.
 
-I started with a few custom scripts. That worked, but then I wanted more: to see who was the heaviest user right now, what they were downloading, which interface they were on. So I added a traffic table. Then protocol breakdowns. Then per-connection detail. One thing led to another.
+Custom shell scripts solved the immediate problem. But once I had something working, I wanted to actually *see* what was happening on the network — who was online, how much traffic each device was generating, where they were connecting to. So I added a live traffic table.
 
-Since I was already blocking internet, I figured a blunt drop rule wasn't ideal — sometimes you just want to slow things down rather than cut them off entirely. So I added rate limiting and traffic shaping via tc/HTB.
+That opened the door to more: which interface is each device on? What's the TCP state breakdown? What are the top destinations? One thing led to another, and the connection detail view followed.
 
-From there (with a lot of help from Claude), the focus shifted to convenience: a recent-devices bar for one-click access, live bandwidth sparklines, column visibility toggles, a searchable device picker.
+A hard internet block also felt heavy-handed for everyday use — sometimes slowing a device down is better than cutting it off entirely. So I added rate limiting and traffic shaping via tc/HTB, with persistence across reboots.
 
-The most recent addition is Telegram integration — instant notifications when a new device joins the network, and the ability to block, unblock, or throttle any device directly from a Telegram message.
+After that, the focus shifted to making the whole thing convenient to live with: a recent-devices bar for one-click access, live sparkline graphs with a hover popup, a searchable device picker, configurable columns, activity logging.
 
-I hope it turns out to be as useful for you as it has been for me.
+The latest addition is Telegram — instant notifications when a new device joins the network, and the ability to block, unblock, or throttle any device directly from my phone without opening a browser.
+
+I hope it turns out as useful for you as it has been for me.
 
 ---
 
