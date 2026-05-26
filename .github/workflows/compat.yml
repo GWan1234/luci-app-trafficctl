@@ -1,0 +1,70 @@
+name: OpenWrt Compatibility
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  compat:
+    name: ${{ matrix.version }} / ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 21.02 (legacy naming)
+          - { version: "21.02", arch: "x86-64",    image: "x86-64-v21.02.6" }
+          - { version: "21.02", arch: "aarch64",   image: "aarch64_cortex-a53-v21.02.6" }
+          - { version: "21.02", arch: "arm_a15",   image: "arm_cortex-a15_neon-vfpv4-v21.02.6" }
+          - { version: "21.02", arch: "armvirt32",  image: "armvirt-32-v21.02.6" }
+          # 22.03 (legacy naming)
+          - { version: "22.03", arch: "x86-64",    image: "x86-64-v22.03.7" }
+          - { version: "22.03", arch: "aarch64",   image: "aarch64_cortex-a53-v22.03.7" }
+          - { version: "22.03", arch: "arm_a15",   image: "arm_cortex-a15_neon-vfpv4-v22.03.7" }
+          - { version: "22.03", arch: "armvirt32",  image: "armvirt-32-v22.03.7" }
+          # 23.05
+          - { version: "23.05", arch: "x86-64",    image: "x86-64-v23.05.6" }
+          - { version: "23.05", arch: "aarch64",   image: "aarch64_generic-v23.05.6" }
+          - { version: "23.05", arch: "arm_a15",   image: "arm_cortex-a15_neon-vfpv4-v23.05.6" }
+          - { version: "23.05", arch: "armsr",     image: "armsr-armv8-v23.05.6" }
+          # 24.10
+          - { version: "24.10", arch: "x86-64",    image: "x86-64-v24.10.6" }
+          - { version: "24.10", arch: "aarch64",   image: "aarch64_generic-v24.10.6" }
+          - { version: "24.10", arch: "arm_a15",   image: "arm_cortex-a15_neon-vfpv4-v24.10.6" }
+          - { version: "24.10", arch: "armsr",     image: "armsr-armv8-v24.10.6" }
+          # 25.12 (latest stable)
+          - { version: "25.12", arch: "x86-64",    image: "x86-64-v25.12.4" }
+          - { version: "25.12", arch: "aarch64",   image: "aarch64_generic-v25.12.4" }
+          - { version: "25.12", arch: "arm_a15",   image: "arm_cortex-a15_neon-vfpv4-v25.12.4" }
+          - { version: "25.12", arch: "armsr",     image: "armsr-armv8-v25.12.4" }
+          # snapshot (latest dev)
+          - { version: "snapshot", arch: "x86-64",  image: "x86-64-snapshot" }
+          - { version: "snapshot", arch: "aarch64", image: "aarch64_generic-snapshot" }
+          - { version: "snapshot", arch: "armsr",   image: "armsr-armv8-snapshot" }
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-qemu-action@v3
+      - name: Build IPK
+        run: ./build-ipk.sh 0.0.0-test 1
+      - name: Install and verify in OpenWrt ${{ matrix.version }} (${{ matrix.arch }})
+        run: |
+          IMAGE="ghcr.io/openwrt/rootfs:${{ matrix.image }}"
+          if ! docker pull "$IMAGE" 2>/tmp/pull-err; then
+            if grep -q "no matching manifest" /tmp/pull-err; then
+              echo "::warning::Image $IMAGE not available for this platform, skipping"
+              exit 0
+            fi
+            cat /tmp/pull-err >&2
+            exit 1
+          fi
+          docker run --rm \
+            --entrypoint /bin/sh \
+            -v "$PWD/dist:/dist" \
+            -v "$PWD/tests:/tests" \
+            "$IMAGE" \
+            /tests/test_install.sh /dist/luci-app-trafficctl_0.0.0-test-1_all.ipk
