@@ -1202,42 +1202,180 @@ return view.extend({
 			}
 		}
 
-		var ratePick = mkInlinePick(RATE_PRESETS, '0', function(v) {
-			var isCustom = v === 'custom';
-			customInput.style.display = isCustom ? '' : 'none';
-			customUnitPick.el.style.display = isCustom ? '' : 'none';
-		});
-		var customInput = E('input', { 'type':'number', 'min':'1', 'step':'1', 'placeholder': _('value'),
-			'class':'cbi-input-text', 'style':'width:80px;display:none;font-size:12px;padding:2px 6px' });
-		var customUnitPick = mkInlinePick([
-			{v:'mbit',l:'Mbit/s'},{v:'kbit',l:'kbit/s'}
-		], 'mbit', function() {});
-		customUnitPick.el.style.display = 'none';
-		var modePick = mkInlinePick([
-			{v:'shaper',l:_('Shaper (queue)')},{v:'limiter',l:_('Limiter (drop)')}
-		], 'shaper', function() {});
-		var rateBtn = E('button', { 'class': 'cbi-button cbi-button-action', 'style': 'font-size:12px;padding:3px 12px' }, _('Apply'));
+		// ── Speed Limit: modern chip UI ──────────────────────────────
+		var _rateSelected = '0';
+		var _modeSelected = 'shaper';
 
-		var rateLimitRow = E('div', {
-			'style': 'display:none;padding:10px 14px;border-radius:4px;margin-bottom:8px;' +
-				'border:1px solid var(--tm-border);background:var(--tm-opts-bg)'
-		}, [
-			E('div', {'style':'font-size:11px;font-weight:600;color:var(--tm-text-mute);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px'}, _('Speed Limit')),
-			E('div', {'style':'display:flex;align-items:center;gap:8px;flex-wrap:wrap'}, [
-				mkLabel(_('Rate') + ':'), ratePick.el, customInput, customUnitPick.el,
-				E('span',{'style':'border-left:1px solid var(--tm-border);height:18px;margin:0 4px'}),
-				mkLabel(_('Mode') + ':'), modePick.el,
-				rateBtn
-			])
+		var chipStyle = 'display:inline-block;padding:4px 10px;margin:2px;border-radius:14px;font-size:12px;' +
+			'font-weight:500;cursor:pointer;transition:all .15s;border:1.5px solid var(--tm-border);' +
+			'background:var(--tm-bg);color:var(--tm-text);user-select:none';
+		var chipActiveStyle = 'display:inline-block;padding:4px 10px;margin:2px;border-radius:14px;font-size:12px;' +
+			'font-weight:600;cursor:pointer;transition:all .15s;border:1.5px solid var(--tm-proto);' +
+			'background:var(--tm-proto);color:#fff;user-select:none';
+		var chipOffStyle = 'display:inline-block;padding:4px 10px;margin:2px;border-radius:14px;font-size:12px;' +
+			'font-weight:500;cursor:pointer;transition:all .15s;border:1.5px solid var(--tm-border);' +
+			'background:var(--tm-bg);color:var(--tm-text-mute);user-select:none';
+		var chipOffActiveStyle = 'display:inline-block;padding:4px 10px;margin:2px;border-radius:14px;font-size:12px;' +
+			'font-weight:600;cursor:pointer;transition:all .15s;border:1.5px solid var(--tm-text-mute);' +
+			'background:var(--tm-text-mute);color:#fff;user-select:none';
+
+		var rateChipsRow = E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:0'});
+		var rateChips = [];
+		RATE_PRESETS.filter(function(p) { return p.v !== 'custom'; }).forEach(function(preset) {
+			var chip = E('span', {'style': preset.v === '0' ? chipOffStyle : chipStyle}, preset.l);
+			chip._val = preset.v;
+			chip.addEventListener('click', function() {
+				_rateSelected = preset.v;
+				updateRateChips();
+				customRow.style.display = 'none';
+				applyRate();
+			});
+			rateChips.push(chip);
+			rateChipsRow.appendChild(chip);
+		});
+
+		function updateRateChips() {
+			rateChips.forEach(function(c) {
+				if (c._val === '0') {
+					c.style.cssText = c._val === _rateSelected ? chipOffActiveStyle : chipOffStyle;
+				} else {
+					c.style.cssText = c._val === _rateSelected ? chipActiveStyle : chipStyle;
+				}
+			});
+			if (_rateSelected === 'custom') {
+				rateChips.forEach(function(c) { c.style.cssText = c._val === '0' ? chipOffStyle : chipStyle; });
+			}
+		}
+
+		// Custom input row
+		var customInput = E('input', { 'type':'number', 'min':'1', 'step':'1', 'placeholder': _('value'),
+			'style':'width:70px;font-size:12px;padding:4px 8px;border:1.5px solid var(--tm-border);border-radius:8px;background:var(--tm-bg);color:var(--tm-text)' });
+		var customUnitBtns = E('span', {'style':'display:inline-flex;border-radius:8px;overflow:hidden;border:1.5px solid var(--tm-border)'});
+		var _customUnit = 'mbit';
+		var mbitBtn = E('span', {'style':'padding:4px 8px;font-size:11px;cursor:pointer;background:var(--tm-proto);color:#fff'}, 'Mbit/s');
+		var kbitBtn = E('span', {'style':'padding:4px 8px;font-size:11px;cursor:pointer;background:var(--tm-bg);color:var(--tm-text)'}, 'kbit/s');
+		function updateUnitBtns() {
+			mbitBtn.style.background = _customUnit === 'mbit' ? 'var(--tm-proto)' : 'var(--tm-bg)';
+			mbitBtn.style.color = _customUnit === 'mbit' ? '#fff' : 'var(--tm-text)';
+			kbitBtn.style.background = _customUnit === 'kbit' ? 'var(--tm-proto)' : 'var(--tm-bg)';
+			kbitBtn.style.color = _customUnit === 'kbit' ? '#fff' : 'var(--tm-text)';
+		}
+		mbitBtn.addEventListener('click', function() { _customUnit = 'mbit'; updateUnitBtns(); });
+		kbitBtn.addEventListener('click', function() { _customUnit = 'kbit'; updateUnitBtns(); });
+		customUnitBtns.appendChild(mbitBtn);
+		customUnitBtns.appendChild(kbitBtn);
+
+		var customApplyBtn = E('button', {
+			'style':'padding:4px 12px;font-size:12px;border-radius:8px;border:none;background:var(--tm-proto);color:#fff;cursor:pointer;font-weight:600'
+		}, _('Apply'));
+		customApplyBtn.addEventListener('click', function() {
+			_rateSelected = 'custom';
+			updateRateChips();
+			applyRate();
+		});
+
+		var customToggleBtn = E('span', {'style': chipStyle, 'data-tip': _('Enter a custom speed value')}, '✎ ' + _('Custom'));
+		customToggleBtn.addEventListener('click', function() {
+			customRow.style.display = customRow.style.display === 'none' ? 'flex' : 'none';
+		});
+		rateChipsRow.appendChild(customToggleBtn);
+
+		var customRow = E('div', {'style':'display:none;margin-top:6px;align-items:center;gap:6px'}, [
+			customInput, customUnitBtns, customApplyBtn
 		]);
 
+		// Mode: segmented toggle (Shaper default)
+		var modeToggle = E('div', {'style':'display:inline-flex;border-radius:8px;overflow:hidden;border:1.5px solid var(--tm-border);margin-top:6px'});
+		var shaperBtn = E('span', {
+			'style':'padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s',
+			'data-tip': _('Queues excess traffic (smoother streaming, lower jitter)')
+		}, '🌊 ' + _('Shaper'));
+		var limiterBtn = E('span', {
+			'style':'padding:5px 12px;font-size:11px;font-weight:500;cursor:pointer;transition:all .15s',
+			'data-tip': _('Drops excess packets (instant enforcement, low overhead)')
+		}, '⚡ ' + _('Limiter'));
+		function updateModeToggle() {
+			shaperBtn.style.background = _modeSelected === 'shaper' ? 'var(--tm-proto)' : 'var(--tm-bg)';
+			shaperBtn.style.color = _modeSelected === 'shaper' ? '#fff' : 'var(--tm-text)';
+			shaperBtn.style.fontWeight = _modeSelected === 'shaper' ? '600' : '500';
+			limiterBtn.style.background = _modeSelected === 'limiter' ? 'var(--tm-rate-fg, #e67e22)' : 'var(--tm-bg)';
+			limiterBtn.style.color = _modeSelected === 'limiter' ? '#fff' : 'var(--tm-text)';
+			limiterBtn.style.fontWeight = _modeSelected === 'limiter' ? '600' : '500';
+		}
+		shaperBtn.addEventListener('click', function() { _modeSelected = 'shaper'; updateModeToggle(); });
+		limiterBtn.addEventListener('click', function() { _modeSelected = 'limiter'; updateModeToggle(); });
+		modeToggle.appendChild(shaperBtn);
+		modeToggle.appendChild(limiterBtn);
+		updateModeToggle();
+
+		var rateLimitRow = E('div', {
+			'style': 'display:none;padding:12px 14px;border-radius:8px;margin-bottom:8px;' +
+				'border:1px solid var(--tm-border);background:var(--tm-opts-bg)'
+		}, [
+			E('div', {'style':'display:flex;align-items:center;justify-content:space-between;margin-bottom:8px'}, [
+				E('span', {'style':'font-size:12px;font-weight:600;color:var(--tm-text)'}, '⚡ ' + _('Speed Limit')),
+				modeToggle
+			]),
+			rateChipsRow,
+			customRow
+		]);
+
+		// Compat shims for existing code that uses ratePick/modePick interface
+		var ratePick = {
+			getValue: function() { return _rateSelected; },
+			setValue: function(v) { _rateSelected = v; updateRateChips(); },
+			el: rateChipsRow
+		};
+		var modePick = {
+			getValue: function() { return _modeSelected; },
+			setValue: function(v) { _modeSelected = v; updateModeToggle(); },
+			el: modeToggle
+		};
+		var rateBtn = { disabled: false, addEventListener: function() {} };
+
 		function getRateKbit() {
-			var v = ratePick.getValue();
-			if (v !== 'custom') return v;
+			if (_rateSelected !== 'custom') return _rateSelected;
 			var n = parseFloat(customInput.value);
 			if (!n || n <= 0) return '0';
-			if (customUnitPick.getValue() === 'mbit') return String(Math.round(n * 1000));
+			if (_customUnit === 'mbit') return String(Math.round(n * 1000));
 			return String(Math.round(n));
+		}
+
+		function applyRate() {
+			var ip   = searchSelect.getValue();
+			var name = '';
+			var kbit = getRateKbit();
+			var mode = _modeSelected;
+
+			if (kbit === '0') {
+				setStatus(statusDiv, 'loading', _('Removing throttle…'));
+				Promise.all([
+					callRatelimit(ip, 0, name),
+					callShapeRemove(ip, name)
+				]).then(function(results) {
+					var res = results[0] || {};
+					setStatus(statusDiv, 'ok', res.msg || _('Throttle removed'));
+					runQuery();
+				}).catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); });
+			} else if (mode === 'shaper') {
+				setStatus(statusDiv, 'loading', _('Shaping') + ' → ' + fmtRate(parseInt(kbit)) + '…');
+				callRatelimit(ip, 0, name)
+					.then(function() { return callShapeAdd(ip, parseInt(kbit), name); })
+					.then(function(res) {
+						setStatus(statusDiv, (res && res.ok) ? 'action' : 'error', (res && res.msg) || '?');
+						runQuery();
+					})
+					.catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); });
+			} else {
+				setStatus(statusDiv, 'loading', _('Limiting') + ' → ' + fmtRate(parseInt(kbit)) + '…');
+				callShapeRemove(ip, name)
+					.then(function() { return callRatelimit(ip, parseInt(kbit), name); })
+					.then(function(res) {
+						setStatus(statusDiv, (res && res.ok) ? 'action' : 'error', (res && res.msg) || '?');
+						runQuery();
+					})
+					.catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); });
+			}
 		}
 
 		var actionRow = E('div', { 'style': 'display:flex;flex-wrap:nowrap;align-items:center;gap:8px' },
@@ -1468,24 +1606,21 @@ return view.extend({
 				var curShapeRate = data.shape_kbit || 0;
 				var curLimitRate = data.rate_limit_kbit || 0;
 				var curRate = curShapeRate > 0 ? curShapeRate : curLimitRate;
-				modePick.setValue(curShapeRate > 0 ? 'shaper' : 'limiter');
+				modePick.setValue(curShapeRate > 0 ? 'shaper' : (curLimitRate > 0 ? 'limiter' : 'shaper'));
 
 				var curRateStr = String(curRate);
 				var matched = RATE_PRESETS.some(function(p) { return p.v === curRateStr; });
 				if (matched) {
 					ratePick.setValue(curRateStr);
-					customInput.style.display = 'none';
-					customUnitPick.el.style.display = 'none';
+					customRow.style.display = 'none';
 				} else if (curRate > 0) {
 					ratePick.setValue('custom');
 					customInput.value = curRate;
-					customUnitPick.setValue('kbit');
-					customInput.style.display = '';
-					customUnitPick.el.style.display = '';
+					_customUnit = 'kbit'; updateUnitBtns();
+					customRow.style.display = 'flex';
 				} else {
 					ratePick.setValue('0');
-					customInput.style.display = 'none';
-					customUnitPick.el.style.display = 'none';
+					customRow.style.display = 'none';
 				}
 
 				while (connsDiv.firstChild) connsDiv.removeChild(connsDiv.firstChild);
@@ -1706,50 +1841,7 @@ return view.extend({
 			updateExtendedStats();
 		}
 
-		rateBtn.addEventListener('click', function() {
-			var ip   = searchSelect.getValue();
-			var name = '';
-			var kbit = getRateKbit();
-			var mode = modePick.getValue();
-			rateBtn.disabled = true;
-
-			if (kbit === '0') {
-				setStatus(statusDiv, 'loading', _('Removing throttle for') + ' ' + name + '…');
-				Promise.all([
-					callRatelimit(ip, 0, name),
-					callShapeRemove(ip, name)
-				]).then(function(results) {
-					var res = results[0] || {};
-					setStatus(statusDiv, 'ok', res.msg || _('Throttle removed'));
-					runQuery();
-				}).catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); })
-				  .then(function() { rateBtn.disabled = false; });
-			} else if (mode === 'shaper') {
-				setStatus(statusDiv, 'loading', _('Shaping') + ' ' + name + ' → ' + fmtRate(parseInt(kbit)) + '…');
-				callRatelimit(ip, 0, name)
-					.then(function() {
-						return callShapeAdd(ip, parseInt(kbit), name);
-					})
-					.then(function(res) {
-						setStatus(statusDiv, (res && res.ok) ? 'action' : 'error', (res && res.msg) || '?');
-						runQuery();
-					})
-					.catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); })
-					.then(function() { rateBtn.disabled = false; });
-			} else {
-				setStatus(statusDiv, 'loading', _('Limiting') + ' ' + name + ' → ' + fmtRate(parseInt(kbit)) + '…');
-				callShapeRemove(ip, name)
-					.then(function() {
-						return callRatelimit(ip, parseInt(kbit), name);
-					})
-					.then(function(res) {
-						setStatus(statusDiv, (res && res.ok) ? 'action' : 'error', (res && res.msg) || '?');
-						runQuery();
-					})
-					.catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); })
-					.then(function() { rateBtn.disabled = false; });
-			}
-		});
+		// rateBtn handler removed — applyRate() is called directly from chip clicks
 
 		wifiBtn.addEventListener('click', function() {
 			var ip   = searchSelect.getValue();
