@@ -23,6 +23,7 @@ cp htdocs/luci-static/resources/view/trafficctl/status.js "$DATA/www/luci-static
 chmod +x "$DATA/usr/local/bin/trafficctl-"*.sh
 chmod +x "$DATA/usr/libexec/rpcd/luci.trafficctl"
 [ -d "$DATA/etc/init.d" ] && chmod +x "$DATA/etc/init.d/"*
+find "$DATA/etc/hotplug.d" -type f 2>/dev/null | xargs chmod +x
 
 (cd "$DATA" && tar czf "$WORKDIR/data.tar.gz" .)
 
