@@ -143,7 +143,7 @@ In practice, both achieve the same result (excess packets are dropped), but the 
 
 11. **Requires deny mode** -- The package sets `macfilter=deny` on all wifi-iface sections. If you are using `macfilter=allow` (whitelist mode), this will conflict.
 
-12. **WiFi reload delay** -- After MAC filter changes, `wifi reload` runs in the background. There may be a 1-3 second delay before the device is actually disconnected.
+12. **WiFi deauth** -- MAC filter changes are applied via `hostapd_cli deny_acl` + `deauthenticate`. Only the target client is disconnected; other clients are unaffected. Disconnection is near-instant (no wifi reload).
 
 ---
 

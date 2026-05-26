@@ -279,7 +279,7 @@ Block/unblock a device from WiFi (MAC filter).
 **Side effects:**
 - Sets `macfilter=deny` on all wifi-iface sections.
 - Adds/removes MAC from `maclist`.
-- Runs `wifi reload`.
+- Applies at runtime via `hostapd_cli deny_acl` + `deauthenticate` (no wifi reload -- only target client affected).
 
 ---
 

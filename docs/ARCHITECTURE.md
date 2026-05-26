@@ -19,7 +19,7 @@ This document describes the internal architecture of luci-app-trafficctl.
 graph TD
     subgraph "Browser (Client)"
         JS["status.js<br/>LuCI view.extend()"]
-        LS["localStorage<br/>(user preferences, poll interval)"]
+        LS["localStorage<br/>(preferences, poll, recent devices)"]
         JS <--> LS
     end
 
@@ -57,7 +57,7 @@ graph TD
             TC["tc<br/>(HTB qdisc on br-lan)"]
             CTMOD["/proc/net/nf_conntrack"]
             IW["iw + brctl<br/>(WiFi/bridge detection)"]
-            HOSTAPD["hostapd<br/>(WiFi MAC ACLs via uci)"]
+            HOSTAPD["hostapd_cli<br/>(WiFi deny ACL + deauth)"]
         end
 
         subgraph "Persistence"
@@ -314,8 +314,27 @@ The frontend uses independent polling loops:
 
 | Poll | Interval | Script | Purpose |
 |------|----------|--------|---------|
-| Bytes | Configurable (2s–60s, or off) | `trafficctl-bytes.sh` | Bandwidth speed = delta bytes / delta time |
-| Summary | On-demand / auto-refresh | `trafficctl-summary.sh` | Full device list refresh |
+| Bytes | Configurable (default 2s, 1s–5s, or off) | `trafficctl-bytes.sh` | Bandwidth speed = delta bytes / delta time |
+| Drops | 5s | `trafficctl-ratelimit-stats.sh` | nft policer drop counters |
+| Shape stats | 5s | `trafficctl-shape-stats.sh` | tc class stats (backlog, drops, overlimits) |
+| Summary | On-demand / auto-refresh (5s–60s) | `trafficctl-summary.sh` | Full device list refresh |
+
+### Speed Calculation
+
+Speed is calculated as `(bytes_now - bytes_prev) / dt` for both download and upload. A spike filter caps values at 1 Gbit/s (125 MB/s) to discard counter resets. The frontend maintains two histories per device:
+
+- `_speedHistory` -- sliding window (trimmed to avgWindow/pollInterval samples) for sparkline and averaging.
+- `_fullHistory` -- never trimmed, used by the popup graph to show the entire session.
+
+### Popup Graph Features
+
+- Dual lines: download (solid blue) + upload (dashed green)
+- Gradient area fill with linear gradient
+- Min/max band (rolling window ±5 points)
+- Interactive crosshair with precise DL/UL values
+- Rate limit line (from shapeMap or summary data)
+- Nice Y-axis ticks (multiples of 100/500 Kbit/s, min 5 grid lines)
+- 98th percentile scaling (outliers don't crush the graph)
 
 Polling stops when:
 - The browser tab is hidden (`document.hidden === true`).
@@ -334,24 +353,27 @@ uci show wireless | grep '=wifi-iface' | cut -d= -f1
 ```
 
 This returns paths like `wireless.default_radio0`, `wireless.default_radio1`, etc. The scripts then:
-1. Set `macfilter=deny` on each interface.
-2. Add/remove the target MAC from each interface's `maclist`.
-3. Run `wifi reload` to apply changes without a full restart.
+1. Set `macfilter=deny` on each interface (UCI).
+2. Add/remove the target MAC from each interface's `maclist` (UCI).
+3. `uci commit wireless` persists the change.
+4. At runtime, use `hostapd_cli` to apply immediately without wifi reload:
+   - **Block:** `hostapd_cli -i wlanX deny_acl ADD_MAC <mac>` + `hostapd_cli -i wlanX deauthenticate <mac>`
+   - **Unblock:** `hostapd_cli -i wlanX deny_acl DEL_MAC <mac>`
+
+This approach disconnects only the target client. All other WiFi clients remain connected.
 
 ---
 
 ## Persistence
 
-Only traffic shaping rules are persisted across reboots:
+| Feature | Persisted | Storage | Rationale |
+|---------|-----------|---------|-----------|
+| Shaping (tc/HTB) | Always | `shapes.json` | Long-term bandwidth allocation |
+| Rate limiting (nft policer) | Optional (`persist_rules`) | `rules.json` | Configurable -- may be temporary or permanent |
+| Internet blocking | Optional (`persist_rules`) | `rules.json` | Configurable -- may be temporary or permanent |
+| WiFi MAC filtering | Always | `uci commit wireless` | Committed to `/etc/config/wireless` |
 
-| Feature | Persisted | Rationale |
-|---------|-----------|-----------|
-| Shaping (tc/HTB) | Yes (`shapes.json`) | Long-term bandwidth allocation |
-| Rate limiting (nft policer) | No | Temporary throttle, short-lived |
-| Internet blocking | No | Emergency block, should require re-confirmation |
-| WiFi MAC filtering | Yes (via `uci commit wireless`) | Committed to `/etc/config/wireless` |
-
-The hotplug script triggers on `ACTION=ifup` and `INTERFACE=lan`, with a readiness loop (waits up to 10s for tc to be available on the bridge device).
+The hotplug script triggers on `ACTION=ifup` and `INTERFACE=lan`, with a readiness loop (waits up to 10s for tc to be available on the bridge device). When `persist_rules` is enabled, blocks and ratelimits are saved/removed from `/etc/trafficmon/rules.json` alongside shape operations.
 
 ---
 

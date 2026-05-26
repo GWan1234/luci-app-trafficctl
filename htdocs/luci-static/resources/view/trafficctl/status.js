@@ -196,9 +196,9 @@ function fmtSpeed(bps) {
 	if (!bps || bps < 1) return '—';
 	var bits = bps * 8;
 	if (bits < 1000) return bits.toFixed(0) + ' bit/s';
-	if (bits < 1000000) return (bits/1000).toFixed(1) + ' Kbit/s';
-	if (bits < 1000000000) return (bits/1000000).toFixed(1) + ' Mbit/s';
-	return (bits/1000000000).toFixed(2) + ' Gbit/s';
+	if (bits < 1000000) { var k = bits/1000; return (k % 1 === 0 ? k.toFixed(0) : k.toFixed(1)) + ' Kbit/s'; }
+	if (bits < 1000000000) { var m = bits/1000000; return (m % 1 === 0 ? m.toFixed(0) : m.toFixed(1)) + ' Mbit/s'; }
+	var g = bits/1000000000; return (g % 1 === 0 ? g.toFixed(0) : g.toFixed(2)) + ' Gbit/s';
 }
 function fmtRate(kbit) {
 	if (!kbit || kbit <= 0) return '—';
@@ -278,92 +278,308 @@ function renderSparkline(history, globalMax, width, height, limitKbit) {
 
 function renderFullGraph(history, limitKbit, width, height) {
 	if (!history || history.length < 2) return null;
-	var w = width || 400, h = height || 160;
-	var pad = {top:20, right:12, bottom:28, left:52};
+	var w = width || 440, h = height || 200;
+	var pad = {top:22, right:14, bottom:32, left:56};
 	var gw = w - pad.left - pad.right, gh = h - pad.top - pad.bottom;
+	var ns = 'http://www.w3.org/2000/svg';
 
-	var maxSpeed = 0;
-	history.forEach(function(p) { if (p.speed > maxSpeed) maxSpeed = p.speed; });
+	var maxSpeed = 0, maxUp = 0;
+	var hasUpload = history.some(function(p) { return p.up > 0; });
+	// Use 98th percentile to ignore spikes
+	var speeds = history.map(function(p) { return p.speed; }).sort(function(a,b){return a-b;});
+	var p98idx = Math.min(speeds.length - 1, Math.floor(speeds.length * 0.98));
+	maxSpeed = speeds[p98idx] || 0;
+	// But ensure absolute max is at most 3x the p98 (clip extreme outliers visually)
+	var absMax = speeds[speeds.length - 1];
+	if (absMax > maxSpeed * 3) maxSpeed = maxSpeed * 1.5;
+	else maxSpeed = absMax;
+	history.forEach(function(p) { if (p.up > maxUp) maxUp = p.up; });
 	var limitBps = limitKbit ? (limitKbit * 1000 / 8) : 0;
 	if (limitBps > maxSpeed) maxSpeed = limitBps * 1.1;
+	if (maxUp > maxSpeed) maxSpeed = maxUp;
 	if (maxSpeed < 1) maxSpeed = 1;
-	maxSpeed *= 1.15;
+	// Round maxSpeed up to a nice tick boundary (multiples of 100 or 500 kbit/s in bytes/s)
+	var niceSteps = [100/8*1000, 200/8*1000, 500/8*1000, 1000/8*1000, 2000/8*1000, 5000/8*1000,
+		10000/8*1000, 20000/8*1000, 50000/8*1000, 100000/8*1000, 200000/8*1000, 500000/8*1000, 1000000/8*1000];
+	var tickStep = niceSteps[0];
+	for (var ns_i = 0; ns_i < niceSteps.length; ns_i++) {
+		if (maxSpeed / niceSteps[ns_i] <= 8) { tickStep = niceSteps[ns_i]; break; }
+	}
+	var gridCount = Math.max(5, Math.ceil(maxSpeed / tickStep));
+	maxSpeed = gridCount * tickStep;
 
 	var startTime = history[0].time;
 	var endTime = history[history.length - 1].time;
 	var duration = endTime - startTime || 1;
 
-	var ns = 'http://www.w3.org/2000/svg';
+	function xScale(t) { return pad.left + ((t - startTime) / duration) * gw; }
+	function yScale(v) { return pad.top + gh - (v / maxSpeed) * gh; }
+
+	// Compute min/max bands (rolling window of 5 points)
+	var bandData = [];
+	var bandWin = Math.max(2, Math.min(5, Math.floor(history.length / 8)));
+	for (var bi = 0; bi < history.length; bi++) {
+		var lo = Infinity, hi = 0;
+		for (var bj = Math.max(0, bi - bandWin); bj <= Math.min(history.length - 1, bi + bandWin); bj++) {
+			if (history[bj].speed < lo) lo = history[bj].speed;
+			if (history[bj].speed > hi) hi = history[bj].speed;
+		}
+		bandData.push({time: history[bi].time, lo: lo, hi: hi});
+	}
+
 	var svg = document.createElementNS(ns, 'svg');
 	svg.setAttribute('width', w); svg.setAttribute('height', h);
 	svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
-	svg.style.cssText = 'display:block;background:var(--tm-bg);border-radius:6px';
+	svg.style.cssText = 'display:block;border-radius:8px;overflow:visible';
 
-	// Grid lines
-	var gridN = 4;
-	for (var gi = 0; gi <= gridN; gi++) {
-		var gy = pad.top + gh - (gi / gridN) * gh;
+	// Gradient definition for download area
+	var defs = document.createElementNS(ns, 'defs');
+	var grad = document.createElementNS(ns, 'linearGradient');
+	grad.setAttribute('id', 'fg-dl-grad'); grad.setAttribute('x1', '0'); grad.setAttribute('y1', '0');
+	grad.setAttribute('x2', '0'); grad.setAttribute('y2', '1');
+	var stop1 = document.createElementNS(ns, 'stop');
+	stop1.setAttribute('offset', '0%'); stop1.setAttribute('stop-color', 'var(--tm-speed)'); stop1.setAttribute('stop-opacity', '0.35');
+	var stop2 = document.createElementNS(ns, 'stop');
+	stop2.setAttribute('offset', '100%'); stop2.setAttribute('stop-color', 'var(--tm-speed)'); stop2.setAttribute('stop-opacity', '0.03');
+	grad.appendChild(stop1); grad.appendChild(stop2); defs.appendChild(grad);
+
+	// Gradient for upload area
+	var gradUp = document.createElementNS(ns, 'linearGradient');
+	gradUp.setAttribute('id', 'fg-ul-grad'); gradUp.setAttribute('x1', '0'); gradUp.setAttribute('y1', '0');
+	gradUp.setAttribute('x2', '0'); gradUp.setAttribute('y2', '1');
+	var stopU1 = document.createElementNS(ns, 'stop');
+	stopU1.setAttribute('offset', '0%'); stopU1.setAttribute('stop-color', 'var(--tm-state-ok)'); stopU1.setAttribute('stop-opacity', '0.25');
+	var stopU2 = document.createElementNS(ns, 'stop');
+	stopU2.setAttribute('offset', '100%'); stopU2.setAttribute('stop-color', 'var(--tm-state-ok)'); stopU2.setAttribute('stop-opacity', '0.02');
+	gradUp.appendChild(stopU1); gradUp.appendChild(stopU2); defs.appendChild(gradUp);
+	svg.appendChild(defs);
+
+	// Background
+	var bg = document.createElementNS(ns, 'rect');
+	bg.setAttribute('width', w); bg.setAttribute('height', h);
+	bg.setAttribute('fill', 'var(--tm-bg)'); bg.setAttribute('rx', '8');
+	svg.appendChild(bg);
+
+	// Grid lines — nice tick values, at least 5 lines, label every 2nd if crowded
+	var labelEvery = gridCount > 7 ? 2 : 1;
+	for (var gi = 0; gi <= gridCount; gi++) {
+		var val = gi * tickStep;
+		var gy = yScale(val);
 		var gl = document.createElementNS(ns, 'line');
 		gl.setAttribute('x1', pad.left); gl.setAttribute('x2', w - pad.right);
 		gl.setAttribute('y1', gy.toFixed(1)); gl.setAttribute('y2', gy.toFixed(1));
 		gl.setAttribute('stroke', 'var(--tm-border)'); gl.setAttribute('stroke-width', '0.5');
+		gl.setAttribute('stroke-dasharray', '2,2');
 		svg.appendChild(gl);
-		var lbl = document.createElementNS(ns, 'text');
-		lbl.setAttribute('x', pad.left - 4); lbl.setAttribute('y', (gy + 3).toFixed(1));
-		lbl.setAttribute('text-anchor', 'end');
-		lbl.setAttribute('font-size', '9'); lbl.setAttribute('fill', 'var(--tm-text-mute)');
-		var val = (gi / gridN) * maxSpeed;
-		lbl.textContent = val < 1 ? '' : fmtSpeed(val);
-		svg.appendChild(lbl);
+		if (gi > 0 && gi % labelEvery === 0) {
+			var lbl = document.createElementNS(ns, 'text');
+			lbl.setAttribute('x', pad.left - 4); lbl.setAttribute('y', (gy + 3).toFixed(1));
+			lbl.setAttribute('text-anchor', 'end');
+			lbl.setAttribute('font-size', '9'); lbl.setAttribute('fill', 'var(--tm-text-mute)');
+			lbl.textContent = fmtSpeed(val);
+			svg.appendChild(lbl);
+		}
 	}
 
 	// Time axis
-	var ticks = 5;
+	var ticks = 6;
 	for (var ti = 0; ti <= ticks; ti++) {
-		var tx = pad.left + (ti / ticks) * gw;
-		var tt = startTime + (ti / ticks) * duration;
-		var secs = Math.round((tt - startTime) / 1000);
+		var tx = xScale(startTime + (ti / ticks) * duration);
+		var secs = Math.round(((ti / ticks) * duration) / 1000);
 		var tl = document.createElementNS(ns, 'text');
-		tl.setAttribute('x', tx.toFixed(1)); tl.setAttribute('y', (h - 6).toFixed(1));
+		tl.setAttribute('x', tx.toFixed(1)); tl.setAttribute('y', (h - 8).toFixed(1));
 		tl.setAttribute('text-anchor', 'middle');
 		tl.setAttribute('font-size', '9'); tl.setAttribute('fill', 'var(--tm-text-mute)');
-		tl.textContent = secs + 's';
+		if (secs < 60) tl.textContent = secs + 's';
+		else tl.textContent = Math.floor(secs/60) + 'm' + (secs%60 ? (secs%60)+'s' : '');
 		svg.appendChild(tl);
+		// Vertical grid tick
+		var vtick = document.createElementNS(ns, 'line');
+		vtick.setAttribute('x1', tx.toFixed(1)); vtick.setAttribute('x2', tx.toFixed(1));
+		vtick.setAttribute('y1', pad.top); vtick.setAttribute('y2', pad.top + gh);
+		vtick.setAttribute('stroke', 'var(--tm-border)'); vtick.setAttribute('stroke-width', '0.3');
+		vtick.setAttribute('stroke-dasharray', '2,4');
+		svg.appendChild(vtick);
 	}
 
-	// Area + line
-	var points = [];
-	history.forEach(function(p) {
-		var x = pad.left + ((p.time - startTime) / duration) * gw;
-		var y = pad.top + gh - (p.speed / maxSpeed) * gh;
-		points.push(x.toFixed(1) + ',' + y.toFixed(1));
-	});
-	var area = document.createElementNS(ns, 'polyline');
-	area.setAttribute('points', pad.left+','+(pad.top+gh)+' ' + points.join(' ') + ' ' + (pad.left+gw)+','+(pad.top+gh));
-	area.setAttribute('fill', 'var(--tm-speed)'); area.setAttribute('opacity', '0.12'); area.setAttribute('stroke', 'none');
-	svg.appendChild(area);
-	var line = document.createElementNS(ns, 'polyline');
-	line.setAttribute('points', points.join(' '));
-	line.setAttribute('fill', 'none'); line.setAttribute('stroke', 'var(--tm-speed)');
-	line.setAttribute('stroke-width', '2'); line.setAttribute('stroke-linejoin', 'round');
-	svg.appendChild(line);
+	// Min/max band (translucent fill between low and high)
+	if (bandData.length > 2) {
+		var bandPath = 'M' + xScale(bandData[0].time).toFixed(1) + ',' + yScale(bandData[0].hi).toFixed(1);
+		for (var bk = 1; bk < bandData.length; bk++) {
+			bandPath += ' L' + xScale(bandData[bk].time).toFixed(1) + ',' + yScale(bandData[bk].hi).toFixed(1);
+		}
+		for (var bl = bandData.length - 1; bl >= 0; bl--) {
+			bandPath += ' L' + xScale(bandData[bl].time).toFixed(1) + ',' + yScale(bandData[bl].lo).toFixed(1);
+		}
+		bandPath += ' Z';
+		var bandEl = document.createElementNS(ns, 'path');
+		bandEl.setAttribute('d', bandPath);
+		bandEl.setAttribute('fill', 'var(--tm-speed)'); bandEl.setAttribute('opacity', '0.08');
+		svg.appendChild(bandEl);
+	}
 
-	// Limit line
+	// Download area (gradient fill)
+	var dlPoints = [];
+	history.forEach(function(p) { dlPoints.push(xScale(p.time).toFixed(1) + ',' + yScale(p.speed).toFixed(1)); });
+	var dlArea = document.createElementNS(ns, 'polyline');
+	dlArea.setAttribute('points', xScale(startTime).toFixed(1)+','+(pad.top+gh)+' '+dlPoints.join(' ')+' '+xScale(endTime).toFixed(1)+','+(pad.top+gh));
+	dlArea.setAttribute('fill', 'url(#fg-dl-grad)'); dlArea.setAttribute('stroke', 'none');
+	svg.appendChild(dlArea);
+
+	// Download line
+	var dlLine = document.createElementNS(ns, 'polyline');
+	dlLine.setAttribute('points', dlPoints.join(' '));
+	dlLine.setAttribute('fill', 'none'); dlLine.setAttribute('stroke', 'var(--tm-speed)');
+	dlLine.setAttribute('stroke-width', '2'); dlLine.setAttribute('stroke-linejoin', 'round'); dlLine.setAttribute('stroke-linecap', 'round');
+	svg.appendChild(dlLine);
+
+	// Upload line + area (if data available)
+	if (hasUpload) {
+		var ulPoints = [];
+		history.forEach(function(p) { ulPoints.push(xScale(p.time).toFixed(1) + ',' + yScale(p.up || 0).toFixed(1)); });
+		var ulArea = document.createElementNS(ns, 'polyline');
+		ulArea.setAttribute('points', xScale(startTime).toFixed(1)+','+(pad.top+gh)+' '+ulPoints.join(' ')+' '+xScale(endTime).toFixed(1)+','+(pad.top+gh));
+		ulArea.setAttribute('fill', 'url(#fg-ul-grad)'); ulArea.setAttribute('stroke', 'none');
+		svg.appendChild(ulArea);
+		var ulLine = document.createElementNS(ns, 'polyline');
+		ulLine.setAttribute('points', ulPoints.join(' '));
+		ulLine.setAttribute('fill', 'none'); ulLine.setAttribute('stroke', 'var(--tm-state-ok)');
+		ulLine.setAttribute('stroke-width', '1.5'); ulLine.setAttribute('stroke-linejoin', 'round');
+		ulLine.setAttribute('stroke-dasharray', '4,2'); ulLine.setAttribute('opacity', '0.8');
+		svg.appendChild(ulLine);
+	}
+
+	// Limit line with label
 	if (limitBps > 0) {
-		var ly = pad.top + gh - (limitBps / maxSpeed) * gh;
+		var ly = yScale(limitBps);
 		var ll = document.createElementNS(ns, 'line');
 		ll.setAttribute('x1', pad.left); ll.setAttribute('x2', w - pad.right);
 		ll.setAttribute('y1', ly.toFixed(1)); ll.setAttribute('y2', ly.toFixed(1));
 		ll.setAttribute('stroke', 'var(--tm-rate-fg)'); ll.setAttribute('stroke-width', '1.5');
-		ll.setAttribute('stroke-dasharray', '6,3'); ll.setAttribute('opacity', '0.8');
+		ll.setAttribute('stroke-dasharray', '6,3'); ll.setAttribute('opacity', '0.85');
 		svg.appendChild(ll);
+		// Label background
+		var limTxt = fmtRate(limitKbit);
 		var limLbl = document.createElementNS(ns, 'text');
-		limLbl.setAttribute('x', w - pad.right - 2); limLbl.setAttribute('y', (ly - 4).toFixed(1));
+		limLbl.setAttribute('x', (w - pad.right - 3).toFixed(1)); limLbl.setAttribute('y', (ly - 5).toFixed(1));
 		limLbl.setAttribute('text-anchor', 'end');
-		limLbl.setAttribute('font-size', '9'); limLbl.setAttribute('fill', 'var(--tm-rate-fg)');
-		limLbl.textContent = fmtRate(limitKbit);
+		limLbl.setAttribute('font-size', '9'); limLbl.setAttribute('fill', 'var(--tm-rate-fg)'); limLbl.setAttribute('font-weight', '600');
+		limLbl.textContent = '⚡ ' + limTxt;
 		svg.appendChild(limLbl);
 	}
+
+	// Legend (top-right corner)
+	var legendX = w - pad.right - 4;
+	var legendY = pad.top + 4;
+	var dlLeg = document.createElementNS(ns, 'text');
+	dlLeg.setAttribute('x', legendX); dlLeg.setAttribute('y', legendY);
+	dlLeg.setAttribute('text-anchor', 'end'); dlLeg.setAttribute('font-size', '9');
+	dlLeg.setAttribute('fill', 'var(--tm-speed)'); dlLeg.setAttribute('font-weight', '600');
+	dlLeg.textContent = '↓ DL';
+	svg.appendChild(dlLeg);
+	if (hasUpload) {
+		var ulLeg = document.createElementNS(ns, 'text');
+		ulLeg.setAttribute('x', legendX); ulLeg.setAttribute('y', legendY + 12);
+		ulLeg.setAttribute('text-anchor', 'end'); ulLeg.setAttribute('font-size', '9');
+		ulLeg.setAttribute('fill', 'var(--tm-state-ok)'); ulLeg.setAttribute('font-weight', '600');
+		ulLeg.textContent = '↑ UL';
+		svg.appendChild(ulLeg);
+	}
+
+	// Current value annotation (last point)
+	var lastP = history[history.length - 1];
+	var lastX = xScale(lastP.time);
+	var lastY = yScale(lastP.speed);
+	var dot = document.createElementNS(ns, 'circle');
+	dot.setAttribute('cx', lastX.toFixed(1)); dot.setAttribute('cy', lastY.toFixed(1));
+	dot.setAttribute('r', '3.5'); dot.setAttribute('fill', 'var(--tm-speed)'); dot.setAttribute('stroke', 'var(--tm-bg)'); dot.setAttribute('stroke-width', '1.5');
+	svg.appendChild(dot);
+	var curLbl = document.createElementNS(ns, 'text');
+	curLbl.setAttribute('x', (lastX - 6).toFixed(1)); curLbl.setAttribute('y', (lastY - 8).toFixed(1));
+	curLbl.setAttribute('text-anchor', 'end'); curLbl.setAttribute('font-size', '10');
+	curLbl.setAttribute('fill', 'var(--tm-speed)'); curLbl.setAttribute('font-weight', '700');
+	curLbl.textContent = fmtSpeed(lastP.speed);
+	svg.appendChild(curLbl);
+
+	// Interactive crosshair overlay (mouse tracking)
+	var overlay = document.createElementNS(ns, 'rect');
+	overlay.setAttribute('x', pad.left); overlay.setAttribute('y', pad.top);
+	overlay.setAttribute('width', gw); overlay.setAttribute('height', gh);
+	overlay.setAttribute('fill', 'transparent'); overlay.setAttribute('style', 'cursor:crosshair');
+	var crossV = document.createElementNS(ns, 'line');
+	crossV.setAttribute('y1', pad.top); crossV.setAttribute('y2', pad.top + gh);
+	crossV.setAttribute('stroke', 'var(--tm-text-mute)'); crossV.setAttribute('stroke-width', '0.8');
+	crossV.setAttribute('stroke-dasharray', '3,2'); crossV.setAttribute('display', 'none');
+	var crossH = document.createElementNS(ns, 'line');
+	crossH.setAttribute('x1', pad.left); crossH.setAttribute('x2', w - pad.right);
+	crossH.setAttribute('stroke', 'var(--tm-text-mute)'); crossH.setAttribute('stroke-width', '0.8');
+	crossH.setAttribute('stroke-dasharray', '3,2'); crossH.setAttribute('display', 'none');
+	var crossDot = document.createElementNS(ns, 'circle');
+	crossDot.setAttribute('r', '4'); crossDot.setAttribute('fill', 'var(--tm-speed)');
+	crossDot.setAttribute('stroke', '#fff'); crossDot.setAttribute('stroke-width', '2'); crossDot.setAttribute('display', 'none');
+	var crossLabel = document.createElementNS(ns, 'text');
+	crossLabel.setAttribute('font-size', '10'); crossLabel.setAttribute('fill', 'var(--tm-text)');
+	crossLabel.setAttribute('font-weight', '600'); crossLabel.setAttribute('display', 'none');
+	var crossTime = document.createElementNS(ns, 'text');
+	crossTime.setAttribute('font-size', '9'); crossTime.setAttribute('fill', 'var(--tm-text-mute)');
+	crossTime.setAttribute('display', 'none');
+	// Upload crosshair dot
+	var crossDotUp = document.createElementNS(ns, 'circle');
+	crossDotUp.setAttribute('r', '3'); crossDotUp.setAttribute('fill', 'var(--tm-state-ok)');
+	crossDotUp.setAttribute('stroke', '#fff'); crossDotUp.setAttribute('stroke-width', '1.5'); crossDotUp.setAttribute('display', 'none');
+	var crossLabelUp = document.createElementNS(ns, 'text');
+	crossLabelUp.setAttribute('font-size', '9'); crossLabelUp.setAttribute('fill', 'var(--tm-state-ok)');
+	crossLabelUp.setAttribute('font-weight', '500'); crossLabelUp.setAttribute('display', 'none');
+
+	svg.appendChild(crossV); svg.appendChild(crossH);
+	svg.appendChild(crossDot); svg.appendChild(crossDotUp);
+	svg.appendChild(crossLabel); svg.appendChild(crossLabelUp); svg.appendChild(crossTime);
+	svg.appendChild(overlay);
+
+	overlay.addEventListener('mousemove', function(ev) {
+		var rect = svg.getBoundingClientRect();
+		var mx = ev.clientX - rect.left;
+		var ratio = (mx - pad.left) / gw;
+		if (ratio < 0) ratio = 0; if (ratio > 1) ratio = 1;
+		var targetTime = startTime + ratio * duration;
+		// Find closest point
+		var closest = 0, minDist = Infinity;
+		for (var ci = 0; ci < history.length; ci++) {
+			var dist = Math.abs(history[ci].time - targetTime);
+			if (dist < minDist) { minDist = dist; closest = ci; }
+		}
+		var pt = history[closest];
+		var cx = xScale(pt.time), cy = yScale(pt.speed);
+		crossV.setAttribute('x1', cx.toFixed(1)); crossV.setAttribute('x2', cx.toFixed(1)); crossV.setAttribute('display', '');
+		crossH.setAttribute('y1', cy.toFixed(1)); crossH.setAttribute('y2', cy.toFixed(1)); crossH.setAttribute('display', '');
+		crossDot.setAttribute('cx', cx.toFixed(1)); crossDot.setAttribute('cy', cy.toFixed(1)); crossDot.setAttribute('display', '');
+		crossLabel.textContent = '↓ ' + fmtSpeed(pt.speed);
+		var lblX = cx + 8, lblAnchor = 'start';
+		if (lblX + 80 > w - pad.right) { lblX = cx - 8; lblAnchor = 'end'; }
+		crossLabel.setAttribute('x', lblX.toFixed(1)); crossLabel.setAttribute('y', (cy - 10).toFixed(1));
+		crossLabel.setAttribute('text-anchor', lblAnchor); crossLabel.setAttribute('display', '');
+		// Time label at bottom
+		var tSec = Math.round((pt.time - startTime) / 1000);
+		crossTime.textContent = tSec + 's';
+		crossTime.setAttribute('x', cx.toFixed(1)); crossTime.setAttribute('y', (pad.top + gh + 14).toFixed(1));
+		crossTime.setAttribute('text-anchor', 'middle'); crossTime.setAttribute('display', '');
+		// Upload dot
+		if (hasUpload && pt.up > 0) {
+			var cyUp = yScale(pt.up);
+			crossDotUp.setAttribute('cx', cx.toFixed(1)); crossDotUp.setAttribute('cy', cyUp.toFixed(1)); crossDotUp.setAttribute('display', '');
+			crossLabelUp.textContent = '↑ ' + fmtSpeed(pt.up);
+			crossLabelUp.setAttribute('x', lblX.toFixed(1)); crossLabelUp.setAttribute('y', (cyUp + 14).toFixed(1));
+			crossLabelUp.setAttribute('text-anchor', lblAnchor); crossLabelUp.setAttribute('display', '');
+		} else {
+			crossDotUp.setAttribute('display', 'none'); crossLabelUp.setAttribute('display', 'none');
+		}
+	});
+	overlay.addEventListener('mouseleave', function() {
+		crossV.setAttribute('display', 'none'); crossH.setAttribute('display', 'none');
+		crossDot.setAttribute('display', 'none'); crossLabel.setAttribute('display', 'none');
+		crossTime.setAttribute('display', 'none');
+		crossDotUp.setAttribute('display', 'none'); crossLabelUp.setAttribute('display', 'none');
+	});
 
 	return svg;
 }
@@ -921,6 +1137,216 @@ function buildExtendedStatsLegend(shapeMap, dropMap) {
 	]);
 }
 
+function guessDeviceType(d) {
+	var n = (d.name || '').toLowerCase();
+	if (/iphone|android|pixel|galaxy|huawei|xiaomi|redmi|poco|oneplus|realme|oppo|vivo|phone/.test(n)) return 'phone';
+	if (/ipad|tab|kindle/.test(n)) return 'tablet';
+	if (/tv|roku|firestick|chromecast|appletv|hisense|samsung.*tv|lg.*tv|sony.*tv/.test(n)) return 'tv';
+	if (/macbook|laptop|notebook|thinkpad|lenovo/.test(n)) return 'laptop';
+	if (/imac|desktop|pc|workstation|mini/.test(n)) return 'desktop';
+	if (/echo|alexa|homepod|nest|speaker/.test(n)) return 'speaker';
+	if (/cam|camera|doorbell|ring/.test(n)) return 'camera';
+	if (/printer|brother|hp.*jet|epson/.test(n)) return 'printer';
+	if (/switch|router|ap|eap|ubnt|unifi/.test(n)) return 'network';
+	return 'device';
+}
+
+function deviceIcon(type, size) {
+	var icons = {
+		phone:   '📱', tablet:  '📱', tv:      '📺', laptop:  '💻',
+		desktop: '🖥️', speaker: '🔊', camera:  '📷', printer: '🖨️',
+		network: '🌐', device:  '⬡'
+	};
+	return E('span', {'style':'font-size:'+(size||18)+'px;line-height:1'}, icons[type] || icons.device);
+}
+
+function buildCardGrid(devices, onSelect, speedMap, shapeMap, dropMap) {
+	var selectedValue = '__all__';
+	var wrapper = E('div', {'style':'display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-bottom:8px'});
+
+	function render(devs) {
+		while (wrapper.firstChild) wrapper.removeChild(wrapper.firstChild);
+
+		var allCard = E('div', {
+			'style':'padding:10px;border-radius:8px;border:2px solid var(--tm-proto);background:var(--tm-info-bg);' +
+				'cursor:pointer;text-align:center;font-size:12px;font-weight:600;color:var(--tm-proto);' +
+				'transition:all .15s;display:flex;flex-direction:column;align-items:center;gap:4px',
+			'data-value':'__all__'
+		}, [E('span', {'style':'font-size:20px'}, '📊'), E('span', {}, _('All devices'))]);
+		allCard.addEventListener('click', function() { selectItem('__all__'); });
+		wrapper.appendChild(allCard);
+
+		devs.forEach(function(d) {
+			var type = guessDeviceType(d);
+			var spd = speedMap && speedMap[d.ip];
+			var sm = shapeMap && shapeMap[d.ip];
+			var dm = dropMap && dropMap[d.ip];
+			var isBlocked = d.blocked;
+			var hasLimit = (sm && sm.rate_kbit > 0) || (dm && dm.rate_kbit > 0);
+
+			var statusDot = isBlocked ? '🔴' : (hasLimit ? '🟠' : (spd && spd.current > 1024 ? '🟢' : '⚪'));
+			var speedLabel = spd && spd.current > 0 ? fmtSpeed(spd.current) : '';
+			var borderColor = selectedValue === d.ip ? 'var(--tm-proto)' : 'var(--tm-border)';
+			var bg = selectedValue === d.ip ? 'var(--tm-info-bg)' : 'var(--tm-bg)';
+
+			var card = E('div', {
+				'style':'padding:10px 8px;border-radius:8px;border:2px solid '+borderColor+';background:'+bg+';' +
+					'cursor:pointer;text-align:center;font-size:11px;transition:all .15s;display:flex;flex-direction:column;align-items:center;gap:3px;overflow:hidden',
+				'data-value': d.ip,
+				'title': d.name + ' (' + d.ip + ')'
+			}, [
+				E('div', {'style':'position:relative'}, [
+					deviceIcon(type, 22),
+					E('span', {'style':'position:absolute;top:-2px;right:-8px;font-size:8px'}, statusDot)
+				]),
+				E('div', {'style':'font-weight:600;color:var(--tm-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%'}, d.name || d.ip),
+				E('div', {'style':'color:var(--tm-text-mute);font-family:monospace;font-size:10px'}, d.ip),
+				speedLabel ? E('div', {'style':'color:var(--tm-speed);font-weight:600;font-size:10px'}, speedLabel) : E('span')
+			]);
+			card.addEventListener('click', function() { selectItem(d.ip); });
+			card.addEventListener('mouseenter', function() { if (selectedValue !== d.ip) this.style.borderColor = 'var(--tm-text-mute)'; });
+			card.addEventListener('mouseleave', function() { if (selectedValue !== d.ip) this.style.borderColor = 'var(--tm-border)'; });
+			wrapper.appendChild(card);
+		});
+	}
+
+	function selectItem(value) {
+		selectedValue = value;
+		render(devices);
+		onSelect(value);
+	}
+
+	render(devices);
+	return {
+		el: wrapper,
+		getValue: function() { return selectedValue; },
+		setValue: function(val) { selectedValue = val; render(devices); },
+		updateDevices: function(newDevices) { devices = newDevices; render(devices); },
+		refresh: function(sm, dm, spdm) { speedMap = spdm; shapeMap = sm; dropMap = dm; render(devices); }
+	};
+}
+
+function buildAvatarStrip(devices, onSelect, speedMap) {
+	var selectedValue = '__all__';
+	var wrapper = E('div', {'style':'display:flex;gap:6px;overflow-x:auto;padding:6px 2px;margin-bottom:8px;scrollbar-width:thin'});
+
+	function render(devs) {
+		while (wrapper.firstChild) wrapper.removeChild(wrapper.firstChild);
+
+		var allPill = E('div', {
+			'style':'display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;min-width:56px;transition:all .15s',
+			'data-value':'__all__'
+		}, [
+			E('div', {'style':'width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;' +
+				'border:2px solid '+(selectedValue==='__all__'?'var(--tm-proto)':'var(--tm-border)')+';' +
+				'background:'+(selectedValue==='__all__'?'var(--tm-info-bg)':'var(--tm-bg)')+';font-size:18px;transition:all .15s'}, '📊'),
+			E('div', {'style':'font-size:9px;color:'+(selectedValue==='__all__'?'var(--tm-proto)':'var(--tm-text-mute)')+';font-weight:'+(selectedValue==='__all__'?'700':'400')+';text-align:center;max-width:56px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'}, _('All'))
+		]);
+		allPill.addEventListener('click', function() { selectItem('__all__'); });
+		wrapper.appendChild(allPill);
+
+		devs.forEach(function(d) {
+			var type = guessDeviceType(d);
+			var isActive = selectedValue === d.ip;
+			var spd = speedMap && speedMap[d.ip];
+			var hasSpeed = spd && spd.current > 1024;
+			var ringColor = isActive ? 'var(--tm-proto)' : (hasSpeed ? 'var(--tm-speed)' : 'var(--tm-border)');
+			var bg = isActive ? 'var(--tm-info-bg)' : 'var(--tm-bg)';
+
+			var pill = E('div', {
+				'style':'display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;min-width:56px;transition:all .15s',
+				'data-value': d.ip,
+				'title': d.name + ' — ' + d.ip
+			}, [
+				E('div', {'style':'width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;' +
+					'border:2px solid '+ringColor+';background:'+bg+';font-size:18px;transition:all .15s'}, deviceIcon(type, 20)),
+				E('div', {'style':'font-size:9px;color:'+(isActive?'var(--tm-proto)':'var(--tm-text-mute)')+';font-weight:'+(isActive?'700':'400')+';text-align:center;max-width:56px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'}, d.name || d.ip)
+			]);
+			pill.addEventListener('click', function() { selectItem(d.ip); });
+			wrapper.appendChild(pill);
+		});
+	}
+
+	function selectItem(value) {
+		selectedValue = value;
+		render(devices);
+		onSelect(value);
+	}
+
+	render(devices);
+	return {
+		el: wrapper,
+		getValue: function() { return selectedValue; },
+		setValue: function(val) { selectedValue = val; render(devices); },
+		updateDevices: function(newDevices) { devices = newDevices; render(devices); },
+		refresh: function(spdm) { speedMap = spdm; render(devices); }
+	};
+}
+
+function buildChipCloud(devices, onSelect, speedMap, shapeMap, dropMap) {
+	var selectedValue = '__all__';
+	var wrapper = E('div', {'style':'display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;align-items:center'});
+
+	var chipNorm = 'display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border-radius:16px;font-size:12px;' +
+		'cursor:pointer;transition:all .15s;border:1.5px solid var(--tm-border);background:var(--tm-bg);color:var(--tm-text);user-select:none';
+	var chipActive = 'display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border-radius:16px;font-size:12px;' +
+		'cursor:pointer;transition:all .15s;border:1.5px solid var(--tm-proto);background:var(--tm-proto);color:#fff;font-weight:600;user-select:none';
+	var chipBlocked = 'display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border-radius:16px;font-size:12px;' +
+		'cursor:pointer;transition:all .15s;border:1.5px solid var(--tm-blocked-border);background:var(--tm-blocked-bg);color:var(--tm-blocked-fg);user-select:none';
+	var chipLimited = 'display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border-radius:16px;font-size:12px;' +
+		'cursor:pointer;transition:all .15s;border:1.5px solid var(--tm-rate-fg);background:var(--tm-bg);color:var(--tm-rate-fg);user-select:none';
+
+	function render(devs) {
+		while (wrapper.firstChild) wrapper.removeChild(wrapper.firstChild);
+
+		var allChip = E('span', {'style': selectedValue === '__all__' ? chipActive : chipNorm}, [
+			E('span', {'style':'font-size:13px'}, '📊'),
+			E('span', {}, _('All'))
+		]);
+		allChip.addEventListener('click', function() { selectItem('__all__'); });
+		wrapper.appendChild(allChip);
+
+		devs.forEach(function(d) {
+			var type = guessDeviceType(d);
+			var sm = shapeMap && shapeMap[d.ip];
+			var dm = dropMap && dropMap[d.ip];
+			var isBlocked = d.blocked;
+			var hasLimit = (sm && sm.rate_kbit > 0) || (dm && dm.rate_kbit > 0);
+			var spd = speedMap && speedMap[d.ip];
+			var speedTxt = spd && spd.current > 1024 ? ' ' + fmtSpeed(spd.current) : '';
+
+			var style;
+			if (selectedValue === d.ip) style = chipActive;
+			else if (isBlocked) style = chipBlocked;
+			else if (hasLimit) style = chipLimited;
+			else style = chipNorm;
+
+			var chip = E('span', {'style': style, 'title': d.ip + (d.mac ? ' ('+d.mac+')' : '')}, [
+				deviceIcon(type, 13),
+				E('span', {}, d.name || d.ip),
+				speedTxt ? E('span', {'style':'font-size:10px;opacity:.7'}, speedTxt) : E('span')
+			]);
+			chip.addEventListener('click', function() { selectItem(d.ip); });
+			wrapper.appendChild(chip);
+		});
+	}
+
+	function selectItem(value) {
+		selectedValue = value;
+		render(devices);
+		onSelect(value);
+	}
+
+	render(devices);
+	return {
+		el: wrapper,
+		getValue: function() { return selectedValue; },
+		setValue: function(val) { selectedValue = val; render(devices); },
+		updateDevices: function(newDevices) { devices = newDevices; render(devices); },
+		refresh: function(sm, dm, spdm) { speedMap = spdm; shapeMap = sm; dropMap = dm; render(devices); }
+	};
+}
+
 function buildSearchSelect(devices, placeholder, onSelect) {
 	var selectedValue = '__all__';
 	var recentIps = [];
@@ -1102,6 +1528,7 @@ return view.extend({
 	_shapeTimer:   null,
 	_bytesHistory: {},
 	_speedHistory: {},
+	_fullHistory:  {},
 	_speedMap:     {},
 	_dropMap:      {},
 	_shapeMap:     {},
@@ -1135,15 +1562,110 @@ return view.extend({
 		devices.sort(function(a, b) { return a.name.localeCompare(b.name); });
 
 		var savedIp = opts.lastIp || '__all__';
-		var searchSelect = buildSearchSelect(devices, _('Search device (name, IP, MAC)…'), function(value) {
+
+		function onDeviceSelect(value) {
 			var o = loadOpts(); o.lastIp = value; saveOpts(o); updateUrlParams(o);
+			if (value !== '__all__') addRecentDevice(value);
+			renderRecentChips();
 			updateModeUI();
 			runQuery();
-		});
+		}
+
+		var searchSelect = buildSearchSelect(devices, _('Search device (name, IP, MAC)…'), onDeviceSelect);
 		if (savedIp && savedIp !== '__all__') {
 			var matchDev = devices.filter(function(d) { return d.ip === savedIp; })[0];
 			searchSelect.setValue(savedIp, matchDev ? matchDev.name + '  —  ' + matchDev.ip : savedIp);
 		}
+
+		// Recent devices stored in localStorage
+		var RECENT_KEY = 'trafficctl_recent';
+		var MAX_RECENT = 6;
+		function getRecentDevices() {
+			try { return JSON.parse(window.localStorage.getItem(RECENT_KEY) || '[]'); }
+			catch(e) { return []; }
+		}
+		function saveRecentDevices(arr) {
+			try { window.localStorage.setItem(RECENT_KEY, JSON.stringify(arr)); } catch(e) {}
+		}
+		function addRecentDevice(ip) {
+			var recent = getRecentDevices().filter(function(r) { return r !== ip; });
+			recent.unshift(ip);
+			if (recent.length > MAX_RECENT) recent.length = MAX_RECENT;
+			saveRecentDevices(recent);
+		}
+
+		// Quick-access bar: [All devices] + recent device chips
+		var quickBar = E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:6px'});
+
+		var allBtn = E('span', {
+			'style':'display:inline-flex;align-items:center;gap:3px;padding:4px 10px;border-radius:14px;font-size:12px;' +
+				'font-weight:600;cursor:pointer;transition:all .15s;user-select:none;' +
+				'border:1.5px solid var(--tm-proto);background:var(--tm-proto);color:#fff'
+		}, ['📊 ', _('All devices')]);
+		allBtn.addEventListener('click', function() {
+			searchSelect.setValue('__all__', '');
+			onDeviceSelect('__all__');
+		});
+		quickBar.appendChild(allBtn);
+
+		var recentContainer = E('span', {'style':'display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center'});
+		quickBar.appendChild(recentContainer);
+
+		var chipNormStyle = 'display:inline-flex;align-items:center;gap:3px;padding:4px 10px;border-radius:14px;font-size:11px;' +
+			'font-weight:500;cursor:pointer;transition:all .15s;user-select:none;' +
+			'border:1.5px solid var(--tm-border);background:var(--tm-bg);color:var(--tm-text)';
+		var chipActiveStyle = 'display:inline-flex;align-items:center;gap:3px;padding:4px 10px;border-radius:14px;font-size:11px;' +
+			'font-weight:600;cursor:pointer;transition:all .15s;user-select:none;' +
+			'border:1.5px solid var(--tm-proto);background:var(--tm-info-bg);color:var(--tm-proto)';
+
+		function renderRecentChips() {
+			while (recentContainer.firstChild) recentContainer.removeChild(recentContainer.firstChild);
+			var recent = getRecentDevices();
+			var currentIp = searchSelect.getValue();
+
+			// Update All button style
+			if (currentIp === '__all__') {
+				allBtn.style.background = 'var(--tm-proto)';
+				allBtn.style.color = '#fff';
+				allBtn.style.borderColor = 'var(--tm-proto)';
+			} else {
+				allBtn.style.background = 'var(--tm-bg)';
+				allBtn.style.color = 'var(--tm-proto)';
+				allBtn.style.borderColor = 'var(--tm-proto)';
+			}
+
+			recent.forEach(function(ip) {
+				var dev = devices.filter(function(d) { return d.ip === ip; })[0];
+				var label = dev ? dev.name : ip;
+				var isActive = ip === currentIp;
+				var chip = E('span', {
+					'style': isActive ? chipActiveStyle : chipNormStyle,
+					'title': ip + (dev && dev.mac ? ' (' + dev.mac + ')' : '')
+				}, [
+					deviceIcon(guessDeviceType(dev || {name:label}), 12),
+					document.createTextNode(' ' + label)
+				]);
+				chip.addEventListener('click', function() {
+					searchSelect.setValue(ip, dev ? dev.name + '  —  ' + ip : ip);
+					onDeviceSelect(ip);
+				});
+				// Remove button (×) on hover
+				var removeBtn = E('span', {
+					'style':'margin-left:2px;font-size:10px;opacity:0;transition:opacity .15s;color:var(--tm-text-mute);cursor:pointer'
+				}, '×');
+				removeBtn.addEventListener('click', function(ev) {
+					ev.stopPropagation();
+					var r = getRecentDevices().filter(function(x) { return x !== ip; });
+					saveRecentDevices(r);
+					renderRecentChips();
+				});
+				chip.appendChild(removeBtn);
+				chip.addEventListener('mouseenter', function() { removeBtn.style.opacity = '1'; });
+				chip.addEventListener('mouseleave', function() { removeBtn.style.opacity = '0'; });
+				recentContainer.appendChild(chip);
+			});
+		}
+		renderRecentChips();
 
 		function mkToggle(id, label, checked, onChange) {
 			var cb = E('input', { 'type': 'checkbox', 'id': id, 'class': 'tm-toggle-input' });
@@ -1305,8 +1827,8 @@ return view.extend({
 		var connsDiv  = E('div', { 'style': opts.showConns===false?'display:none':'' });
 
 		// Speed graph popup on spark cell hover
-		var graphPopup = E('div', {'style':'display:none;position:fixed;z-index:500;padding:8px;border-radius:8px;' +
-			'background:var(--tm-bg);border:1px solid var(--tm-border);box-shadow:0 8px 24px rgba(0,0,0,.2);pointer-events:none'});
+		var graphPopup = E('div', {'style':'display:none;position:fixed;z-index:500;padding:10px;border-radius:10px;' +
+			'background:var(--tm-bg);border:1px solid var(--tm-border);box-shadow:0 8px 24px rgba(0,0,0,.25)'});
 		document.body.appendChild(graphPopup);
 		var graphPopupIp = null;
 		var graphPopupTimer = null;
@@ -1326,13 +1848,25 @@ return view.extend({
 		}
 		function updateGraphPopup() {
 			if (!graphPopupIp) return;
-			var hist = self._speedHistory[graphPopupIp];
+			var hist = self._fullHistory[graphPopupIp];
 			var sm = self._shapeMap[graphPopupIp], dm = self._dropMap[graphPopupIp];
 			var lk = (sm && sm.rate_kbit > 0) ? sm.rate_kbit : ((dm && dm.rate_kbit > 0) ? dm.rate_kbit : 0);
+			// Fallback: get limit from summary rows if shapeMap not yet populated
+			if (!lk && self._lastRows) {
+				var row = self._lastRows.filter(function(r) { return r.ip === graphPopupIp; })[0];
+				if (row) lk = (row.shape_kbit || 0) > 0 ? row.shape_kbit : (row.rate_limit_kbit || 0);
+			}
 			while (graphPopup.firstChild) graphPopup.removeChild(graphPopup.firstChild);
-			var svg = renderFullGraph(hist, lk, 380, 150);
-			if (svg) graphPopup.appendChild(svg);
-			else graphPopup.appendChild(E('span', {'style':'color:var(--tm-text-mute);font-size:11px'}, _('Not enough data yet')));
+			var svg = renderFullGraph(hist, lk, 440, 200);
+			if (svg) {
+				graphPopup.appendChild(svg);
+				if (lk > 0) {
+					graphPopup.appendChild(E('div', {'style':'font-size:10px;color:var(--tm-text-mute);margin-top:4px;text-align:center'},
+						_('Note: speed is measured before shaper — bursts above limit are normal')));
+				}
+			} else {
+				graphPopup.appendChild(E('span', {'style':'color:var(--tm-text-mute);font-size:11px'}, _('Not enough data yet')));
+			}
 		}
 		function hideGraphPopup() {
 			graphPopup.style.display = 'none';
@@ -1340,13 +1874,18 @@ return view.extend({
 			if (graphPopupTimer) { clearInterval(graphPopupTimer); graphPopupTimer = null; }
 		}
 
+		graphPopup.addEventListener('mouseleave', hideGraphPopup);
+
 		connsDiv.addEventListener('mouseenter', function(ev) {
 			var cell = ev.target.closest ? ev.target.closest('td[data-spark-ip]') : null;
 			if (cell) showGraphPopup(cell);
 		}, true);
 		connsDiv.addEventListener('mouseleave', function(ev) {
 			var cell = ev.target.closest ? ev.target.closest('td[data-spark-ip]') : null;
-			if (cell) hideGraphPopup();
+			if (!cell) return;
+			var related = ev.relatedTarget;
+			if (related && (graphPopup === related || graphPopup.contains(related))) return;
+			hideGraphPopup();
 		}, true);
 
 		var BTN_BASE = 'padding:5px 14px;border-radius:3px;cursor:pointer;font-size:13px;min-width:140px;text-align:center;font-weight:500';
@@ -1602,6 +2141,7 @@ return view.extend({
 					if (svg) sparkCell.appendChild(svg);
 				}
 			});
+
 		}
 
 		function pollDrops() {
@@ -1679,6 +2219,7 @@ return view.extend({
 				Object.keys(self._speedHistory).forEach(function(ip) {
 					if (!activeIps[ip]) {
 						delete self._speedHistory[ip];
+						delete self._fullHistory[ip];
 						delete self._speedMap[ip];
 						delete self._speedEwma[ip];
 						delete self._bytesHistory[ip];
@@ -1691,8 +2232,20 @@ return view.extend({
 						var dt = (now - prev.time) / 1000;
 						if (dt < 0.5) return;
 						var dIn = d.bytes_in - prev.bytes_in;
+						var dOut = d.bytes_out - prev.bytes_out;
+						// Counter reset or wrap — discard this sample
 						if (dIn < 0) dIn = 0;
+						if (dOut < 0) dOut = 0;
 						var speed = dIn / dt;
+						var speedUp = dOut / dt;
+						// Spike filter: cap at link speed (1 Gbit/s = 125 MB/s)
+						var MAX_BPS = 125000000;
+						if (speed > MAX_BPS) speed = 0;
+						if (speedUp > MAX_BPS) speedUp = 0;
+
+						// Full history (never trimmed) — for the popup graph
+						if (!self._fullHistory[d.ip]) self._fullHistory[d.ip] = [];
+						self._fullHistory[d.ip].push({speed: speed, up: speedUp, time: now});
 
 						if (avgMethod === 'ewma') {
 							var alpha = 2 / (maxSamples + 1);
@@ -2472,7 +3025,10 @@ return view.extend({
 		return E('div', {'class':'cbi-map', 'style':'color:'+C.hostname}, [
 			E('h2', {'style':'color:'+C.hostname}, _('Traffic Control')),
 			E('div', {'class':'cbi-section'}, [
-				E('div', {'style':'display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap'}, [searchSelect.el, actionRow]),
+				E('div', {'style':'margin-bottom:10px'}, [
+						E('div', {'style':'display:flex;align-items:center;gap:10px;flex-wrap:wrap'}, [searchSelect.el, actionRow]),
+						quickBar
+					]),
 				rateLimitRow,
 				statusDiv,
 				activityDiv,

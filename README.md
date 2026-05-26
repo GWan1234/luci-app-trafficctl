@@ -68,15 +68,16 @@ Per-device traffic monitoring and control for OpenWrt routers. Monitor connectio
 
 ## Features
 
-- **Real-time Per-device Monitoring** -- View active connections per device with TCP/UDP counts, TCP state breakdown, destination IPs, and live bandwidth speed (sparkline graphs).
+- **Real-time Per-device Monitoring** -- View active connections per device with TCP/UDP counts, TCP state breakdown, destination IPs, and live bandwidth speed (sparkline graphs with rate limit overlay).
+- **Interactive Speed Graphs** -- Hover any sparkline for a full-size popup graph with: download + upload dual lines, gradient area fill, min/max band, crosshair with precise values, rate limit line, nice-value Y axis (multiples of 100/500 Kbit/s). Full history from page load.
 - **Traffic Shaping (Queue)** -- tc/HTB classes on the LAN bridge with fq_codel leaf qdiscs. Queues excess traffic instead of dropping, providing smoother throughput.
 - **Rate Limiting (Policer)** -- nftables or iptables-based packet dropping when a device exceeds the configured rate. Instant enforcement, no queuing.
 - **Internet Blocking** -- Layer 3 drop rules per device. Connections are killed immediately and counter stats are tracked.
-- **WiFi MAC Filtering** -- Block any device from associating with WiFi. Works across all radio interfaces (2.4 GHz, 5 GHz, 6 GHz) automatically.
+- **WiFi MAC Filtering** -- Block any device from associating with WiFi via hostapd_cli deny ACL. Only the target client is deauthenticated -- no wifi reload, other clients stay connected. Works across all radio interfaces (2.4 GHz, 5 GHz, 6 GHz) automatically.
 - **Interface Detection** -- Shows actual connection interface: WiFi band (2.4G/5G/6G) or LAN port name (lan2/lan3/lan4).
-- **Live Speed Polling** -- Optional polling with configurable interval or off by default; shows sparkline per device.
-- **Reverse DNS** -- Optional hostname resolution for external destination IPs.
-- **Searchable Device Picker** -- Inline search by name, IP, or MAC with filtered dropdown.
+- **Live Speed Polling** -- Optional polling with configurable interval (default 2s); shows sparkline per device with spike filtering.
+- **Reverse DNS** -- Optional hostname resolution for external destination IPs with in-memory cache (no repeated lookups).
+- **Searchable Device Picker** -- Command palette (search by name, IP, or MAC) with recent devices quick-access bar stored in localStorage.
 - **Telegram Bot** -- Optional bot for remote control: device list, block/unblock, rate limit, shape traffic, new device notifications. Runs on the router via long polling, no external server needed.
 - **New Device Detection** -- Discovers new devices via three sources: ARP table, DHCP leases, Wi-Fi station list. Instant DHCP hotplug trigger for near-realtime alerts.
 - **Activity Logging** -- Configurable logging of all actions (blocks, ratelimits, shapes, config changes) to a local file and/or syslog. Includes source IP, username, and trigger (LuCI/Telegram/CLI).
@@ -205,8 +206,8 @@ opkg install curl
 ### Persistence
 
 - Shaping rules are always saved to `/etc/trafficmon/shapes.json` and restored on boot.
-- Block and rate-limit rules are optionally persistent when `persist_rules` is enabled in Settings (saved to `/etc/trafficmon/rules.json`).
-- On reboot, the hotplug script at `/etc/hotplug.d/iface/99-trafficctl-shapes` restores all saved rules when the LAN interface comes up.
+- Block and rate-limit rules are optionally persistent when `persist_rules` is enabled in Settings > Logging & Persistence (saved to `/etc/trafficmon/rules.json`).
+- On reboot, the hotplug script at `/etc/hotplug.d/iface/99-trafficctl-shapes` restores all saved rules (shapes, blocks, ratelimits) when the LAN interface comes up.
 
 ### Activity Logging
 
@@ -218,9 +219,9 @@ opkg install curl
 ### WiFi MAC Filtering
 
 When a device is WiFi-blocked:
-- Its MAC is added to the deny list on **all** wifi-iface sections.
+- Its MAC is added to the deny list on **all** wifi-iface sections via UCI.
 - `macfilter=deny` is set on each interface.
-- `wifi reload` is called to apply without full restart.
+- At runtime, `hostapd_cli deny_acl ADD_MAC` adds the MAC to the deny ACL and `deauthenticate` disconnects only that client. No wifi reload -- other clients stay connected.
 
 ---
 
