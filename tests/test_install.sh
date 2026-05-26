@@ -7,7 +7,7 @@ IPK="$1"
 
 mkdir -p /var/lock /tmp/opkg-lists
 
-opkg install --force-depends "$IPK"
+opkg install --force-depends --force-architecture "$IPK"
 
 for f in \
   /usr/local/bin/trafficctl-summary.sh \
