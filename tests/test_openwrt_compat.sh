@@ -90,7 +90,7 @@ if [ -f "$IPK" ]; then
     # Verify all critical files in data.tar.gz
     DATA_FILES=$(tar tzf data.tar.gz)
     for expected in \
-        "usr/libexec/rpcd/trafficctl" \
+        "usr/libexec/rpcd/luci.trafficctl" \
         "usr/local/bin/trafficctl-summary.sh" \
         "usr/local/bin/trafficctl-device.sh" \
         "usr/local/bin/trafficctl-fw.sh" \
