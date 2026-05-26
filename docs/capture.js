@@ -518,6 +518,29 @@ async function captureTheme(page, dark, phone) {
   ).catch(() => {});
   await page.waitForTimeout(1000);
 
+  // Debug: dump what the page actually shows
+  const debug = await page.evaluate(() => {
+    const rows = document.querySelectorAll('tr.tm-row');
+    const info = [];
+    rows.forEach((row, i) => {
+      const cells = row.querySelectorAll('td');
+      const texts = Array.from(cells).slice(0, 4).map(c => c.textContent.trim());
+      info.push(`  row[${i}] cells=${cells.length} title="${row.getAttribute('title')||''}" → [${texts.join(' | ')}]`);
+    });
+    return {
+      url: location.href,
+      rowCount: rows.length,
+      rows: info.slice(0, 15),
+      bodySnippet: document.body.innerText.substring(0, 500)
+    };
+  });
+  console.log('\n── DEBUG ──────────────────────────────────');
+  console.log('  URL:', debug.url);
+  console.log('  tr.tm-row count:', debug.rowCount);
+  debug.rows.forEach(r => console.log(r));
+  if (debug.rowCount === 0) console.log('  Body snippet:', debug.bodySnippet.substring(0, 300));
+  console.log('───────────────────────────────────────────\n');
+
   // Detect phone device from the table
   const phone = await findPhone(page);
   if (!phone) { console.error('No device found in table!'); process.exit(1); }
