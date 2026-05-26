@@ -32,16 +32,26 @@ jobs:
           - { version: "23.05", arch: "aarch64",   image: "aarch64_generic-v23.05.6" }
           - { version: "23.05", arch: "arm_a15",   image: "arm_cortex-a15_neon-vfpv4-v23.05.6" }
           - { version: "23.05", arch: "armsr",     image: "armsr-armv8-v23.05.6" }
-          # 24.10
-          - { version: "24.10", arch: "x86-64",    image: "x86-64-v24.10.6" }
-          - { version: "24.10", arch: "aarch64",   image: "aarch64_generic-v24.10.6" }
-          - { version: "24.10", arch: "arm_a15",   image: "arm_cortex-a15_neon-vfpv4-v24.10.6" }
-          - { version: "24.10", arch: "armsr",     image: "armsr-armv8-v24.10.6" }
+          # 24.10 (first available)
+          - { version: "24.10.1", arch: "x86-64",  image: "x86-64-v24.10.1" }
+          - { version: "24.10.1", arch: "aarch64", image: "aarch64_generic-v24.10.1" }
+          - { version: "24.10.1", arch: "arm_a15", image: "arm_cortex-a15_neon-vfpv4-v24.10.1" }
+          - { version: "24.10.1", arch: "armsr",   image: "armsr-armv8-v24.10.1" }
+          # 24.10 (latest)
+          - { version: "24.10.6", arch: "x86-64",  image: "x86-64-v24.10.6" }
+          - { version: "24.10.6", arch: "aarch64", image: "aarch64_generic-v24.10.6" }
+          - { version: "24.10.6", arch: "arm_a15", image: "arm_cortex-a15_neon-vfpv4-v24.10.6" }
+          - { version: "24.10.6", arch: "armsr",   image: "armsr-armv8-v24.10.6" }
+          # 25.12 (first)
+          - { version: "25.12.0", arch: "x86-64",  image: "x86-64-v25.12.0" }
+          - { version: "25.12.0", arch: "aarch64", image: "aarch64_generic-v25.12.0" }
+          - { version: "25.12.0", arch: "arm_a15", image: "arm_cortex-a15_neon-vfpv4-v25.12.0" }
+          - { version: "25.12.0", arch: "armsr",   image: "armsr-armv8-v25.12.0" }
           # 25.12 (latest stable)
-          - { version: "25.12", arch: "x86-64",    image: "x86-64-v25.12.4" }
-          - { version: "25.12", arch: "aarch64",   image: "aarch64_generic-v25.12.4" }
-          - { version: "25.12", arch: "arm_a15",   image: "arm_cortex-a15_neon-vfpv4-v25.12.4" }
-          - { version: "25.12", arch: "armsr",     image: "armsr-armv8-v25.12.4" }
+          - { version: "25.12.4", arch: "x86-64",  image: "x86-64-v25.12.4" }
+          - { version: "25.12.4", arch: "aarch64", image: "aarch64_generic-v25.12.4" }
+          - { version: "25.12.4", arch: "arm_a15", image: "arm_cortex-a15_neon-vfpv4-v25.12.4" }
+          - { version: "25.12.4", arch: "armsr",   image: "armsr-armv8-v25.12.4" }
           # snapshot (latest dev)
           - { version: "snapshot", arch: "x86-64",  image: "x86-64-snapshot" }
           - { version: "snapshot", arch: "aarch64", image: "aarch64_generic-snapshot" }
