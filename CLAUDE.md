@@ -69,7 +69,7 @@ docs/
 
 ## Releases & Changelog
 
-Release process is automated via **release-please**. Do NOT create tags or edit CHANGELOG.md manually.
+Releases are **fully automatic**: any `feat:` or `fix:` commit merged to `main` triggers version bump, tag, GitHub Release, and IPK build via `auto-release.yml`.
 
 **Commit message format (Conventional Commits):**
 
@@ -82,19 +82,14 @@ docs: update install instructions
 chore: bump ESLint config
 ```
 
-- `feat:` → minor version bump, appears in "Features"
-- `fix:` → patch version bump, appears in "Bug Fixes"
-- `feat!:` or `fix!:` (with `!`) → major version bump, appears as breaking change
-- `ci:`, `refactor:`, `perf:` → patch, appear in their sections
-- `docs:`, `chore:`, `style:` → patch, hidden in CHANGELOG
+- `feat:` → minor version bump (1.2.0 → 1.3.0)
+- `fix:` / `perf:` / `refactor:` / `ci:` → patch version bump (1.3.0 → 1.3.1)
+- `feat!:` or `fix!:` (with `!`) → major version bump
+- `docs:`, `chore:`, `style:` → no release
 
-**Release flow:**
-1. Commit to `main` with the prefixes above
-2. release-please creates/updates a "Release PR" with bumped version + CHANGELOG entries
-3. Merge the PR → release-please creates the tag + GitHub Release (with notes from CHANGELOG)
-4. `release.yml` triggers automatically, builds IPK and attaches assets to the release
+**Flow:** merge to main → CI passes → auto-release creates tag + release + IPK. No manual steps.
 
-**Escape hatch:** `release.yml` has `workflow_dispatch` to manually rebuild assets for an existing tag.
+**Manual trigger:** `auto-release.yml` also supports `workflow_dispatch` to re-run.
 
 ## Deployment
 

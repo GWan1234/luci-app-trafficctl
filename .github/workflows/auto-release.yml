@@ -1,0 +1,124 @@
+name: Auto Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  ci:
+    name: CI checks
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    name: Tag, release & build
+    runs-on: ubuntu-latest
+    needs: ci
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Determine version bump
+        id: bump
+        run: |
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "latest_tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
+
+          # Get commits since last tag
+          COMMITS=$(git log "${LATEST_TAG}..HEAD" --pretty=format:"%s" 2>/dev/null || git log --pretty=format:"%s")
+
+          # Determine bump type
+          BUMP="none"
+          if echo "$COMMITS" | grep -qE '^feat!:|^fix!:|BREAKING CHANGE'; then
+            BUMP="major"
+          elif echo "$COMMITS" | grep -qE '^feat(\(.+\))?:'; then
+            BUMP="minor"
+          elif echo "$COMMITS" | grep -qE '^fix(\(.+\))?:|^perf(\(.+\))?:|^refactor(\(.+\))?:|^ci(\(.+\))?:'; then
+            BUMP="patch"
+          fi
+          echo "bump=$BUMP" >> "$GITHUB_OUTPUT"
+
+          if [ "$BUMP" = "none" ]; then
+            echo "No releasable commits since $LATEST_TAG"
+            exit 0
+          fi
+
+          # Calculate new version
+          VERSION="${LATEST_TAG#v}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+          case "$BUMP" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+          esac
+          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          echo "new_tag=v${NEW_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate changelog
+        id: changelog
+        if: steps.bump.outputs.bump != 'none'
+        run: |
+          TAG="${{ steps.bump.outputs.latest_tag }}"
+          {
+            echo 'body<<CHANGELOG_EOF'
+            echo "## What's Changed"
+            echo ""
+
+            # Features
+            FEATS=$(git log "${TAG}..HEAD" --pretty=format:"%s" | grep -E '^feat(\(.+\))?:' | sed 's/^feat\(([^)]*)\)\?:\s*//' || true)
+            if [ -n "$FEATS" ]; then
+              echo "### Features"
+              echo "$FEATS" | while read -r line; do echo "- $line"; done
+              echo ""
+            fi
+
+            # Fixes
+            FIXES=$(git log "${TAG}..HEAD" --pretty=format:"%s" | grep -E '^fix(\(.+\))?:' | sed 's/^fix\(([^)]*)\)\?:\s*//' || true)
+            if [ -n "$FIXES" ]; then
+              echo "### Bug Fixes"
+              echo "$FIXES" | while read -r line; do echo "- $line"; done
+              echo ""
+            fi
+
+            # Other notable
+            OTHER=$(git log "${TAG}..HEAD" --pretty=format:"%s" | grep -E '^(perf|refactor|ci)(\(.+\))?:' | sed 's/^[a-z]*\(([^)]*)\)\?:\s*//' || true)
+            if [ -n "$OTHER" ]; then
+              echo "### Other"
+              echo "$OTHER" | while read -r line; do echo "- $line"; done
+              echo ""
+            fi
+
+            echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${TAG}...${{ steps.bump.outputs.new_tag }}"
+            echo 'CHANGELOG_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create tag
+        if: steps.bump.outputs.bump != 'none'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ steps.bump.outputs.new_tag }}"
+          git push origin "${{ steps.bump.outputs.new_tag }}"
+
+      - name: Build .ipk
+        if: steps.bump.outputs.bump != 'none'
+        run: |
+          ./build-ipk.sh "${{ steps.bump.outputs.new_version }}" 1
+          SRC=$(echo dist/luci-app-trafficctl_*_all.ipk)
+          for name in luci-app-trafficctl_latest_all.ipk luci-app-trafficctl_all.ipk luci-app-trafficctl.ipk; do
+            ln -f "$SRC" "dist/$name"
+          done
+
+      - name: Create GitHub Release
+        if: steps.bump.outputs.bump != 'none'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.bump.outputs.new_tag }}
+          name: ${{ steps.bump.outputs.new_tag }}
+          body: ${{ steps.changelog.outputs.body }}
+          files: dist/*.ipk
