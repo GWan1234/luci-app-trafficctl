@@ -504,9 +504,9 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		{ key:'udp',              label:'UDP',          num:true,  tip: _('UDP bytes transferred'), hide:true },
 		{ key:'blocked',          label: _('Inet'),     num:false, tip: _('Internet access status (paused = traffic blocked)') },
 		{ key:'conn_type',        label: _('Link'),     num:false, tip: _('Connection interface (WiFi band or LAN port)') },
-		{ key:'_throttle_kbit',   label: _('Speed Limit'), num:true,  tip: _('Active speed limit: shaper (queue) or limiter (drop)') },
-		{ key:'_drop_packets',    label: _('Dropped'),  num:true,  tip: _('Packets dropped by rate limiter'), hide:true },
-		{ key:'_backlog',         label: _('Queued'),   num:true,  tip: _('Bytes queued in traffic shaper'), hide:true }
+		{ key:'_throttle_kbit',   label: '⚡',            num:true,  tip: _('Speed limit: shaper (queue) or limiter (drop)') },
+		{ key:'_drop_packets',    label: '🚫',           num:true,  tip: _('Packets dropped by rate limiter'), hide:true },
+		{ key:'_backlog',         label: '📦',           num:true,  tip: _('Bytes queued in traffic shaper'), hide:true }
 	];
 
 	hiddenCols = hiddenCols || {};
@@ -561,7 +561,8 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 
 	var thead = E('thead', {}, E('tr', {}, visibleCols.map(function(c) {
 		var arrow = c.key === sortCol ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
-		var thStyle = TH + (c.key === '_spark' ? ';cursor:default;width:68px' : '');
+		var compact = c.key === '_spark' || c.key === '_throttle_kbit' || c.key === '_drop_packets' || c.key === '_backlog';
+		var thStyle = TH + (c.key === '_spark' ? ';cursor:default;width:68px' : '') + (compact ? ';white-space:nowrap;width:1%' : '');
 		var attrs = { 'style': thStyle, 'data-col': c.key, 'data-num': c.num ? '1' : '0' };
 		if (c.tip) attrs.title = c.tip;
 		var th = E('th', attrs, c.label + arrow);
