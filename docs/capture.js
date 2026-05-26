@@ -50,7 +50,7 @@ async function gotoAllDevices(page) {
       delete o.lastIp;
       localStorage.setItem('trafficctl_opts', JSON.stringify(o));
     } catch (e) {}
-  });
+  }).catch(() => {});
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
       await page.goto(APP_URL, { waitUntil: 'domcontentloaded', timeout: 15000 });
@@ -502,44 +502,9 @@ async function captureTheme(page, dark, phone) {
   const page = ctx.pages()[0];
 
   await page.setViewportSize({ width: 1300, height: 820 });
-  await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
 
-  // Wait for device overview table with local IPs (not connection table)
-  await page.waitForFunction(
-    () => {
-      for (const row of document.querySelectorAll('tr.tm-row')) {
-        const cells = row.querySelectorAll('td');
-        if (cells.length >= 4 && /^192\.168\.\d+\.\d+$/.test((cells[1].textContent||'').trim()))
-          return true;
-      }
-      return false;
-    },
-    { timeout: 30000 }
-  ).catch(() => {});
-  await page.waitForTimeout(1000);
-
-  // Debug: dump what the page actually shows
-  const debug = await page.evaluate(() => {
-    const rows = document.querySelectorAll('tr.tm-row');
-    const info = [];
-    rows.forEach((row, i) => {
-      const cells = row.querySelectorAll('td');
-      const texts = Array.from(cells).slice(0, 4).map(c => c.textContent.trim());
-      info.push(`  row[${i}] cells=${cells.length} title="${row.getAttribute('title')||''}" → [${texts.join(' | ')}]`);
-    });
-    return {
-      url: location.href,
-      rowCount: rows.length,
-      rows: info.slice(0, 15),
-      bodySnippet: document.body.innerText.substring(0, 500)
-    };
-  });
-  console.log('\n── DEBUG ──────────────────────────────────');
-  console.log('  URL:', debug.url);
-  console.log('  tr.tm-row count:', debug.rowCount);
-  debug.rows.forEach(r => console.log(r));
-  if (debug.rowCount === 0) console.log('  Body snippet:', debug.bodySnippet.substring(0, 300));
-  console.log('───────────────────────────────────────────\n');
+  // Ensure we start on all-devices overview (not a remembered device detail)
+  await gotoAllDevices(page);
 
   // Detect phone device from the table
   const phone = await findPhone(page);
