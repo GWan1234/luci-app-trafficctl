@@ -89,7 +89,7 @@ async function waitDone(page, timeout = 20000) {
 
 async function selectDevice(page, ip) {
   await page.evaluate(ip => {
-    for (const row of document.querySelectorAll('tr.tm-row[title]')) {
+    for (const row of document.querySelectorAll('tr.tm-row')) {
       const cells = row.querySelectorAll('td');
       if (cells[1] && cells[1].textContent.trim() === ip) { row.click(); return; }
     }
@@ -135,17 +135,17 @@ async function closeSettings(page) {
 // Find best candidate phone device in the device overview table
 async function findPhone(page) {
   const result = await page.evaluate(() => {
-    // Device rows have title="Click to inspect …" — connection rows don't
-    const rows = document.querySelectorAll('tr.tm-row[title]');
+    const rows = document.querySelectorAll('tr.tm-row');
     const candidates = [];
     const exclude = ['mbp', 'macbook', 'imac', 'laptop', 'desktop', 'pc', 'server', 'nas',
                      'work', 'workmb', 'mini', 'air', 'pro'];
     for (const row of rows) {
       const cells = row.querySelectorAll('td');
-      if (cells.length < 2) continue;
+      if (cells.length < 4) continue;
       const name = cells[0].textContent.toLowerCase();
       const ip   = (cells[1].textContent || '').trim();
-      if (!ip.match(/^\d+\.\d+\.\d+\.\d+$/)) continue;
+      // Only local IPs (device overview) — skip external IPs (connection table)
+      if (!ip.match(/^192\.168\.\d+\.\d+$/)) continue;
       if (exclude.some(x => name.includes(x))) continue;
       const isWifi = row.innerHTML.includes('📶');
       const score =
@@ -160,7 +160,11 @@ async function findPhone(page) {
   });
   console.log('  Devices:', result.map(r => `${r.name} (${r.ip}) score=${r.score}`).join(', '));
   const pick = result.find(r => r.score >= 50) || null;
-  if (!pick) console.log('  ⚠ No phone-like device found (all scores < 50)');
+  if (!pick && result.length > 0) {
+    console.log('  ⚠ No phone-like device (scores < 50), using highest-scored device');
+    return result[0];
+  }
+  if (!pick) console.log('  ⚠ No devices found at all — is the page showing device overview?');
   return pick;
 }
 
@@ -500,9 +504,16 @@ async function captureTheme(page, dark, phone) {
   await page.setViewportSize({ width: 1300, height: 820 });
   await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
 
-  // Wait for the device overview table to populate (RPC calls may take a few seconds)
+  // Wait for device overview table with local IPs (not connection table)
   await page.waitForFunction(
-    () => document.querySelectorAll('tr.tm-row[title]').length > 0,
+    () => {
+      for (const row of document.querySelectorAll('tr.tm-row')) {
+        const cells = row.querySelectorAll('td');
+        if (cells.length >= 4 && /^192\.168\.\d+\.\d+$/.test((cells[1].textContent||'').trim()))
+          return true;
+      }
+      return false;
+    },
     { timeout: 30000 }
   ).catch(() => {});
   await page.waitForTimeout(1000);
