@@ -89,7 +89,7 @@ async function waitDone(page, timeout = 20000) {
 
 async function selectDevice(page, ip) {
   await page.evaluate(ip => {
-    for (const row of document.querySelectorAll('tr.tm-row[title^="Click to inspect"]')) {
+    for (const row of document.querySelectorAll('tr.tm-row[title]')) {
       const cells = row.querySelectorAll('td');
       if (cells[1] && cells[1].textContent.trim() === ip) { row.click(); return; }
     }
@@ -136,7 +136,7 @@ async function closeSettings(page) {
 async function findPhone(page) {
   const result = await page.evaluate(() => {
     // Device rows have title="Click to inspect …" — connection rows don't
-    const rows = document.querySelectorAll('tr.tm-row[title^="Click to inspect"]');
+    const rows = document.querySelectorAll('tr.tm-row[title]');
     const candidates = [];
     const exclude = ['mbp', 'macbook', 'imac', 'laptop', 'desktop', 'pc', 'server', 'nas',
                      'work', 'workmb', 'mini', 'air', 'pro'];
@@ -502,7 +502,7 @@ async function captureTheme(page, dark, phone) {
 
   // Wait for the device overview table to populate (RPC calls may take a few seconds)
   await page.waitForFunction(
-    () => document.querySelectorAll('tr.tm-row[title^="Click to inspect"]').length > 0,
+    () => document.querySelectorAll('tr.tm-row[title]').length > 0,
     { timeout: 30000 }
   ).catch(() => {});
   await page.waitForTimeout(1000);
