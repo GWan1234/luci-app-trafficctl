@@ -192,11 +192,41 @@ npm install   # installs eslint from package.json devDependencies
 npx eslint htdocs/luci-static/resources/view/trafficctl/status.js
 ```
 
+### Automated Tests
+
+Run all tests locally:
+
+```sh
+bash tests/test_fw.sh              # Shell unit tests (firewall scripts)
+bash tests/test_telegram.sh        # Telegram bot unit tests
+bash tests/test_telegram_mock.sh   # Telegram bot with mocked API responses
+bash tests/test_telegram_e2e.sh    # End-to-end bot tests (61 tests)
+bash tests/test_security.sh        # Security tests (injection, path traversal)
+bash tests/test_build_ipk.sh       # IPK package build verification
+```
+
+**E2E tests** (`test_telegram_e2e.sh`) run the real bot script with mocked externals (curl, uci, iw, ip, jsonfilter) and verify:
+- Command processing (`/devices`, `/status`, `/help`)
+- Callback handling (block, unblock, limit, shape, WiFi block)
+- Authorization (unauthorized chat rejection)
+- Input validation (invalid IP in callbacks)
+- New device detection and notifications
+- Known device online notifications
+- DHCP trigger processing
+- Template tag substitution (17 tags: `{{name}}`, `{{ip}}`, `{{mac}}`, `{{link}}`, `{{date}}`, `{{time}}`, `{{datetime}}`, `{{router}}`, `{{ssid}}`, `{{signal}}`, `{{freq}}`, `{{iface}}`, `{{clients}}`, `{{uptime}}`, `{{wan_ip}}`, `{{load}}`, `{{conns}}`)
+- Notification throttling
+
 ### CI
 
-The GitHub Actions workflow (`.github/workflows/ci.yml`) runs:
-1. ShellCheck on all `.sh` files
-2. ESLint on `status.js` (ES5 mode)
+GitHub Actions (`.github/workflows/`) runs on every push and PR:
+
+| Workflow | What it checks |
+|----------|----------------|
+| `tests.yml` | Unit, mock, E2E, security, and build tests |
+| `shellcheck.yml` | ShellCheck on all `.sh` files |
+| `eslint.yml` | ESLint on `status.js` (ES5 mode) |
+| `compat.yml` | OpenWrt rootfs compatibility (52 version/arch combos) |
+| `auto-release.yml` | CI + build IPK/APK + create GitHub release (on main only) |
 
 ---
 
