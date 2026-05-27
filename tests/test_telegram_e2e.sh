@@ -37,6 +37,7 @@ assert_file_contains() {
     else
         FAIL=$((FAIL + 1))
         printf "FAIL: %s\n  expected '%s' in %s\n" "$desc" "$needle" "$file"
+        [ -f "$file" ] && printf "  actual: %s\n" "$(cat "$file")"
     fi
 }
 
