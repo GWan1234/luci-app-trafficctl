@@ -1,22 +1,37 @@
 #!/bin/sh
 # Runs INSIDE an OpenWrt rootfs Docker container.
-# Usage: sh /tests/test_install.sh /dist/luci-app-trafficctl_*.ipk
-# Does NOT use opkg — extracts the IPK directly so the test works on any
-# rootfs image regardless of its arch configuration.
+# Usage: sh /tests/test_install.sh /dist/package.ipk
+#    or: sh /tests/test_install.sh /dist/package.apk
+# Detects format by extension. Extracts and verifies installation.
 set -e
 
-IPK="$1"
+PKG="$1"
 
-[ -f "$IPK" ] || { echo "IPK not found: $IPK"; exit 1; }
+[ -f "$PKG" ] || { echo "Package not found: $PKG"; exit 1; }
 
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
-# IPK is a tar.gz containing: debian-binary, control.tar.gz, data.tar.gz
-tar xzf "$IPK" -C "$TMPDIR"
-
-# Install package files directly into the filesystem root
-tar xzf "$TMPDIR/data.tar.gz" -C /
+case "$PKG" in
+    *.ipk)
+        echo "Installing IPK package..."
+        tar xzf "$PKG" -C "$TMPDIR"
+        tar xzf "$TMPDIR/data.tar.gz" -C /
+        ;;
+    *.apk)
+        echo "Installing APK package..."
+        if command -v apk >/dev/null 2>&1; then
+            apk add --allow-untrusted "$PKG"
+        else
+            echo "ERROR: apk not available in this container"
+            exit 1
+        fi
+        ;;
+    *)
+        echo "Unknown package format: $PKG"
+        exit 1
+        ;;
+esac
 
 # Verify all expected files are present
 for f in \
@@ -64,4 +79,4 @@ for s in \
   [ -x "$s" ] || { echo "NOT EXECUTABLE: $s"; exit 1; }
 done
 
-echo "All checks passed."
+echo "All checks passed ($(echo "$PKG" | sed 's/.*\.//' | tr '[:lower:]' '[:upper:]') format)."

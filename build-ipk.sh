@@ -49,12 +49,38 @@ cat > "$CTRL/conffiles" <<EOF
 /etc/trafficmon/telegram_known.json
 EOF
 
+cat > "$CTRL/preinst" <<'EOF'
+#!/bin/sh
+# Stop telegram bot before upgrade to avoid stale process
+if [ -z "${IPKG_INSTROOT}" ] && [ -x /etc/init.d/trafficctl-telegram ]; then
+    /etc/init.d/trafficctl-telegram stop 2>/dev/null || true
+fi
+exit 0
+EOF
+chmod +x "$CTRL/preinst"
+
 cat > "$CTRL/postinst" <<'EOF'
 #!/bin/sh
-[ -n "${IPKG_INSTROOT}" ] || /etc/init.d/rpcd restart
+if [ -z "${IPKG_INSTROOT}" ]; then
+    /etc/init.d/rpcd restart
+    # Restart telegram bot if it was enabled
+    if [ -x /etc/init.d/trafficctl-telegram ]; then
+        /etc/init.d/trafficctl-telegram start 2>/dev/null || true
+    fi
+fi
 exit 0
 EOF
 chmod +x "$CTRL/postinst"
+
+cat > "$CTRL/prerm" <<'EOF'
+#!/bin/sh
+if [ -z "${IPKG_INSTROOT}" ] && [ -x /etc/init.d/trafficctl-telegram ]; then
+    /etc/init.d/trafficctl-telegram stop 2>/dev/null || true
+    /etc/init.d/trafficctl-telegram disable 2>/dev/null || true
+fi
+exit 0
+EOF
+chmod +x "$CTRL/prerm"
 
 (cd "$CTRL" && tar czf "$WORKDIR/control.tar.gz" .)
 

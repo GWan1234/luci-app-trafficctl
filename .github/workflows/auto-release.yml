@@ -114,6 +114,25 @@ jobs:
             ln -f "$SRC" "dist/$name"
           done
 
+      - name: Build apk-tools (with mkpkg)
+        if: steps.bump.outputs.bump != 'none'
+        run: |
+          sudo apt-get -y install meson libssl-dev zlib1g-dev lua5.3-dev
+          git clone --depth 1 --branch v3.0.5 https://gitlab.alpinelinux.org/alpine/apk-tools.git /tmp/apk-tools
+          cd /tmp/apk-tools
+          meson setup build -Dprefix=/usr/local -Dminimal=false -Dlua=disabled -Dlua_version=5.3
+          ninja -C build
+          sudo ninja -C build install
+
+      - name: Build .apk
+        if: steps.bump.outputs.bump != 'none'
+        run: |
+          ./build-apk.sh "${{ steps.bump.outputs.new_version }}" 1
+          SRC=$(echo dist/luci-app-trafficctl_*_noarch.apk)
+          for name in luci-app-trafficctl_latest_noarch.apk luci-app-trafficctl_noarch.apk luci-app-trafficctl.apk; do
+            ln -f "$SRC" "dist/$name"
+          done
+
       - name: Create GitHub Release
         if: steps.bump.outputs.bump != 'none'
         uses: softprops/action-gh-release@v3

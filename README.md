@@ -226,14 +226,31 @@ Each test builds the `.ipk`, runs `opkg install --force-depends` inside the real
 
 ## Installation
 
-### From .ipk (recommended)
+> **Which file do I need?**
+> - OpenWrt **21.02 — 24.10** → download `.ipk` (opkg)
+> - OpenWrt **25.12+** and snapshot → download `.apk` (apk)
 
-**Option A — LuCI web UI** (no SSH needed):
+### OpenWrt 25.12+ (.apk)
+
+**Option A — LuCI web UI:**
+1. Download [`luci-app-trafficctl.apk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.apk) to your computer
+2. In LuCI: **System → Software → Upload Package...**
+3. Select the downloaded file and click **OK**
+
+**Option B — SSH:**
+
+```sh
+cd /tmp && wget https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.apk && apk add --allow-untrusted luci-app-trafficctl.apk
+```
+
+### OpenWrt 21.02 — 24.10 (.ipk)
+
+**Option A — LuCI web UI:**
 1. Download [`luci-app-trafficctl.ipk`](https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk) to your computer
 2. In LuCI: **System → Software → Upload Package...**
 3. Select the downloaded file and click **OK**
 
-**Option B — SSH, one command on the router** (requires HTTPS support — `libustream-wolfssl` or `libustream-openssl`):
+**Option B — SSH** (requires HTTPS support — `libustream-wolfssl` or `libustream-openssl`):
 
 ```sh
 opkg install https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk
@@ -271,6 +288,31 @@ ssh root@router 'chmod +x /usr/local/bin/trafficctl-*.sh /usr/libexec/rpcd/luci.
 
 ### Required packages
 
+<details>
+<summary>OpenWrt 25.12+ (apk)</summary>
+
+```sh
+# Core (always required)
+apk add conntrack luci-base rpcd
+
+# For traffic shaping
+apk add tc-full kmod-sched-core kmod-sched-htb
+
+# For interface detection (WiFi band + LAN port)
+apk add iw-full bridge-utils
+
+# For reverse DNS (optional)
+apk add bind-dig
+
+# For Telegram bot (optional)
+apk add curl
+```
+
+</details>
+
+<details>
+<summary>OpenWrt 21.02 — 24.10 (opkg)</summary>
+
 ```sh
 # Core (always required)
 opkg install conntrack luci-base rpcd
@@ -287,6 +329,8 @@ opkg install bind-dig
 # For Telegram bot (optional)
 opkg install curl
 ```
+
+</details>
 
 ---
 
