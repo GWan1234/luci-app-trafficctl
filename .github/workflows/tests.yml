@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   test:
-    name: Tests
+    name: Unit & Mock Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -20,7 +20,21 @@ jobs:
         run: bash tests/test_fw.sh
       - name: Telegram unit tests
         run: bash tests/test_telegram.sh
+      - name: Telegram mock tests
+        run: bash tests/test_telegram_mock.sh
       - name: Security tests
         run: bash tests/test_security.sh
       - name: IPK build test
         run: bash tests/test_build_ipk.sh
+
+  telegram-integration:
+    name: Telegram Integration
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+    steps:
+      - uses: actions/checkout@v6
+      - name: Telegram bot integration tests
+        env:
+          TEST_TELEGRAM_TOKEN: ${{ secrets.TEST_TELEGRAM_TOKEN }}
+          TEST_TELEGRAM_CHAT_ID: ${{ secrets.TEST_TELEGRAM_CHAT_ID }}
+        run: bash tests/test_telegram_integration.sh
