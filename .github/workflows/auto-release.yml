@@ -105,7 +105,7 @@ jobs:
           git tag "${{ steps.bump.outputs.new_tag }}"
           git push origin "${{ steps.bump.outputs.new_tag }}"
 
-      - name: Build .ipk
+      - name: Build .ipk (standalone)
         if: steps.bump.outputs.bump != 'none'
         run: |
           ./build-ipk.sh "${{ steps.bump.outputs.new_version }}" 1
@@ -114,24 +114,30 @@ jobs:
             ln -f "$SRC" "dist/$name"
           done
 
-      - name: Build apk-tools (with mkpkg)
+      - name: Build .apk (via OpenWrt SDK)
         if: steps.bump.outputs.bump != 'none'
-        run: |
-          sudo apt-get -y install meson libssl-dev zlib1g-dev lua5.3-dev
-          git clone --depth 1 --branch v3.0.5 https://gitlab.alpinelinux.org/alpine/apk-tools.git /tmp/apk-tools
-          cd /tmp/apk-tools
-          meson setup build -Dprefix=/usr/local -Dminimal=false -Dlua=disabled -Dlua_version=5.3
-          ninja -C build
-          sudo ninja -C build install
+        uses: openwrt/gh-action-sdk@main
+        env:
+          ARCH: x86_64-25.12.4
+          FEEDNAME: trafficctl
+          PACKAGES: luci-app-trafficctl
+          NO_DEFAULT_FEEDS: 1
+          EXTRA_FEEDS: "src-git|luci|https://github.com/openwrt/luci.git;openwrt-25.12"
 
-      - name: Build .apk
+      - name: Collect .apk artifact
         if: steps.bump.outputs.bump != 'none'
         run: |
-          ./build-apk.sh "${{ steps.bump.outputs.new_version }}" 1
-          SRC=$(echo dist/luci-app-trafficctl_*_noarch.apk)
-          for name in luci-app-trafficctl_latest_noarch.apk luci-app-trafficctl_noarch.apk luci-app-trafficctl.apk; do
-            ln -f "$SRC" "dist/$name"
-          done
+          mkdir -p dist
+          APK=$(find bin/ -name "luci-app-trafficctl*.apk" 2>/dev/null | head -1)
+          if [ -n "$APK" ]; then
+            cp "$APK" dist/
+            for name in luci-app-trafficctl_latest_noarch.apk luci-app-trafficctl_noarch.apk luci-app-trafficctl.apk; do
+              ln -f "$APK" "dist/$name"
+            done
+          else
+            echo "::warning::APK build did not produce output, falling back to standalone build"
+            ./build-apk.sh "${{ steps.bump.outputs.new_version }}" 1 || true
+          fi
 
       - name: Create GitHub Release
         if: steps.bump.outputs.bump != 'none'
@@ -140,4 +146,6 @@ jobs:
           tag_name: ${{ steps.bump.outputs.new_tag }}
           name: ${{ steps.bump.outputs.new_tag }}
           body: ${{ steps.changelog.outputs.body }}
-          files: dist/*.ipk
+          files: |
+            dist/*.ipk
+            dist/*.apk
