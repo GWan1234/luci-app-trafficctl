@@ -114,32 +114,33 @@ jobs:
             ln -f "$SRC" "dist/$name"
           done
 
-      - name: Build .apk (via OpenWrt SDK, signed)
-        if: steps.bump.outputs.bump != 'none'
-        uses: openwrt/gh-action-sdk@main
-        env:
-          ARCH: x86_64-25.12.4
-          FEEDNAME: trafficctl
-          PACKAGES: luci-app-trafficctl
-          NO_DEFAULT_FEEDS: 1
-          EXTRA_FEEDS: "src-git|luci|https://github.com/openwrt/luci.git;openwrt-25.12"
-          PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}
-          KEY_BUILD: ${{ secrets.USIGN_PRIVATE_KEY }}
-
-      - name: Collect .apk artifact
+      - name: Install apk-tools
         if: steps.bump.outputs.bump != 'none'
         run: |
-          mkdir -p dist
-          APK=$(find bin/ -name "luci-app-trafficctl*.apk" 2>/dev/null | head -1)
-          if [ -n "$APK" ]; then
-            cp "$APK" dist/
-            for name in luci-app-trafficctl_latest_noarch.apk luci-app-trafficctl_noarch.apk luci-app-trafficctl.apk; do
-              ln -f "$APK" "dist/$name"
-            done
+          # Get apk-tools static from Alpine (has mkpkg support)
+          wget -q https://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/apk-tools-static-2.14.6-r3.apk -O /tmp/apk-static.apk
+          tar -xzf /tmp/apk-static.apk -C /tmp sbin/apk.static 2>/dev/null || true
+          if [ -x /tmp/sbin/apk.static ]; then
+            sudo cp /tmp/sbin/apk.static /usr/local/bin/apk
           else
-            echo "::warning::APK build did not produce output, falling back to standalone build"
-            ./build-apk.sh "${{ steps.bump.outputs.new_version }}" 1 || true
+            sudo apt-get update -qq && sudo apt-get install -yqq apk-tools || true
           fi
+          apk --version || echo "::warning::apk-tools not available"
+
+      - name: Build .apk (standalone, signed)
+        if: steps.bump.outputs.bump != 'none'
+        env:
+          APK_PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}
+        run: |
+          if [ -n "$APK_PRIVATE_KEY" ]; then
+            echo "$APK_PRIVATE_KEY" > /tmp/apk-key.pem
+            export APK_KEY=/tmp/apk-key.pem
+          fi
+          ./build-apk.sh "${{ steps.bump.outputs.new_version }}" 1
+          SRC=$(echo dist/luci-app-trafficctl_*_noarch.apk)
+          for name in luci-app-trafficctl_latest_noarch.apk luci-app-trafficctl_noarch.apk luci-app-trafficctl.apk; do
+            ln -f "$SRC" "dist/$name"
+          done
 
       - name: Create GitHub Release
         if: steps.bump.outputs.bump != 'none'
