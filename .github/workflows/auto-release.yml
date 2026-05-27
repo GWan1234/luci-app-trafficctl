@@ -107,21 +107,11 @@ jobs:
 
       - name: Build .ipk (standalone)
         if: steps.bump.outputs.bump != 'none'
-        run: |
-          ./build-ipk.sh "${{ steps.bump.outputs.new_version }}" 1
-          SRC=$(echo dist/luci-app-trafficctl_*_all.ipk)
-          for name in luci-app-trafficctl_latest_all.ipk luci-app-trafficctl_all.ipk luci-app-trafficctl.ipk; do
-            ln -f "$SRC" "dist/$name"
-          done
+        run: ./build-ipk.sh "${{ steps.bump.outputs.new_version }}" 1
 
       - name: Build .apk (standalone)
         if: steps.bump.outputs.bump != 'none'
-        run: |
-          ./build-apk.sh "${{ steps.bump.outputs.new_version }}" 1
-          SRC=$(echo dist/luci-app-trafficctl_*_noarch.apk)
-          for name in luci-app-trafficctl_latest_noarch.apk luci-app-trafficctl_noarch.apk luci-app-trafficctl.apk; do
-            ln -f "$SRC" "dist/$name"
-          done
+        run: ./build-apk.sh "${{ steps.bump.outputs.new_version }}" 1
 
       - name: Create GitHub Release
         if: steps.bump.outputs.bump != 'none'
