@@ -75,27 +75,62 @@ SCRIPT
 
 chmod +x "$SCRIPTS"/*
 
-# --- Build .apk via apk mkpkg ---
+# --- Build .apk ---
 mkdir -p "$OUTDIR"
 APK_FILE="$OUTDIR/${PKG_NAME}_${PKG_VERSION}-r${PKG_RELEASE}_noarch.apk"
 
-apk mkpkg \
-    --info "name:${PKG_NAME}" \
-    --info "version:${PKG_VERSION}-r${PKG_RELEASE}" \
-    --info "description:Per-device traffic monitoring, rate limiting (nft/iptables), traffic shaping (tc/HTB), internet blocking, WiFi MAC filtering, and Telegram bot control." \
-    --info "arch:noarch" \
-    --info "license:Apache-2.0" \
-    --info "origin:https://github.com/YusDyr/luci-app-trafficctl" \
-    --info "url:https://github.com/YusDyr/luci-app-trafficctl" \
-    --info "maintainer:Denis Iusupov <yusdyr@gmail.com>" \
-    --info "depends:conntrack luci-base rpcd" \
-    --info "provides:${PKG_NAME}=${PKG_VERSION}-r${PKG_RELEASE}" \
-    --info "tags:openwrt:section=luci" \
-    --script "post-install:$SCRIPTS/post-install" \
-    --script "pre-upgrade:$SCRIPTS/pre-upgrade" \
-    --script "post-upgrade:$SCRIPTS/post-upgrade" \
-    --script "pre-deinstall:$SCRIPTS/pre-deinstall" \
-    --files "$DATA" \
-    --output "$APK_FILE"
+if command -v apk >/dev/null 2>&1 && apk mkpkg --help >/dev/null 2>&1; then
+    # Use apk mkpkg if available (OpenWrt's apk-tools fork)
+    apk mkpkg \
+        --info "name:${PKG_NAME}" \
+        --info "version:${PKG_VERSION}-r${PKG_RELEASE}" \
+        --info "description:Per-device traffic monitoring, rate limiting (nft/iptables), traffic shaping (tc/HTB), internet blocking, WiFi MAC filtering, and Telegram bot control." \
+        --info "arch:noarch" \
+        --info "license:Apache-2.0" \
+        --info "origin:https://github.com/YusDyr/luci-app-trafficctl" \
+        --info "url:https://github.com/YusDyr/luci-app-trafficctl" \
+        --info "maintainer:Denis Iusupov <yusdyr@gmail.com>" \
+        --info "depends:conntrack luci-base rpcd" \
+        --info "provides:${PKG_NAME}=${PKG_VERSION}-r${PKG_RELEASE}" \
+        --info "tags:openwrt:section=luci" \
+        --script "post-install:$SCRIPTS/post-install" \
+        --script "pre-upgrade:$SCRIPTS/pre-upgrade" \
+        --script "post-upgrade:$SCRIPTS/post-upgrade" \
+        --script "pre-deinstall:$SCRIPTS/pre-deinstall" \
+        --files "$DATA" \
+        --output "$APK_FILE"
+else
+    # Fallback: build APKv2 manually (two concatenated gzipped tars)
+    CTRL="$WORKDIR/control"
+    mkdir -p "$CTRL"
+
+    cat > "$CTRL/.PKGINFO" <<PKGINFO
+pkgname = ${PKG_NAME}
+pkgver = ${PKG_VERSION}-r${PKG_RELEASE}
+pkgdesc = Per-device traffic monitoring, rate limiting (nft/iptables), traffic shaping (tc/HTB), internet blocking, WiFi MAC filtering, and Telegram bot control.
+arch = noarch
+license = Apache-2.0
+origin = https://github.com/YusDyr/luci-app-trafficctl
+url = https://github.com/YusDyr/luci-app-trafficctl
+maintainer = Denis Iusupov <yusdyr@gmail.com>
+depend = conntrack
+depend = luci-base
+depend = rpcd
+PKGINFO
+
+    cp "$SCRIPTS/post-install" "$CTRL/.post-install"
+    cp "$SCRIPTS/pre-upgrade" "$CTRL/.pre-upgrade"
+    cp "$SCRIPTS/post-upgrade" "$CTRL/.post-upgrade"
+    cp "$SCRIPTS/pre-deinstall" "$CTRL/.pre-deinstall"
+
+    # Control tar (metadata + scripts)
+    tar -czf "$WORKDIR/control.tar.gz" -C "$CTRL" .
+
+    # Data tar (package files)
+    tar -czf "$WORKDIR/data.tar.gz" -C "$DATA" .
+
+    # APKv2: concatenate control + data
+    cat "$WORKDIR/control.tar.gz" "$WORKDIR/data.tar.gz" > "$APK_FILE"
+fi
 
 echo "$APK_FILE"

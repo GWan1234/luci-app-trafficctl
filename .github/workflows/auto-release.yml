@@ -114,28 +114,9 @@ jobs:
             ln -f "$SRC" "dist/$name"
           done
 
-      - name: Install apk-tools
+      - name: Build .apk (standalone)
         if: steps.bump.outputs.bump != 'none'
         run: |
-          # Get apk-tools static from Alpine (has mkpkg support)
-          wget -q https://dl-cdn.alpinelinux.org/alpine/v3.21/main/x86_64/apk-tools-static-2.14.6-r3.apk -O /tmp/apk-static.apk
-          tar -xzf /tmp/apk-static.apk -C /tmp sbin/apk.static 2>/dev/null || true
-          if [ -x /tmp/sbin/apk.static ]; then
-            sudo cp /tmp/sbin/apk.static /usr/local/bin/apk
-          else
-            sudo apt-get update -qq && sudo apt-get install -yqq apk-tools || true
-          fi
-          apk --version || echo "::warning::apk-tools not available"
-
-      - name: Build .apk (standalone, signed)
-        if: steps.bump.outputs.bump != 'none'
-        env:
-          APK_PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}
-        run: |
-          if [ -n "$APK_PRIVATE_KEY" ]; then
-            echo "$APK_PRIVATE_KEY" > /tmp/apk-key.pem
-            export APK_KEY=/tmp/apk-key.pem
-          fi
           ./build-apk.sh "${{ steps.bump.outputs.new_version }}" 1
           SRC=$(echo dist/luci-app-trafficctl_*_noarch.apk)
           for name in luci-app-trafficctl_latest_noarch.apk luci-app-trafficctl_noarch.apk luci-app-trafficctl.apk; do
