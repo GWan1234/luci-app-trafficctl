@@ -237,7 +237,16 @@ Each test builds the `.ipk`, runs `opkg install --force-depends` inside the real
 2. In LuCI: **System → Software → Upload Package...**
 3. Select the downloaded file and click **OK**
 
-**Option B — SSH:**
+**Option B — SSH (with signature verification):**
+
+```sh
+# Add the signing key (one-time):
+wget -O /etc/apk/keys/luci-app-trafficctl.pub https://raw.githubusercontent.com/YusDyr/luci-app-trafficctl/main/keys/apk-signing.pub
+# Install:
+cd /tmp && wget https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.apk && apk add luci-app-trafficctl.apk
+```
+
+**Option C — SSH (without key, quick install):**
 
 ```sh
 cd /tmp && wget https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.apk && apk add --allow-untrusted luci-app-trafficctl.apk

@@ -19,7 +19,7 @@ jobs:
       - name: Build .ipk (standalone)
         run: ./build-ipk.sh 0.0.0-test 1
 
-      - name: Build .apk (via OpenWrt SDK)
+      - name: Build .apk (via OpenWrt SDK, signed)
         uses: openwrt/gh-action-sdk@main
         env:
           ARCH: x86_64-25.12.4
@@ -27,6 +27,8 @@ jobs:
           PACKAGES: luci-app-trafficctl
           NO_DEFAULT_FEEDS: 1
           EXTRA_FEEDS: "src-git|luci|https://github.com/openwrt/luci.git;openwrt-25.12"
+          PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}
+          KEY_BUILD: ${{ secrets.USIGN_PRIVATE_KEY }}
 
       - name: Collect APK
         run: |

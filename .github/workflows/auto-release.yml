@@ -114,7 +114,7 @@ jobs:
             ln -f "$SRC" "dist/$name"
           done
 
-      - name: Build .apk (via OpenWrt SDK)
+      - name: Build .apk (via OpenWrt SDK, signed)
         if: steps.bump.outputs.bump != 'none'
         uses: openwrt/gh-action-sdk@main
         env:
@@ -123,6 +123,8 @@ jobs:
           PACKAGES: luci-app-trafficctl
           NO_DEFAULT_FEEDS: 1
           EXTRA_FEEDS: "src-git|luci|https://github.com/openwrt/luci.git;openwrt-25.12"
+          PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}
+          KEY_BUILD: ${{ secrets.USIGN_PRIVATE_KEY }}
 
       - name: Collect .apk artifact
         if: steps.bump.outputs.bump != 'none'
