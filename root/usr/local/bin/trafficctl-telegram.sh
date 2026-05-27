@@ -287,7 +287,7 @@ format_new_device_msg() {
 			    -v dt="$TVAR_DATE" -v tm="$TVAR_TIME" -v dtm="$TVAR_DATETIME" \
 			    -v rtr="$TVAR_ROUTER" -v ssid="$ssid" -v sig="$signal" \
 			    -v freq="$freq" -v iface="$iface" -v clients="$TVAR_CLIENTS" \
-			    -v up="$TVAR_UPTIME" -v wan="$TVAR_WAN_IP" -v load="$TVAR_LOAD" \
+			    -v up="$TVAR_UPTIME" -v wan="$TVAR_WAN_IP" -v ld="$TVAR_LOAD" \
 			    -v conns="$conns" '{
 				gsub(/\{\{\s*name\s*\}\}/, n)
 				gsub(/\{\{\s*ip\s*\}\}/, i)
@@ -304,7 +304,7 @@ format_new_device_msg() {
 				gsub(/\{\{\s*clients\s*\}\}/, clients)
 				gsub(/\{\{\s*uptime\s*\}\}/, up)
 				gsub(/\{\{\s*wan_ip\s*\}\}/, wan)
-				gsub(/\{\{\s*load\s*\}\}/, load)
+				gsub(/\{\{\s*load\s*\}\}/, ld)
 				gsub(/\{\{\s*conns\s*\}\}/, conns)
 				gsub(/\\n/, "\n")
 				print

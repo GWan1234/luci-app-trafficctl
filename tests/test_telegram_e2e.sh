@@ -37,7 +37,6 @@ assert_file_contains() {
     else
         FAIL=$((FAIL + 1))
         printf "FAIL: %s\n  expected '%s' in %s\n" "$desc" "$needle" "$file"
-        [ -f "$file" ] && printf "  actual: %s\n" "$(cat "$file")"
     fi
 }
 
@@ -343,7 +342,7 @@ run_bot_once() {
 
     chmod +x "$modified"
     export PATH="$MOCKBIN:$PATH"
-    timeout 15 bash "$modified" 2>"$MOCKDIR/bot_stderr.log" || true
+    timeout 15 bash "$modified" 2>/dev/null || true
 }
 
 cleanup() {
@@ -910,19 +909,6 @@ JSON
 JSON
 
     run_bot_once
-
-    # CI debug: show bot stderr and known file state on failure
-    if ! grep -qF "iPad-Air" "$API_LOG" 2>/dev/null; then
-        echo "  [DEBUG-TAGS] API_LOG lines: $(wc -l < "$API_LOG")"
-        echo "  [DEBUG-TAGS] API_LOG content: $(cat "$API_LOG")"
-        echo "  [DEBUG-TAGS] known.json: $(cat "$MOCKDIR/etc/trafficmon/telegram_known.json")"
-        echo "  [DEBUG-TAGS] bot stderr (last 20): $(tail -20 "$MOCKDIR/bot_stderr.log" 2>/dev/null)"
-        echo "  [DEBUG-TAGS] PATH first: $(echo "$PATH" | cut -d: -f1)"
-        echo "  [DEBUG-TAGS] which iw: $(which iw 2>&1)"
-        echo "  [DEBUG-TAGS] which ip: $(which ip 2>&1)"
-        echo "  [DEBUG-TAGS] iw mock test: $("$MOCKBIN/iw" dev 2>&1)"
-        echo "  [DEBUG-TAGS] ip mock test: $("$MOCKBIN/ip" neigh show 2>&1)"
-    fi
 
     # Verify all template tags were substituted
     assert_file_contains "tags: {{name}} resolved" "iPad-Air" "$API_LOG"
