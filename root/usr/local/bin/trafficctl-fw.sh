@@ -60,7 +60,7 @@ tctl_block_add() {
     local ip="$1" comment="$2"
 
     if [ "$TCTL_FW" = "nft" ]; then
-        nft add rule inet fw4 forward "ip saddr $ip counter drop comment \"$comment\""
+        nft insert rule inet fw4 forward "ip saddr $ip counter drop comment \"$comment\""
     else
         iptables -I FORWARD -s "$ip" -j DROP -m comment --comment "$comment"
     fi
@@ -158,14 +158,13 @@ tctl_persist_save() {
     local tmp="${TCTL_RULES_FILE}.tmp"
     # Remove existing entry for same ip+type, append new one
     awk -v ip="$ip" -v t="$type" -v p="$param" '
-    BEGIN { found=0 }
     {
-        gsub(/^\[|\]$/,"")
-        n=split($0, items, /},{/)
+        gsub(/^\[/,""); gsub(/\]$/,"")
+        n=split($0, items, "},{")
         printf "["
         first=1
         for (i=1; i<=n; i++) {
-            gsub(/^{|}$/,"",items[i])
+            sub(/^\{/,"",items[i]); sub(/\}$/,"",items[i])
             if (items[i] ~ "\"ip\":\"" ip "\"" && items[i] ~ "\"type\":\"" t "\"") continue
             if (!first) printf ","
             printf "{%s}", items[i]
@@ -183,12 +182,12 @@ tctl_persist_remove() {
     local tmp="${TCTL_RULES_FILE}.tmp"
     awk -v ip="$ip" -v t="$type" '
     {
-        gsub(/^\[|\]$/,"")
-        n=split($0, items, /},{/)
+        gsub(/^\[/,""); gsub(/\]$/,"")
+        n=split($0, items, "},{")
         printf "["
         first=1
         for (i=1; i<=n; i++) {
-            gsub(/^{|}$/,"",items[i])
+            sub(/^\{/,"",items[i]); sub(/\}$/,"",items[i])
             if (items[i] ~ "\"ip\":\"" ip "\"" && items[i] ~ "\"type\":\"" t "\"") continue
             if (!first) printf ","
             printf "{%s}", items[i]
@@ -252,5 +251,27 @@ tctl_log() {
     # Duplicate to syslog if configured
     if [ "$(uci -q get trafficctl.logging.syslog 2>/dev/null)" = "1" ]; then
         logger -t "$TCTL_LOG_TAG" "$ts src=$src user=$user via=$via action=$action target=$target${detail:+ detail=$detail}"
+    fi
+}
+
+# ── Flow Offload Detection ─────────────────────────────────────────────────
+
+tctl_get_offload_mode() {
+    local sw hw
+    sw=$(uci -q get firewall.@defaults[0].flow_offloading 2>/dev/null)
+    hw=$(uci -q get firewall.@defaults[0].flow_offloading_hw 2>/dev/null)
+    if [ "$hw" = "1" ]; then
+        # kernel 5.7+ supports counter sync on flowtables (docs.kernel.org/networking/nf_flowtable.html).
+        # OpenWrt 22.03+ fw4 sets the counter flag by default, syncing hardware
+        # byte counts back to conntrack — monitoring works.
+        if nft list flowtables 2>/dev/null | grep -q "counter"; then
+            echo "hardware-counter"
+        else
+            echo "hardware"
+        fi
+    elif [ "$sw" = "1" ]; then
+        echo "software"
+    else
+        echo "none"
     fi
 }

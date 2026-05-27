@@ -2,6 +2,17 @@
 'require view';
 'require rpc';
 'require fs';
+
+(function() {
+	if (!document.querySelector('link[href*="trafficctl/status.css"]')) {
+		var lnk = document.createElement('link');
+		lnk.rel = 'stylesheet';
+		lnk.type = 'text/css';
+		lnk.href = '/luci-static/resources/view/trafficctl/status.css';
+		document.head.appendChild(lnk);
+	}
+})();
+
 var TRAFFICCTL_BUILD = '20260526i';
 console.log('[trafficctl] build:' + TRAFFICCTL_BUILD);
 
@@ -10,15 +21,19 @@ var RECENT_KEY = 'trafficctl_recent';
 var MAX_RECENT = 6;
 
 function getRecentDevices() {
-	try { return JSON.parse(window.localStorage.getItem(RECENT_KEY) || '[]'); }
-	catch(e) { return []; }
+	try {
+		var stored = JSON.parse(window.localStorage.getItem(RECENT_KEY) || '[]');
+		return stored.map(function(r) { return typeof r === 'string' ? {ip: r, name: r} : r; });
+	} catch(e) { return []; }
 }
 function saveRecentDevices(arr) {
 	try { window.localStorage.setItem(RECENT_KEY, JSON.stringify(arr)); } catch(e) {}
 }
-function addRecentDevice(ip) {
-	var recent = getRecentDevices().filter(function(r) { return r !== ip; });
-	recent.unshift(ip);
+function addRecentDevice(ip, name) {
+	var recent = getRecentDevices();
+	var existing = recent.filter(function(r) { return (r.ip || r) === ip; })[0];
+	recent = recent.filter(function(r) { return (r.ip || r) !== ip; });
+	recent.unshift({ip: ip, name: name || (existing && existing.name) || ip});
 	if (recent.length > MAX_RECENT) recent.length = MAX_RECENT;
 	saveRecentDevices(recent);
 }
@@ -126,7 +141,7 @@ var callTelegramSet = rpc.declare({
 var callTelegramTest = rpc.declare({
 	object: 'luci.trafficctl',
 	method: 'telegram_test',
-	params: ['bot_token', 'chat_id']
+	params: ['bot_token', 'chat_id', 'message']
 });
 
 var callLoggingGet = rpc.declare({
@@ -151,34 +166,10 @@ var callVersion = rpc.declare({
 	method: 'version'
 });
 
-var C = {
-	thBg:          'var(--tm-th-bg)',
-	thFg:          'var(--tm-th-fg)',
-	rowEven:       'var(--tm-bg)',
-	rowOdd:        'var(--tm-bg-alt)',
-	proto:         'var(--tm-proto)',
-	hostname:      'var(--tm-text)',
-	service:       'var(--tm-service)',
-	stateOk:       'var(--tm-state-ok)',
-	stateWait:     'var(--tm-state-wait)',
-	stateClose:    'var(--tm-state-close)',
-	optsBg:        'var(--tm-bg-subtle)',
-	optsBorder:    'var(--tm-border)',
-	infoBg:        'var(--tm-info-bg)',
-	infoBorder:    'var(--tm-info-border)',
-	infoFg:        'var(--tm-info-fg)',
-	blockedBg:     'var(--tm-blocked-bg)',
-	blockedBorder: 'var(--tm-blocked-border)',
-	blockedFg:     'var(--tm-blocked-fg)',
-	rateFg:        'var(--tm-rate-fg)',
-	textMute:      'var(--tm-text-mute)',
-	textFaint:     'var(--tm-text-faint)',
-	border:        'var(--tm-border)',
-	speedFg:       'var(--tm-speed)',
-	mac:           'var(--tm-text-mute)',
-	dropFg:        'var(--tm-drop-fg)',
-	shapeFg:       'var(--tm-shape-fg)'
-};
+var callConfigGet = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'config_get'
+});
 
 var RATE_PRESETS = [
 	{v:'0',      l: _('Off')},
@@ -243,7 +234,7 @@ function mkEthIcon(size) {
 	svg.setAttribute('stroke-width', '2');
 	svg.setAttribute('stroke-linecap', 'round');
 	svg.setAttribute('stroke-linejoin', 'round');
-	svg.style.cssText = 'display:inline-block;vertical-align:middle;margin-right:3px';
+	svg.setAttribute('class', 'tm-eth-icon');
 	var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
 	path.setAttribute('d', 'M4 7h16a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1zM7 11v2M10 11v2M13 11v2M16 11v2');
 	svg.appendChild(path);
@@ -266,7 +257,7 @@ function renderSparkline(history, globalMax, width, height, limitKbit) {
 	svg.setAttribute('width', w);
 	svg.setAttribute('height', h);
 	svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
-	svg.style.cssText = 'display:block;margin:0 auto';
+	svg.style.cssText = 'display:block;margin:0 auto'; /* sparkline — kept inline (runtime/canvas) */
 	var area = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
 	area.setAttribute('points', '0,' + h + ' ' + points.join(' ') + ' ' + (w - 0) + ',' + h);
 	area.setAttribute('fill', 'var(--tm-speed)');
@@ -726,8 +717,6 @@ function injectStyles() {
 	document.head.appendChild(s);
 }
 
-var TH = 'cursor:pointer;padding:7px 12px;white-space:nowrap;background:' + C.thBg +
-         ';color:' + C.thFg + ';border:none;font-size:12px;font-weight:600;user-select:none;text-align:left';
 
 var PRIVATE_RE = /^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.)/;
 
@@ -771,24 +760,20 @@ function buildGroupedTable(groups, sortCol, sortDir) {
 
 	var thead = E('thead', {}, E('tr', {}, cols.map(function(c) {
 		var arrow = c.key === sortCol ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
-		return E('th', { 'style': TH, 'data-col': c.key, 'data-num': c.num ? '1' : '0' }, c.label + arrow);
+		return E('th', { 'class': 'tm-th', 'data-col': c.key, 'data-num': c.num ? '1' : '0' }, c.label + arrow);
 	})));
 
-	var tbody = E('tbody', {}, sorted.map(function(r, i) {
-		var bg = i%2===0 ? C.rowEven : C.rowOdd;
-		var td = 'padding:6px 12px;border-bottom:1px solid '+C.border+';color:'+C.hostname+';font-size:12px;background:'+bg;
+	var tbody = E('tbody', {}, sorted.map(function(r) {
 		return E('tr', { 'class': 'tm-row' }, [
-			E('td', { 'style': td+';font-weight:500;color:'+C.proto }, escHtml(r.key)),
-			E('td', { 'style': td+';text-align:right;font-weight:600' }, String(r.count)),
-			E('td', { 'style': td+';text-align:right;color:'+C.proto }, String(r.tcp)),
-			E('td', { 'style': td+';text-align:right;color:'+C.stateClose }, String(r.udp)),
-			E('td', { 'style': td+';text-align:right;font-family:monospace;font-weight:500' }, fmtBytes(r.bytes))
+			E('td', { 'class': 'tm-td tm-td--medium tm-c-proto' }, escHtml(r.key)),
+			E('td', { 'class': 'tm-td tm-td--right tm-td--bold' }, String(r.count)),
+			E('td', { 'class': 'tm-td tm-td--right tm-c-proto' }, String(r.tcp)),
+			E('td', { 'class': 'tm-td tm-td--right tm-c-close' }, String(r.udp)),
+			E('td', { 'class': 'tm-td tm-td--right tm-td--mono tm-td--medium' }, fmtBytes(r.bytes))
 		]);
 	}));
 
-	return E('table', {
-		'style': 'width:100%;border-collapse:collapse;font-size:12px;border:1px solid '+C.border+';border-radius:4px;overflow:hidden'
-	}, [thead, tbody]);
+	return E('table', { 'class': 'tm-table' }, [thead, tbody]);
 }
 
 function buildTable(conns, sortCol, sortDir, rdnsMode, hiddenCols) {
@@ -813,14 +798,12 @@ function buildTable(conns, sortCol, sortDir, rdnsMode, hiddenCols) {
 
 	var thead = E('thead', {}, E('tr', {}, cols.map(function(c) {
 		var arrow = c.key === sortCol ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
-		return E('th', { 'style': TH, 'data-col': c.key, 'data-num': c.num ? '1' : '0' }, c.label + arrow);
+		return E('th', { 'class': 'tm-th', 'data-col': c.key, 'data-num': c.num ? '1' : '0' }, c.label + arrow);
 	})));
 
 	var tbody = E('tbody', {}, sorted.map(function(r, i) {
 		var state = escHtml(r.state || '');
-		var sc = state === 'ESTABLISHED' ? C.stateOk : state === 'TIME_WAIT' ? C.stateWait : state === 'CLOSE_WAIT' ? C.stateClose : C.hostname;
-		var bg = i%2===0 ? C.rowEven : C.rowOdd;
-		var td = 'padding:5px 12px;border-bottom:1px solid '+C.border+';color:'+C.hostname+';font-size:12px;background:'+bg;
+		var scCls = state === 'ESTABLISHED' ? ' tm-c-ok' : state === 'TIME_WAIT' ? ' tm-c-wait' : state === 'CLOSE_WAIT' ? ' tm-c-close' : '';
 
 		var dst = r.dst || '';
 		var dstEl = dst
@@ -828,31 +811,29 @@ function buildTable(conns, sortCol, sortDir, rdnsMode, hiddenCols) {
 			           'class':'tm-link', 'onclick': 'event.stopPropagation()' }, dst)
 			: '';
 
-		var hostCell = E('td', { 'style': td+';color:'+C.hostname, 'data-dst': dst });
+		var hostCell = E('td', { 'class': 'tm-td tm-td--compact', 'data-dst': dst });
 		if (r.host) {
 			hostCell.textContent = r.host;
 		} else if (rdnsMode && !PRIVATE_RE.test(dst)) {
-			hostCell.innerHTML = '<span style="color:'+C.textFaint+';font-style:italic">' + _('resolving…') + '</span>';
+			hostCell.innerHTML = '<span class="tm-c-faint" style="font-style:italic">' + _('resolving…') + '</span>';
 		} else {
 			hostCell.textContent = '—';
 		}
 
 		var cellMap = {
-			proto: E('td', { 'style': td+';color:'+C.proto+';font-weight:600' }, r.proto || ''),
-			dst: E('td', { 'style': td+';font-family:monospace' }, dstEl),
+			proto: E('td', { 'class': 'tm-td tm-td--compact tm-td--bold tm-c-proto' }, r.proto || ''),
+			dst: E('td', { 'class': 'tm-td tm-td--compact tm-td--mono' }, dstEl),
 			host: hostCell,
-			port: E('td', { 'style': td+';text-align:right;font-family:monospace' }, String(r.port || '')),
-			service: E('td', { 'style': td+';color:'+C.service }, escHtml(r.service || (SERVICE_PORTS[r.port]||''))),
-			bytes: E('td', { 'style': td+';text-align:right;font-family:monospace;font-weight:500'}, fmtBytes(r.bytes)),
-			state: E('td', { 'style': td+';color:'+sc+';font-weight:500' }, state)
+			port: E('td', { 'class': 'tm-td tm-td--compact tm-td--right tm-td--mono' }, String(r.port || '')),
+			service: E('td', { 'class': 'tm-td tm-td--compact tm-c-service' }, escHtml(r.service || (SERVICE_PORTS[r.port]||''))),
+			bytes: E('td', { 'class': 'tm-td tm-td--compact tm-td--right tm-td--mono tm-td--medium' }, fmtBytes(r.bytes)),
+			state: E('td', { 'class': 'tm-td tm-td--compact tm-td--medium' + scCls }, state)
 		};
 		var cells = cols.map(function(c) { return cellMap[c.key]; });
 		return E('tr', { 'class': 'tm-row' }, cells);
 	}));
 
-	return E('table', {
-		'style': 'width:100%;border-collapse:collapse;font-size:12px;border:1px solid '+C.border+';border-radius:4px;overflow:hidden'
-	}, [thead, tbody]);
+	return E('table', { 'class': 'tm-table' }, [thead, tbody]);
 }
 
 function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, dropMap, shapeMap, speedHistory, hiddenCols) {
@@ -927,8 +908,8 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 	var thead = E('thead', {}, E('tr', {}, visibleCols.map(function(c) {
 		var arrow = c.key === sortCol ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
 		var compact = c.key === '_spark' || c.key === '_throttle_kbit' || c.key === '_drop_packets' || c.key === '_backlog';
-		var thStyle = TH + (c.key === '_spark' ? ';cursor:default;width:68px' : '') + (compact ? ';white-space:nowrap;width:1%' : '');
-		var attrs = { 'style': thStyle, 'data-col': c.key, 'data-num': c.num ? '1' : '0' };
+		var thExtra = (c.key === '_spark' ? ';cursor:default;width:68px' : '') + (compact ? ';white-space:nowrap;width:1%' : '');
+		var attrs = { 'class': 'tm-th', 'style': thExtra || undefined, 'data-col': c.key, 'data-num': c.num ? '1' : '0' };
 		if (c.tip) attrs['data-tip'] = c.tip;
 		var label = c.label + arrow;
 		if (c.key === '_speed' && !hasSpeedData) label = c.label + ' ';
@@ -939,35 +920,32 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 	})));
 
 	var tbody = E('tbody', {}, sorted.map(function(r, i) {
-		var bg = i%2===0 ? C.rowEven : C.rowOdd;
-		var td = 'padding:6px 12px;border-bottom:1px solid '+C.border+';color:'+C.hostname+';font-size:12px;background:'+bg;
-
 		var sd = speedMap[r.ip];
 		var cellMap = {};
 
-		cellMap.name = E('td', { 'style': td+';font-weight:600;color:'+C.proto }, escHtml(r.name));
-		cellMap.ip = E('td', { 'style': td+';font-family:monospace' }, escHtml(r.ip));
+		cellMap.name = E('td', { 'class': 'tm-td tm-td--bold tm-c-proto' }, escHtml(r.name));
+		cellMap.ip = E('td', { 'class': 'tm-td tm-td--mono' }, escHtml(r.ip));
 		var macEl = r.mac ? E('a', { 'href':'/cgi-bin/luci/admin/network/dhcp','target':'_blank','rel':'noopener','class':'tm-link','title':_('Open DHCP/DNS bindings'),'onclick':'event.stopPropagation()' }, r.mac) : '';
-		cellMap.mac = E('td', { 'style': td+';font-family:monospace;color:'+C.mac+';font-size:11px' }, macEl || '');
+		cellMap.mac = E('td', { 'class': 'tm-td tm-td--mono tm-td--sm tm-c-mute' }, macEl || '');
 
-		cellMap._speed = E('td', { 'style': td+';text-align:right;font-family:monospace', 'data-speed-ip': r.ip, 'title': sd ? (_('Avg')+': '+fmtSpeed(sd.avg)+' / '+_('Max')+': '+fmtSpeed(sd.max)) : _('Calculating…') });
+		cellMap._speed = E('td', { 'class': 'tm-td tm-td--right tm-td--mono', 'data-speed-ip': r.ip, 'title': sd ? (_('Avg')+': '+fmtSpeed(sd.avg)+' / '+_('Max')+': '+fmtSpeed(sd.max)) : _('Calculating…') });
 		if (sd && sd.current > 1024) { cellMap._speed.className = 'tm-speed-active'; cellMap._speed.textContent = fmtSpeed(sd.current); }
 		else { cellMap._speed.className = 'tm-speed-idle'; cellMap._speed.textContent = sd ? fmtSpeed(sd.current) : '—'; }
 
 		var sparkTip = r._throttle_kbit > 0 ? (_('Limit') + ': ' + fmtRate(r._throttle_kbit)) : '';
-		cellMap._spark = E('td', { 'style': td+';text-align:center;padding:2px 4px', 'data-spark-ip': r.ip, 'data-tip': sparkTip || undefined });
+		cellMap._spark = E('td', { 'class': 'tm-td tm-td--center', 'style': 'padding:2px 4px', 'data-spark-ip': r.ip, 'data-tip': sparkTip || undefined });
 		var sparkSvg = renderSparkline(speedHistory[r.ip], globalSpeedMax, 60, 20, r._throttle_kbit);
 		if (sparkSvg) cellMap._spark.appendChild(sparkSvg);
 
-		cellMap.conns = E('td', { 'style': td+';text-align:right;font-weight:600' }, String(r.conns||0));
-		cellMap.total = E('td', { 'style': td+';text-align:right;font-family:monospace;font-size:11px' }, fmtBytes(r.total||0));
-		cellMap.tcp = E('td', { 'style': td+';text-align:right;font-family:monospace;font-size:11px;color:'+C.proto }, fmtBytes(r.tcp||0));
-		cellMap.udp = E('td', { 'style': td+';text-align:right;font-family:monospace;font-size:11px;color:'+C.stateClose }, fmtBytes(r.udp||0));
+		cellMap.conns = E('td', { 'class': 'tm-td tm-td--right tm-td--bold' }, String(r.conns||0));
+		cellMap.total = E('td', { 'class': 'tm-td tm-td--right tm-td--mono tm-td--sm' }, fmtBytes(r.total||0));
+		cellMap.tcp = E('td', { 'class': 'tm-td tm-td--right tm-td--mono tm-td--sm tm-c-proto' }, fmtBytes(r.tcp||0));
+		cellMap.udp = E('td', { 'class': 'tm-td tm-td--right tm-td--mono tm-td--sm tm-c-close' }, fmtBytes(r.udp||0));
 
 		var inetBadge = r.blocked
-			? E('span', { 'style': 'color:'+C.rateFg+';font-weight:600' }, '⏸️ ' + _('paused'))
-			: E('span', { 'style': 'color:'+C.proto }, '▶️ ' + _('ok'));
-		cellMap.blocked = E('td', { 'style': td+';text-align:center' }, inetBadge);
+			? E('span', { 'class': 'tm-c-rate tm-fw-600' }, '⏸️ ' + _('paused'))
+			: E('span', { 'class': 'tm-c-proto' }, '▶️ ' + _('ok'));
+		cellMap.blocked = E('td', { 'class': 'tm-td tm-td--center' }, inetBadge);
 
 		var linkBadge;
 		var ct = r.conn_type || 'ethernet';
@@ -984,53 +962,44 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 					tip = _('Last seen') + ': ' + lastType + ', ' + agoStr + ' ' + _('ago');
 				}
 			}
-			linkBadge = E('span', { 'style': 'color:'+C.textFaint+';cursor:help', 'title': tip }, '❓');
+			linkBadge = E('span', { 'class': 'tm-c-faint', 'style': 'cursor:help', 'title': tip }, '❓');
 		} else if (isWifi) {
 			var wLabel = ct === 'wifi' ? 'WiFi' : ct;
 			linkBadge = r.wifi_blocked
-				? E('span', { 'style': 'color:'+C.rateFg+';font-weight:600;text-decoration:line-through' }, '📶 ' + wLabel)
-				: E('span', { 'style': 'color:'+C.proto }, '📶 ' + wLabel);
+				? E('span', { 'class': 'tm-c-rate tm-fw-600', 'style': 'text-decoration:line-through' }, '📶 ' + wLabel)
+				: E('span', { 'class': 'tm-c-proto' }, '📶 ' + wLabel);
 		} else {
 			var ethLabel = (ct === 'ethernet') ? 'eth' : ct;
-			linkBadge = E('span', { 'style': 'color:'+C.textMute }, [mkEthIcon(14), document.createTextNode(ethLabel)]);
+			linkBadge = E('span', { 'class': 'tm-c-mute' }, [mkEthIcon(14), document.createTextNode(ethLabel)]);
 		}
-		cellMap.conn_type = E('td', { 'style': td+';text-align:center' }, linkBadge);
+		cellMap.conn_type = E('td', { 'class': 'tm-td tm-td--center' }, linkBadge);
 
 		var throttleBadge;
-		if (r._throttle_mode === 'shaper') { throttleBadge = E('span', { 'style': 'color:'+C.shapeFg+';font-weight:600', 'title': _('Shaper (tc/HTB queue)') }, '🌊 ' + fmtRate(r._throttle_kbit)); }
-		else if (r._throttle_mode === 'limiter') { throttleBadge = E('span', { 'style': 'color:'+C.rateFg+';font-weight:600', 'title': _('Limiter (nft drop)') }, '⚡ ' + fmtRate(r._throttle_kbit)); }
-		else { throttleBadge = E('span', { 'style': 'color:'+C.textFaint }, '—'); }
-		cellMap._throttle_kbit = E('td', { 'style': td+';text-align:center' }, throttleBadge);
+		if (r._throttle_mode === 'shaper') { throttleBadge = E('span', { 'class': 'tm-c-shape tm-fw-600', 'title': _('Shaper (tc/HTB queue)') }, '🌊 ' + fmtRate(r._throttle_kbit)); }
+		else if (r._throttle_mode === 'limiter') { throttleBadge = E('span', { 'class': 'tm-c-rate tm-fw-600', 'title': _('Limiter (nft drop)') }, '⚡ ' + fmtRate(r._throttle_kbit)); }
+		else { throttleBadge = E('span', { 'class': 'tm-c-faint' }, '—'); }
+		cellMap._throttle_kbit = E('td', { 'class': 'tm-td tm-td--center' }, throttleBadge);
 
 		var dp = r._drop_packets || 0;
-		var dropBadge = dp > 0 ? E('span', { 'style': 'color:'+C.dropFg+';font-weight:600', 'title': fmtBytes(r._drop_bytes||0)+' '+_('dropped') }, '🚫 ' + dp) : E('span', { 'style': 'color:'+C.textFaint }, '—');
-		cellMap._drop_packets = E('td', { 'style': td+';text-align:center', 'data-drop-ip': r.ip }, dropBadge);
+		var dropBadge = dp > 0 ? E('span', { 'class': 'tm-c-drop tm-fw-600', 'title': fmtBytes(r._drop_bytes||0)+' '+_('dropped') }, '🚫 ' + dp) : E('span', { 'class': 'tm-c-faint' }, '—');
+		cellMap._drop_packets = E('td', { 'class': 'tm-td tm-td--center', 'data-drop-ip': r.ip }, dropBadge);
 
 		var bl = r._backlog || 0;
-		var backlogBadge = bl > 0 ? E('span', { 'style': 'color:'+C.shapeFg+';font-weight:600', 'title': _('Bytes queued in tc') }, fmtBytes(bl)) : E('span', { 'style': 'color:'+C.textFaint }, '—');
-		cellMap._backlog = E('td', { 'style': td+';text-align:center', 'data-backlog-ip': r.ip }, backlogBadge);
+		var backlogBadge = bl > 0 ? E('span', { 'class': 'tm-c-shape tm-fw-600', 'title': _('Bytes queued in tc') }, fmtBytes(bl)) : E('span', { 'class': 'tm-c-faint' }, '—');
+		cellMap._backlog = E('td', { 'class': 'tm-td tm-td--center', 'data-backlog-ip': r.ip }, backlogBadge);
 
 		var cells = visibleCols.map(function(c) { return cellMap[c.key]; });
 		var row = E('tr', { 'class': 'tm-row', 'title': _('Click to inspect') + ' ' + r.name }, cells);
-		row.addEventListener('click', function() { addRecentDevice(r.ip); onSelect(r.ip, r.name); });
+		row.addEventListener('click', function() { addRecentDevice(r.ip, r.name); onSelect(r.ip, r.name); });
 		return row;
 	}));
 
-	return E('table', {
-		'style': 'width:100%;border-collapse:collapse;font-size:12px;border:1px solid '+C.border+';border-radius:4px;overflow:hidden'
-	}, [thead, tbody]);
+	return E('table', { 'class': 'tm-table' }, [thead, tbody]);
 }
 
 function setStatus(el, type, msg) {
-	var styles = {
-		loading: 'background:var(--tm-info-bg);border:1px solid var(--tm-info-border);color:var(--tm-info-fg)',
-		ok:      'background:var(--tm-info-bg);border:1px solid var(--tm-state-ok);color:var(--tm-state-ok)',
-		error:   'background:var(--tm-blocked-bg);border:1px solid var(--tm-blocked-border);color:var(--tm-blocked-fg)',
-		action:  'background:var(--tm-info-bg);border:1px solid var(--tm-rate-fg);color:var(--tm-rate-fg)'
-	};
-	el.style.cssText = 'padding:8px 14px;border-radius:4px;font-size:13px;margin-bottom:10px;' + (styles[type]||styles.ok);
+	el.className = 'tm-status tm-status--' + (type || 'ok');
 	el.innerHTML = type === 'loading' ? '<span class="tm-spinner"></span>'+escHtml(msg) : escHtml(msg);
-	el.style.display = '';
 }
 
 function updateUrlParams(opts) {
@@ -1071,7 +1040,6 @@ function buildExtendedStatsPanel(ip, shapeMap, dropMap, speedMap) {
 	var dm = dropMap[ip];
 	var spd = speedMap[ip];
 
-	var panelStyle = 'background:var(--tm-bg-subtle);border:1px solid var(--tm-border);border-radius:4px;padding:12px 16px;font-size:13px;margin:8px 0';
 	var td = 'padding:5px 12px;border-bottom:1px solid var(--tm-border);font-size:13px';
 	var tooltips = {
 		'Drops': _('packets dropped by queue overflow'),
@@ -1125,22 +1093,20 @@ function buildExtendedStatsPanel(ip, shapeMap, dropMap, speedMap) {
 	}
 
 	if (rows.length === 0) {
-		return E('div', { 'style': panelStyle + ';color:var(--tm-text-mute)' }, _('No extended stats available for this device.'));
+		return E('div', { 'class': 'tm-ext-panel', 'style': 'color:var(--tm-text-mute)' }, _('No extended stats available for this device.'));
 	}
 
-	var tbl = E('table', { 'style': 'width:100%;border-collapse:collapse;border:1px solid var(--tm-border);border-radius:4px;overflow:hidden' }, [
+	var tbl = E('table', { 'class': 'tm-table' }, [
 		E('tbody', {}, rows)
 	]);
 
-	return E('div', { 'style': panelStyle }, [
-		E('div', { 'style': 'margin-bottom:8px;font-weight:600;font-size:14px;color:var(--tm-text)' }, _('Extended Statistics')),
+	return E('div', { 'class': 'tm-ext-panel' }, [
+		E('div', { 'class': 'tm-ext-panel__title' }, _('Extended Statistics')),
 		tbl
 	]);
 }
 
 function buildExtendedStatsLegend(shapeMap, dropMap) {
-	var panelStyle = 'position:sticky;top:0;background:var(--tm-bg-subtle);border:1px solid var(--tm-border);border-radius:4px;padding:12px 16px;font-size:13px;margin:8px 0';
-	var rowStyle = 'display:flex;justify-content:space-between;align-items:baseline;padding:4px 0;border-bottom:1px dotted var(--tm-border)';
 	var labelStyle = 'color:var(--tm-text-mute);font-size:12px';
 	var valueStyle = 'font-family:monospace;font-weight:600;color:var(--tm-text);font-size:13px';
 	var totalDrops = 0, totalOverlimits = 0, totalEcn = 0, totalMemory = 0;
@@ -1169,7 +1135,7 @@ function buildExtendedStatsLegend(shapeMap, dropMap) {
 	var rows = [];
 	function addRow(label, value, color) {
 		var vs = color ? valueStyle + ';color:' + color : valueStyle;
-		rows.push(E('div', { 'style': rowStyle }, [
+		rows.push(E('div', { 'class': 'tm-ext-row' }, [
 			E('span', { 'style': labelStyle }, label),
 			E('span', { 'style': vs }, value)
 		]));
@@ -1190,9 +1156,9 @@ function buildExtendedStatsLegend(shapeMap, dropMap) {
 		rows.push(E('div', { 'style': 'padding:4px 0;color:var(--tm-text-mute)' }, _('No extended stats available.')));
 	}
 
-	return E('div', { 'style': panelStyle }, [
-		E('div', { 'style': 'margin-bottom:8px;font-weight:600;font-size:14px;color:var(--tm-text)' }, _('Extended Statistics') + ' (' + _('all devices') + ')'),
-		E('div', { 'style': 'display:flex;flex-direction:column' }, rows)
+	return E('div', { 'class': 'tm-ext-panel tm-ext-panel--sticky' }, [
+		E('div', { 'class': 'tm-ext-panel__title' }, _('Extended Statistics') + ' (' + _('all devices') + ')'),
+		E('div', { 'class': 'tm-ext-col-flex' }, rows)
 	]);
 }
 
@@ -1221,16 +1187,14 @@ function deviceIcon(type, size) {
 
 function buildCardGrid(devices, onSelect, speedMap, shapeMap, dropMap) {
 	var selectedValue = '__all__';
-	var wrapper = E('div', {'style':'display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-bottom:8px'});
+	var wrapper = E('div', {'class':'tm-card-grid'});
 
 	function render(devs) {
 		while (wrapper.firstChild) wrapper.removeChild(wrapper.firstChild);
 
 		var allCard = E('div', {
-			'style':'padding:10px;border-radius:8px;border:2px solid var(--tm-proto);background:var(--tm-info-bg);' +
-				'cursor:pointer;text-align:center;font-size:12px;font-weight:600;color:var(--tm-proto);' +
-				'transition:all .15s;display:flex;flex-direction:column;align-items:center;gap:4px',
-			'data-value':'__all__'
+			'class': 'tm-card tm-card--all',
+			'data-value': '__all__'
 		}, [E('span', {'style':'font-size:20px'}, '📊'), E('span', {}, _('All devices'))]);
 		allCard.addEventListener('click', function() { selectItem('__all__'); });
 		wrapper.appendChild(allCard);
@@ -1245,22 +1209,20 @@ function buildCardGrid(devices, onSelect, speedMap, shapeMap, dropMap) {
 
 			var statusDot = isBlocked ? '🔴' : (hasLimit ? '🟠' : (spd && spd.current > 1024 ? '🟢' : '⚪'));
 			var speedLabel = spd && spd.current > 0 ? fmtSpeed(spd.current) : '';
-			var borderColor = selectedValue === d.ip ? 'var(--tm-proto)' : 'var(--tm-border)';
-			var bg = selectedValue === d.ip ? 'var(--tm-info-bg)' : 'var(--tm-bg)';
-
+			var isSelected = selectedValue === d.ip;
 			var card = E('div', {
-				'style':'padding:10px 8px;border-radius:8px;border:2px solid '+borderColor+';background:'+bg+';' +
-					'cursor:pointer;text-align:center;font-size:11px;transition:all .15s;display:flex;flex-direction:column;align-items:center;gap:3px;overflow:hidden',
+				'class': 'tm-card',
+				'style': isSelected ? 'border-color:var(--tm-proto);background:var(--tm-info-bg)' : '',
 				'data-value': d.ip,
 				'title': d.name + ' (' + d.ip + ')'
 			}, [
-				E('div', {'style':'position:relative'}, [
+				E('div', {'class':'tm-device-icon-wrap'}, [
 					deviceIcon(type, 22),
-					E('span', {'style':'position:absolute;top:-2px;right:-8px;font-size:8px'}, statusDot)
+					E('span', {'class':'tm-device-icon-badge'}, statusDot)
 				]),
-				E('div', {'style':'font-weight:600;color:var(--tm-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%'}, d.name || d.ip),
-				E('div', {'style':'color:var(--tm-text-mute);font-family:monospace;font-size:10px'}, d.ip),
-				speedLabel ? E('div', {'style':'color:var(--tm-speed);font-weight:600;font-size:10px'}, speedLabel) : E('span')
+				E('div', {'class':'tm-card__name'}, d.name || d.ip),
+				E('div', {'class':'tm-card__ip'}, d.ip),
+				speedLabel ? E('div', {'class':'tm-card__speed'}, speedLabel) : E('span')
 			]);
 			card.addEventListener('click', function() { selectItem(d.ip); });
 			card.addEventListener('mouseenter', function() { if (selectedValue !== d.ip) this.style.borderColor = 'var(--tm-text-mute)'; });
@@ -1287,13 +1249,13 @@ function buildCardGrid(devices, onSelect, speedMap, shapeMap, dropMap) {
 
 function buildAvatarStrip(devices, onSelect, speedMap) {
 	var selectedValue = '__all__';
-	var wrapper = E('div', {'style':'display:flex;gap:6px;overflow-x:auto;padding:6px 2px;margin-bottom:8px;scrollbar-width:thin'});
+	var wrapper = E('div', {'class':'tm-avatar-strip'});
 
 	function render(devs) {
 		while (wrapper.firstChild) wrapper.removeChild(wrapper.firstChild);
 
 		var allPill = E('div', {
-			'style':'display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;min-width:56px;transition:all .15s',
+			'class':'tm-avatar-pill',
 			'data-value':'__all__'
 		}, [
 			E('div', {'style':'width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;' +
@@ -1313,7 +1275,7 @@ function buildAvatarStrip(devices, onSelect, speedMap) {
 			var bg = isActive ? 'var(--tm-info-bg)' : 'var(--tm-bg)';
 
 			var pill = E('div', {
-				'style':'display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;min-width:56px;transition:all .15s',
+				'class':'tm-avatar-pill',
 				'data-value': d.ip,
 				'title': d.name + ' — ' + d.ip
 			}, [
@@ -1344,21 +1306,17 @@ function buildAvatarStrip(devices, onSelect, speedMap) {
 
 function buildChipCloud(devices, onSelect, speedMap, shapeMap, dropMap) {
 	var selectedValue = '__all__';
-	var wrapper = E('div', {'style':'display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;align-items:center'});
+	var wrapper = E('div', {'class':'tm-chip-cloud'});
 
-	var chipNorm = 'display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border-radius:16px;font-size:12px;' +
-		'cursor:pointer;transition:all .15s;border:1.5px solid var(--tm-border);background:var(--tm-bg);color:var(--tm-text);user-select:none';
-	var chipActive = 'display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border-radius:16px;font-size:12px;' +
-		'cursor:pointer;transition:all .15s;border:1.5px solid var(--tm-proto);background:var(--tm-proto);color:#fff;font-weight:600;user-select:none';
-	var chipBlocked = 'display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border-radius:16px;font-size:12px;' +
-		'cursor:pointer;transition:all .15s;border:1.5px solid var(--tm-blocked-border);background:var(--tm-blocked-bg);color:var(--tm-blocked-fg);user-select:none';
-	var chipLimited = 'display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border-radius:16px;font-size:12px;' +
-		'cursor:pointer;transition:all .15s;border:1.5px solid var(--tm-rate-fg);background:var(--tm-bg);color:var(--tm-rate-fg);user-select:none';
+	var chipNorm    = 'tm-cloud-chip';
+	var chipActive  = 'tm-cloud-chip tm-cloud-chip--active';
+	var chipBlocked = 'tm-cloud-chip tm-cloud-chip--blocked';
+	var chipLimited = 'tm-cloud-chip tm-cloud-chip--limited';
 
 	function render(devs) {
 		while (wrapper.firstChild) wrapper.removeChild(wrapper.firstChild);
 
-		var allChip = E('span', {'style': selectedValue === '__all__' ? chipActive : chipNorm}, [
+		var allChip = E('span', {'class': selectedValue === '__all__' ? chipActive : chipNorm}, [
 			E('span', {'style':'font-size:13px'}, '📊'),
 			E('span', {}, _('All'))
 		]);
@@ -1374,16 +1332,16 @@ function buildChipCloud(devices, onSelect, speedMap, shapeMap, dropMap) {
 			var spd = speedMap && speedMap[d.ip];
 			var speedTxt = spd && spd.current > 1024 ? ' ' + fmtSpeed(spd.current) : '';
 
-			var style;
-			if (selectedValue === d.ip) style = chipActive;
-			else if (isBlocked) style = chipBlocked;
-			else if (hasLimit) style = chipLimited;
-			else style = chipNorm;
+			var chipClass;
+			if (selectedValue === d.ip) chipClass = chipActive;
+			else if (isBlocked) chipClass = chipBlocked;
+			else if (hasLimit) chipClass = chipLimited;
+			else chipClass = chipNorm;
 
-			var chip = E('span', {'style': style, 'title': d.ip + (d.mac ? ' ('+d.mac+')' : '')}, [
+			var chip = E('span', {'class': chipClass, 'title': d.ip + (d.mac ? ' ('+d.mac+')' : '')}, [
 				deviceIcon(type, 13),
 				E('span', {}, d.name || d.ip),
-				speedTxt ? E('span', {'style':'font-size:10px;opacity:.7'}, speedTxt) : E('span')
+				speedTxt ? E('span', {'class':'tm-cloud-chip__speed'}, speedTxt) : E('span')
 			]);
 			chip.addEventListener('click', function() { selectItem(d.ip); });
 			wrapper.appendChild(chip);
@@ -1410,27 +1368,20 @@ function buildSearchSelect(devices, placeholder, onSelect) {
 	var selectedValue = '__all__';
 	var recentIps = [];
 	var MAX_RECENT = 5;
-	var wrapper = E('div', { 'style': 'position:relative;display:inline-block;width:100%;max-width:480px' });
+	var wrapper = E('div', { 'class': 'tm-search-wrapper' });
 	var input = E('input', {
 		'type': 'text',
 		'placeholder': placeholder,
 		'autocomplete': 'off',
-		'style': 'width:100%;padding:8px 32px 8px 12px;font-size:14px;border:2px solid var(--tm-border);border-radius:6px;cursor:pointer;background:var(--tm-bg);color:var(--tm-text)'
+		'class': 'tm-search-input'
 	});
-	var clearBtn = E('span', {
-		'style': 'position:absolute;right:8px;top:50%;transform:translateY(-50%);cursor:pointer;color:var(--tm-text-mute);font-size:16px;display:none;line-height:1'
-	}, '×');
-	var dropdown = E('div', {
-		'style': 'position:absolute;top:100%;left:0;right:0;max-height:280px;overflow-y:auto;' +
-				 'background:var(--tm-bg);border:1px solid var(--tm-border);border-top:none;border-radius:0 0 4px 4px;' +
-				 'box-shadow:0 4px 8px rgba(0,0,0,.15);z-index:100;display:none'
-	});
+	var clearBtn = E('span', { 'class': 'tm-search-clear tm-hidden' }, '×');
+	var dropdown = E('div', { 'class': 'tm-search-dropdown tm-hidden' });
 	wrapper.appendChild(input);
 	wrapper.appendChild(clearBtn);
 	wrapper.appendChild(dropdown);
 
 	var highlightIdx = -1;
-	var ITEM_STYLE = 'padding:6px 10px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--tm-border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
 
 	function addToRecent(ip) {
 		recentIps = recentIps.filter(function(r) { return r !== ip; });
@@ -1451,18 +1402,18 @@ function buildSearchSelect(devices, placeholder, onSelect) {
 	}
 
 	function mkItem(it, idx, q) {
-		var item = E('div', { 'style': ITEM_STYLE, 'data-value': it.value });
+		var item = E('div', { 'class': 'tm-dropdown-item', 'data-value': it.value });
 		if (q && it.value !== '__all__') {
 			item.innerHTML = highlightMatch(it.label, q);
 		} else {
 			item.textContent = it.label;
 		}
 		if (it.section) {
-			item.style.cssText = 'padding:3px 10px;font-size:11px;color:var(--tm-text-mute);font-weight:600;text-transform:uppercase;letter-spacing:.3px;cursor:default;border-bottom:1px solid var(--tm-border)';
+			item.className = 'tm-dropdown-item--section';
 			return item;
 		}
 		if (it.value === '__all__') {
-			item.style.cssText = ITEM_STYLE + ';font-weight:600;color:var(--tm-proto)';
+			item.className = 'tm-dropdown-item tm-dropdown-item--all';
 		}
 		item.addEventListener('mousedown', function(ev) {
 			ev.preventDefault();
@@ -1519,28 +1470,32 @@ function buildSearchSelect(devices, placeholder, onSelect) {
 		selectedValue = value;
 		if (value === '__all__') {
 			input.value = '';
-			clearBtn.style.display = 'none';
+			clearBtn.classList.add('tm-hidden');
 		} else {
 			addToRecent(value);
 			input.value = label.replace(/\s+\(.*\)$/, '');
-			clearBtn.style.display = '';
+			clearBtn.classList.remove('tm-hidden');
 		}
-		dropdown.style.display = 'none';
+		dropdown.classList.add('tm-hidden');
 		if (!silent) onSelect(value);
 	}
 
 	input.addEventListener('focus', function() {
 		this.style.cursor = 'text';
 		renderItems(input.value);
-		dropdown.style.display = '';
+		dropdown.classList.remove('tm-hidden');
 	});
 	input.addEventListener('blur', function() {
 		this.style.cursor = 'pointer';
-		setTimeout(function() { dropdown.style.display = 'none'; }, 150);
+		setTimeout(function() { dropdown.classList.add('tm-hidden'); }, 150);
+	});
+	input.addEventListener('click', function() {
+		renderItems(input.value);
+		dropdown.classList.remove('tm-hidden');
 	});
 	input.addEventListener('input', function() {
 		renderItems(input.value);
-		dropdown.style.display = '';
+		dropdown.classList.remove('tm-hidden');
 	});
 	input.addEventListener('keydown', function(ev) {
 		var actionItems = [];
@@ -1563,7 +1518,7 @@ function buildSearchSelect(devices, placeholder, onSelect) {
 				selectItem(el.getAttribute('data-value'), el.textContent);
 			}
 		} else if (ev.key === 'Escape') {
-			dropdown.style.display = 'none';
+			dropdown.classList.add('tm-hidden');
 			input.blur();
 		}
 	});
@@ -1624,7 +1579,10 @@ return view.extend({
 
 		function onDeviceSelect(value) {
 			var o = loadOpts(); o.lastIp = value; saveOpts(o); updateUrlParams(o);
-			if (value !== '__all__') addRecentDevice(value);
+			if (value !== '__all__') {
+				var _nd = devices.filter(function(d) { return d.ip === value; })[0];
+				addRecentDevice(value, _nd ? _nd.name : null);
+			}
 			renderRecentChips();
 			updateModeUI();
 			runQuery();
@@ -1639,28 +1597,18 @@ return view.extend({
 		// Recent devices — functions defined at top level
 
 		// Quick-access bar: [All devices] + recent device chips
-		var quickBar = E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin-top:6px'});
+		var quickBar = E('div', {'class':'tm-quick-bar'});
 
-		var allBtn = E('span', {
-			'style':'display:inline-flex;align-items:center;gap:3px;padding:4px 10px;border-radius:14px;font-size:12px;' +
-				'font-weight:600;cursor:pointer;transition:all .15s;user-select:none;' +
-				'border:1.5px solid var(--tm-proto);background:var(--tm-proto);color:#fff'
-		}, ['📊 ', _('All devices')]);
+		var allBtn = E('span', {'class':'tm-quick-bar__all'}, ['📊 ', _('All devices')]);
 		allBtn.addEventListener('click', function() {
 			searchSelect.setValue('__all__', '');
 			onDeviceSelect('__all__');
 		});
 		quickBar.appendChild(allBtn);
 
-		var recentContainer = E('span', {'style':'display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center'});
+		var recentContainer = E('span', {'class':'tm-recent-container'});
 		quickBar.appendChild(recentContainer);
 
-		var chipNormStyle = 'display:inline-flex;align-items:center;gap:3px;padding:4px 10px;border-radius:14px;font-size:11px;' +
-			'font-weight:500;cursor:pointer;transition:all .15s;user-select:none;' +
-			'border:1.5px solid var(--tm-border);background:var(--tm-bg);color:var(--tm-text)';
-		var chipActiveStyle = 'display:inline-flex;align-items:center;gap:3px;padding:4px 10px;border-radius:14px;font-size:11px;' +
-			'font-weight:600;cursor:pointer;transition:all .15s;user-select:none;' +
-			'border:1.5px solid var(--tm-proto);background:var(--tm-info-bg);color:var(--tm-proto)';
 
 		function renderRecentChips() {
 			while (recentContainer.firstChild) recentContainer.removeChild(recentContainer.firstChild);
@@ -1668,38 +1616,32 @@ return view.extend({
 			var currentIp = searchSelect.getValue();
 
 			// Update All button style
-			if (currentIp === '__all__') {
-				allBtn.style.background = 'var(--tm-proto)';
-				allBtn.style.color = '#fff';
-				allBtn.style.borderColor = 'var(--tm-proto)';
-			} else {
-				allBtn.style.background = 'var(--tm-bg)';
-				allBtn.style.color = 'var(--tm-proto)';
-				allBtn.style.borderColor = 'var(--tm-proto)';
-			}
+			// tm-quick-bar__all has the active (filled) look by default;
+			// when a device is selected we switch to outline-only variant
+			allBtn.className = currentIp === '__all__' ? 'tm-quick-bar__all' : 'tm-quick-bar__all tm-quick-bar__all--outline';
 
-			recent.forEach(function(ip) {
+			recent.forEach(function(entry) {
+				var ip = entry.ip || entry;
+				var storedName = entry.name;
 				var dev = devices.filter(function(d) { return d.ip === ip; })[0];
-				var label = dev ? dev.name : ip;
+				var label = (dev && dev.name) || storedName || ip;
 				var isActive = ip === currentIp;
 				var chip = E('span', {
-					'style': isActive ? chipActiveStyle : chipNormStyle,
+					'class': isActive ? 'tm-recent-chip tm-recent-chip--active' : 'tm-recent-chip',
 					'title': ip + (dev && dev.mac ? ' (' + dev.mac + ')' : '')
 				}, [
 					deviceIcon(guessDeviceType(dev || {name:label}), 12),
 					document.createTextNode(' ' + label)
 				]);
 				chip.addEventListener('click', function() {
-					searchSelect.setValue(ip, dev ? dev.name + '  —  ' + ip : ip);
+					var lbl = label !== ip ? label + '  —  ' + ip : ip;
+					searchSelect.setValue(ip, lbl);
 					onDeviceSelect(ip);
 				});
-				// Remove button (×) on hover
-				var removeBtn = E('span', {
-					'style':'margin-left:2px;font-size:10px;opacity:0;transition:opacity .15s;color:var(--tm-text-mute);cursor:pointer'
-				}, '×');
+				var removeBtn = E('span', {'class':'tm-recent-remove'}, '×');
 				removeBtn.addEventListener('click', function(ev) {
 					ev.stopPropagation();
-					var r = getRecentDevices().filter(function(x) { return x !== ip; });
+					var r = getRecentDevices().filter(function(x) { return (x.ip || x) !== ip; });
 					saveRecentDevices(r);
 					renderRecentChips();
 				});
@@ -1716,26 +1658,19 @@ return view.extend({
 			cb.checked = !!checked;
 			cb.addEventListener('change', onChange);
 			var track = E('label', { 'class': 'tm-toggle', 'for': id });
-			return E('div', { 'style': 'display:inline-flex;align-items:center;gap:6px;margin-right:12px;white-space:nowrap' }, [
+			return E('div', { 'class': 'tm-toggle-wrap' }, [
 				cb, track,
-				E('label', { 'for': id, 'style': 'cursor:pointer;color:'+C.hostname+';font-size:12px;user-select:none' }, label)
+				E('label', { 'for': id, 'style': 'cursor:pointer;font-size:12px;user-select:none;color:var(--tm-text)' }, label)
 			]);
 		}
 		function mkLabel(t) {
-			return E('span', { 'style': 'color:'+C.textMute+';font-size:12px;margin-right:4px;white-space:nowrap' }, t);
+			return E('span', { 'class': 'tm-inline-label' }, t);
 		}
 
 		function mkInlinePick(options, currentValue, onChange) {
-			var wrapper = E('span', {'style':'position:relative;display:inline-block'});
-			var display = E('span', {
-				'style': 'color:var(--tm-text);font-size:12px;font-weight:500;cursor:pointer;' +
-					'border-bottom:1px dashed var(--tm-text-mute);padding-bottom:1px;white-space:nowrap'
-			});
-			var popup = E('div', {
-				'style': 'display:none;position:absolute;top:calc(100% + 4px);left:50%;transform:translateX(-50%);' +
-					'background:var(--tm-bg);border:1px solid var(--tm-border);border-radius:6px;' +
-					'box-shadow:0 4px 12px rgba(0,0,0,.15);z-index:200;padding:4px 0;white-space:nowrap'
-			});
+			var wrapper = E('span', {'class':'tm-inline-pick-wrapper'});
+			var display = E('span', {'class':'tm-inline-pick-display'});
+			var popup = E('div', {'class':'tm-inline-pick-popup tm-hidden'});
 			var selectedValue = currentValue;
 
 			function updateDisplay() {
@@ -1758,7 +1693,7 @@ return view.extend({
 						ev.preventDefault();
 						selectedValue = opt.v;
 						updateDisplay();
-						popup.style.display = 'none';
+						popup.classList.add('tm-hidden');
 						onChange(opt.v);
 					});
 					item.addEventListener('mouseenter', function() { this.style.background = 'var(--tm-hover)'; });
@@ -1770,9 +1705,9 @@ return view.extend({
 			display.addEventListener('click', function(ev) {
 				ev.stopPropagation();
 				buildPopup();
-				popup.style.display = popup.style.display === 'none' ? '' : 'none';
+				popup.classList.toggle('tm-hidden');
 			});
-			document.addEventListener('click', function() { popup.style.display = 'none'; });
+			document.addEventListener('click', function() { popup.classList.add('tm-hidden'); });
 
 			wrapper.appendChild(display);
 			wrapper.appendChild(popup);
@@ -1784,43 +1719,39 @@ return view.extend({
 			var wrapper = E('span', {'style':'display:inline-flex;flex-wrap:wrap;gap:2px;align-items:center'});
 			var selected = currentValue;
 			var chips = [];
-			var csNorm = 'padding:3px 8px;border-radius:10px;font-size:11px;cursor:pointer;transition:all .15s;' +
-				'border:1px solid var(--tm-border);background:var(--tm-bg);color:var(--tm-text)';
-			var csActive = 'padding:3px 8px;border-radius:10px;font-size:11px;cursor:pointer;transition:all .15s;' +
-				'border:1px solid var(--tm-proto);background:var(--tm-proto);color:#fff;font-weight:600';
 			options.forEach(function(opt) {
-				var chip = E('span', {'style': opt.v === selected ? csActive : csNorm}, opt.l);
+				var chip = E('span', {'class': opt.v === selected ? 'tm-chip tm-chip--active' : 'tm-chip'}, opt.l);
 				chip.addEventListener('click', function() {
 					selected = opt.v;
-					chips.forEach(function(c) { c.style.cssText = c._v === selected ? csActive : csNorm; });
+					chips.forEach(function(c) { c.className = c._v === selected ? 'tm-chip tm-chip--active' : 'tm-chip'; });
 					onChange(opt.v);
 				});
 				chip._v = opt.v;
 				chips.push(chip);
 				wrapper.appendChild(chip);
 			});
-			return { el: wrapper, getValue: function() { return selected; }, setValue: function(v) { selected = v; chips.forEach(function(c) { c.style.cssText = c._v === v ? csActive : csNorm; }); } };
+			return { el: wrapper, getValue: function() { return selected; }, setValue: function(v) { selected = v; chips.forEach(function(c) { c.className = c._v === v ? 'tm-chip tm-chip--active' : 'tm-chip'; }); } };
 		}
 
 		var showStats = mkToggle('tm-stats', _('Stats'), opts.showStats !== false, function() {
 			var o = loadOpts(); o.showStats = this.checked; saveOpts(o); updateUrlParams(o);
-			statsDiv.style.display = this.checked ? '' : 'none';
+			statsDiv.classList.toggle('tm-hidden', !this.checked);
 		});
 		var showConns = mkToggle('tm-conns', _('Connections'), opts.showConns !== false, function() {
 			var o = loadOpts(); o.showConns = this.checked; saveOpts(o); updateUrlParams(o);
-			connsDiv.style.display = this.checked ? '' : 'none';
+			connsDiv.classList.toggle('tm-hidden', !this.checked);
 		});
 		var rdnsCheck = mkToggle('tm-rdns', _('rDNS'), opts.rdns, function() {
 			var o = loadOpts(); o.rdns = this.checked; saveOpts(o); updateUrlParams(o);
 		});
 		var extStatsCheck = mkToggle('tm-extended', _('Extended'), opts.extendedStats, function() {
 			var o = loadOpts(); o.extendedStats = this.checked; saveOpts(o); updateUrlParams(o);
-			extStatsDiv.style.display = this.checked ? '' : 'none';
+			extStatsDiv.classList.toggle('tm-hidden', !this.checked);
 			if (this.checked) updateExtendedStats();
 		});
 		var activityCheck = mkToggle('tm-activity', _('Activity'), opts.showActivity, function() {
 			var o = loadOpts(); o.showActivity = this.checked; saveOpts(o);
-			activityDiv.style.display = this.checked ? '' : 'none';
+			activityDiv.classList.toggle('tm-hidden', !this.checked);
 			if (this.checked) {
 				if (!activityDiv._loaded) {
 					activityDiv._loaded = true;
@@ -1830,8 +1761,8 @@ return view.extend({
 			}
 		});
 
-		var extStatsDiv = E('div', { 'style': opts.extendedStats ? '' : 'display:none' });
-		var activityDiv = E('div', { 'style': opts.showActivity ? '' : 'display:none' });
+		var extStatsDiv = E('div', { 'class': opts.extendedStats ? '' : 'tm-hidden' });
+		var activityDiv = E('div', { 'class': opts.showActivity ? '' : 'tm-hidden' });
 
 		var refreshPick = mkChipPick([
 			{v:'0',l:_('Off')},{v:'5',l:'5s'},{v:'10',l:'10s'},{v:'30',l:'30s'},{v:'60',l:'60s'}
@@ -1869,13 +1800,48 @@ return view.extend({
 			var o = loadOpts(); o.groupBy = v; saveOpts(o); runQuery();
 		});
 
-		var statusDiv = E('div', { 'style': 'display:none' });
-		var statsDiv  = E('div', { 'style': 'margin:8px 0' + (opts.showStats===false?';display:none':'') });
-		var connsDiv  = E('div', { 'style': opts.showConns===false?'display:none':'' });
+		var statusDiv = E('div', { 'class': 'tm-hidden' });
+		var statsDiv  = E('div', { 'style': 'margin:8px 0', 'class': opts.showStats === false ? 'tm-hidden' : '' });
+		var connsDiv  = E('div', { 'class': opts.showConns === false ? 'tm-hidden' : '' });
+
+		var _rdnsQueue   = [];
+		var _rdnsFlying  = 0;
+		var _rdnsMax     = 4;
+		var _rdnsDispatch = function() {
+			while (_rdnsFlying < _rdnsMax && _rdnsQueue.length > 0) {
+				var item = _rdnsQueue.shift();
+				if (item.gen !== self._queryGen) continue;
+				(function(it) {
+					_rdnsFlying++;
+					callRdns(it.dst).then(function(res) {
+						_rdnsFlying--;
+						_rdnsDispatch();
+						if (it.gen !== self._queryGen) return;
+						var host = (res && res.host) ? res.host : null;
+						self._rdnsCache[it.dst] = host || null;
+						Array.prototype.forEach.call(
+							connsDiv.querySelectorAll('td[data-dst="'+it.dst+'"]'),
+							function(cell) {
+								if (host) { cell.textContent = host; cell.style.color = ''; }
+								else { cell.innerHTML = '<span class="tm-c-faint">—</span>'; }
+							}
+						);
+					}).catch(function() {
+						_rdnsFlying--;
+						_rdnsDispatch();
+						if (it.gen !== self._queryGen) return;
+						self._rdnsCache[it.dst] = null;
+						Array.prototype.forEach.call(
+							connsDiv.querySelectorAll('td[data-dst="'+it.dst+'"]'),
+							function(cell) { cell.innerHTML = '<span class="tm-c-faint">—</span>'; }
+						);
+					});
+				})(item);
+			}
+		};
 
 		// Speed graph popup on spark cell hover
-		var graphPopup = E('div', {'style':'display:none;position:fixed;z-index:500;padding:10px;border-radius:10px;' +
-			'background:var(--tm-bg);border:1px solid var(--tm-border);box-shadow:0 8px 24px rgba(0,0,0,.25)'});
+		var graphPopup = E('div', {'class':'tm-graph-popup tm-hidden'});
 		document.body.appendChild(graphPopup);
 		var graphPopupIp = null;
 		var graphPopupTimer = null;
@@ -1888,7 +1854,7 @@ return view.extend({
 			var rect = cell.getBoundingClientRect();
 			graphPopup.style.left = Math.max(8, rect.left - 160) + 'px';
 			graphPopup.style.top = (rect.bottom + 6) + 'px';
-			graphPopup.style.display = '';
+			graphPopup.classList.remove('tm-hidden');
 			if (!graphPopupTimer) {
 				graphPopupTimer = setInterval(updateGraphPopup, 2000);
 			}
@@ -1908,15 +1874,15 @@ return view.extend({
 			if (svg) {
 				graphPopup.appendChild(svg);
 				if (lk > 0) {
-					graphPopup.appendChild(E('div', {'style':'font-size:10px;color:var(--tm-text-mute);margin-top:4px;text-align:center'},
+					graphPopup.appendChild(E('div', {'class':'tm-graph-popup__note'},
 						_('Note: speed is measured before shaper — bursts above limit are normal')));
 				}
 			} else {
-				graphPopup.appendChild(E('span', {'style':'color:var(--tm-text-mute);font-size:11px'}, _('Not enough data yet')));
+				graphPopup.appendChild(E('span', {'class':'tm-graph-popup__empty'}, _('Not enough data yet')));
 			}
 		}
 		function hideGraphPopup() {
-			graphPopup.style.display = 'none';
+			graphPopup.classList.add('tm-hidden');
 			graphPopupIp = null;
 			if (graphPopupTimer) { clearInterval(graphPopupTimer); graphPopupTimer = null; }
 		}
@@ -1935,37 +1901,33 @@ return view.extend({
 			hideGraphPopup();
 		}, true);
 
-		var BTN_BASE = 'padding:5px 14px;border-radius:3px;cursor:pointer;font-size:13px;min-width:140px;text-align:center;font-weight:500';
-		var BTN_ORANGE = BTN_BASE + ';background:#c05621;color:#fff;border:1px solid #9c4221';
-		var BTN_GREEN  = BTN_BASE + ';background:#276749;color:#fff;border:1px solid #22543d';
-
 		var inetBtn = E('button', { 'class': 'cbi-button' }, '');
-		var wifiBtn = E('button', { 'class': 'cbi-button', 'style': 'display:none' }, '');
+		var wifiBtn = E('button', { 'class': 'cbi-button tm-hidden' }, '');
 
 		function updateInetBtn(blocked) {
 			if (blocked) {
 				inetBtn.textContent = '▶️ ' + _('Unblock Internet');
-				inetBtn.style.cssText = BTN_GREEN;
+				inetBtn.className = 'tm-btn tm-btn--unblock';
 				inetBtn._action = 'unblock';
 			} else {
 				inetBtn.textContent = '⏸️ ' + _('Block Internet');
-				inetBtn.style.cssText = BTN_ORANGE;
+				inetBtn.className = 'tm-btn tm-btn--block';
 				inetBtn._action = 'block';
 			}
 		}
 		updateInetBtn(false);
 
 		function updateWifiBtn(wifiBlocked, hasMac) {
-			if (!hasMac) { wifiBtn.style.display = 'none'; return; }
-			wifiBtn.style.display = '';
+			if (!hasMac) { wifiBtn.classList.add('tm-hidden'); return; }
+			wifiBtn.classList.remove('tm-hidden');
 			wifiBtn.disabled = false;
 			if (wifiBlocked) {
 				wifiBtn.textContent = '📡✓ ' + _('Unblock WiFi');
-				wifiBtn.style.cssText = BTN_GREEN;
+				wifiBtn.className = 'tm-btn tm-btn--unblock';
 				wifiBtn._wifiAction = 'unblock';
 			} else {
 				wifiBtn.textContent = '📡❌ ' + _('Block WiFi');
-				wifiBtn.style.cssText = BTN_ORANGE;
+				wifiBtn.className = 'tm-btn tm-btn--block';
 				wifiBtn._wifiAction = 'block';
 			}
 		}
@@ -1974,28 +1936,15 @@ return view.extend({
 		var _rateSelected = '0';
 		var _modeSelected = 'shaper';
 
-		var chipStyle = 'display:inline-block;padding:4px 10px;margin:2px;border-radius:14px;font-size:12px;' +
-			'font-weight:500;cursor:pointer;transition:all .15s;border:1.5px solid var(--tm-border);' +
-			'background:var(--tm-bg);color:var(--tm-text);user-select:none';
-		var rateChipActiveStyle = 'display:inline-block;padding:4px 10px;margin:2px;border-radius:14px;font-size:12px;' +
-			'font-weight:600;cursor:pointer;transition:all .15s;border:1.5px solid var(--tm-proto);' +
-			'background:var(--tm-proto);color:#fff;user-select:none';
-		var chipOffStyle = 'display:inline-block;padding:4px 10px;margin:2px;border-radius:14px;font-size:12px;' +
-			'font-weight:500;cursor:pointer;transition:all .15s;border:1.5px solid var(--tm-border);' +
-			'background:var(--tm-bg);color:var(--tm-text-mute);user-select:none';
-		var chipOffActiveStyle = 'display:inline-block;padding:4px 10px;margin:2px;border-radius:14px;font-size:12px;' +
-			'font-weight:600;cursor:pointer;transition:all .15s;border:1.5px solid var(--tm-text-mute);' +
-			'background:var(--tm-text-mute);color:#fff;user-select:none';
-
-		var rateChipsRow = E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:0'});
+		var rateChipsRow = E('div', {'class':'tm-rate-chips-row'});
 		var rateChips = [];
 		RATE_PRESETS.filter(function(p) { return p.v !== 'custom'; }).forEach(function(preset) {
-			var chip = E('span', {'style': preset.v === '0' ? chipOffStyle : chipStyle}, preset.l);
+			var chip = E('span', {'class': preset.v === '0' ? 'tm-chip tm-chip--off' : 'tm-chip'}, preset.l);
 			chip._val = preset.v;
 			chip.addEventListener('click', function() {
 				_rateSelected = preset.v;
 				updateRateChips();
-				customRow.style.display = 'none';
+				customRow.classList.add('tm-hidden');
 				applyRate();
 			});
 			rateChips.push(chip);
@@ -2005,20 +1954,20 @@ return view.extend({
 		function updateRateChips() {
 			rateChips.forEach(function(c) {
 				if (c._val === '0') {
-					c.style.cssText = c._val === _rateSelected ? chipOffActiveStyle : chipOffStyle;
+					c.className = c._val === _rateSelected ? 'tm-chip tm-chip--off-active' : 'tm-chip tm-chip--off';
 				} else {
-					c.style.cssText = c._val === _rateSelected ? rateChipActiveStyle : chipStyle;
+					c.className = c._val === _rateSelected ? 'tm-chip tm-chip--active' : 'tm-chip';
 				}
 			});
 			if (_rateSelected === 'custom') {
-				rateChips.forEach(function(c) { c.style.cssText = c._val === '0' ? chipOffStyle : chipStyle; });
+				rateChips.forEach(function(c) { c.className = c._val === '0' ? 'tm-chip tm-chip--off' : 'tm-chip'; });
 			}
 		}
 
 		// Custom input row
 		var customInput = E('input', { 'type':'number', 'min':'1', 'step':'1', 'placeholder': _('value'),
-			'style':'width:70px;font-size:12px;padding:4px 8px;border:1.5px solid var(--tm-border);border-radius:8px;background:var(--tm-bg);color:var(--tm-text)' });
-		var customUnitBtns = E('span', {'style':'display:inline-flex;border-radius:8px;overflow:hidden;border:1.5px solid var(--tm-border)'});
+			'class': 'tm-custom-input' });
+		var customUnitBtns = E('span', {'class':'tm-custom-unit-btns'});
 		var _customUnit = 'mbit';
 		var mbitBtn = E('span', {'style':'padding:4px 8px;font-size:11px;cursor:pointer;background:var(--tm-proto);color:#fff'}, 'Mbit/s');
 		var kbitBtn = E('span', {'style':'padding:4px 8px;font-size:11px;cursor:pointer;background:var(--tm-bg);color:var(--tm-text)'}, 'kbit/s');
@@ -2034,7 +1983,7 @@ return view.extend({
 		customUnitBtns.appendChild(kbitBtn);
 
 		var customApplyBtn = E('button', {
-			'style':'padding:4px 12px;font-size:12px;border-radius:8px;border:none;background:var(--tm-proto);color:#fff;cursor:pointer;font-weight:600'
+			'class':'tm-custom-apply'
 		}, _('Apply'));
 		customApplyBtn.addEventListener('click', function() {
 			_rateSelected = 'custom';
@@ -2042,18 +1991,18 @@ return view.extend({
 			applyRate();
 		});
 
-		var customToggleBtn = E('span', {'style': chipStyle, 'data-tip': _('Enter a custom speed value')}, '✎ ' + _('Custom'));
+		var customToggleBtn = E('span', {'class': 'tm-chip', 'data-tip': _('Enter a custom speed value')}, '✎ ' + _('Custom'));
 		customToggleBtn.addEventListener('click', function() {
-			customRow.style.display = customRow.style.display === 'none' ? 'flex' : 'none';
+			customRow.classList.toggle('tm-hidden');
 		});
 		rateChipsRow.appendChild(customToggleBtn);
 
-		var customRow = E('div', {'style':'display:none;margin-top:6px;align-items:center;gap:6px'}, [
+		var customRow = E('div', {'class':'tm-custom-row tm-hidden'}, [
 			customInput, customUnitBtns, customApplyBtn
 		]);
 
 		// Mode: segmented toggle (Shaper default)
-		var modeToggle = E('div', {'style':'display:inline-flex;border-radius:8px;overflow:hidden;border:1.5px solid var(--tm-border);margin-top:6px'});
+		var modeToggle = E('div', {'class':'tm-mode-toggle'});
 		var shaperBtn = E('span', {
 			'style':'padding:5px 12px;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s',
 			'data-tip': _('Queues excess traffic (smoother streaming, lower jitter)')
@@ -2077,11 +2026,10 @@ return view.extend({
 		updateModeToggle();
 
 		var rateLimitRow = E('div', {
-			'style': 'display:none;padding:12px 14px;border-radius:8px;margin-bottom:8px;' +
-				'border:1px solid var(--tm-border);background:var(--tm-section-action)'
+			'class': 'tm-rate-panel tm-hidden'
 		}, [
-			E('div', {'style':'display:flex;align-items:center;justify-content:space-between;margin-bottom:8px'}, [
-				E('span', {'style':'font-size:12px;font-weight:600;color:var(--tm-text)'}, '⚡ ' + _('Speed Limit')),
+			E('div', {'class':'tm-rate-panel__header'}, [
+				E('span', {'class':'tm-rate-panel__title'}, '⚡ ' + _('Speed Limit')),
 				modeToggle
 			]),
 			rateChipsRow,
@@ -2146,18 +2094,18 @@ return view.extend({
 			}
 		}
 
-		var actionRow = E('div', { 'style': 'display:flex;flex-wrap:nowrap;align-items:center;gap:8px' },
+		var actionRow = E('div', { 'class': 'tm-action-row' },
 			[inetBtn, wifiBtn]);
 
 		function isAllMode() { return searchSelect.getValue() === '__all__'; }
 
 		function updateModeUI() {
 			var all = isAllMode();
-			actionRow.style.display     = all ? 'none' : '';
-			rateLimitRow.style.display  = all ? 'none' : '';
-			rdnsCheck.style.display     = all ? 'none' : '';
-			extStatsCheck.style.display = all ? 'none' : '';
-			extStatsDiv.style.display   = (!all && loadOpts().extendedStats) ? '' : 'none';
+			actionRow.classList.toggle('tm-hidden', all);
+			rateLimitRow.classList.toggle('tm-hidden', all);
+			rdnsCheck.classList.toggle('tm-hidden', all);
+			extStatsCheck.classList.toggle('tm-hidden', all);
+			extStatsDiv.classList.toggle('tm-hidden', all || !loadOpts().extendedStats);
 			if (typeof updateTableSectionMode === 'function') updateTableSectionMode();
 		}
 
@@ -2208,11 +2156,11 @@ return view.extend({
 						while (cell.firstChild) cell.removeChild(cell.firstChild);
 						if (dp > 0) {
 							cell.appendChild(E('span', {
-								'style': 'color:'+C.dropFg+';font-weight:600',
+								'class': 'tm-c-drop tm-fw-600',
 								'title': fmtBytes(db) + ' ' + _('dropped')
 							}, '🚫 ' + dp));
 						} else {
-							cell.appendChild(E('span', { 'style': 'color:'+C.textFaint }, '—'));
+							cell.appendChild(E('span', { 'class': 'tm-c-faint' }, '—'));
 						}
 					});
 				}
@@ -2240,9 +2188,9 @@ return view.extend({
 						if (!cell) return;
 						while (cell.firstChild) cell.removeChild(cell.firstChild);
 						if (bl > 0) {
-							cell.appendChild(E('span', { 'style': 'color:'+C.shapeFg+';font-weight:600', 'title': _('Bytes queued in tc') }, fmtBytes(bl)));
+							cell.appendChild(E('span', { 'class': 'tm-c-shape tm-fw-600', 'title': _('Bytes queued in tc') }, fmtBytes(bl)));
 						} else {
-							cell.appendChild(E('span', { 'style': 'color:'+C.textFaint }, '—'));
+							cell.appendChild(E('span', { 'class': 'tm-c-faint' }, '—'));
 						}
 					});
 				}
@@ -2342,6 +2290,7 @@ return view.extend({
 			var o = loadOpts();
 			var proto = (o.proto && o.proto !== 'all') ? o.proto : '';
 			self._queryGen++;
+			_rdnsQueue.length = 0;
 			var gen = self._queryGen;
 
 			setStatus(statusDiv, 'loading', _('Running…'));
@@ -2353,8 +2302,9 @@ return view.extend({
 				}
 
 				if (opts.showStats !== false) {
-					var parts = [_('Connections') + ': <b>'+data.total+'</b>'];
-					if (data.total > 0) {
+					var connCount = (data.protocols.tcp||0) + (data.protocols.udp||0) + (data.protocols.other||0);
+					var parts = [_('Connections') + ': <b>'+connCount+'</b>'];
+					if (connCount > 0) {
 						parts.push('TCP: <b>'+(data.protocols.tcp||0)+'</b>');
 						parts.push('UDP: <b>'+(data.protocols.udp||0)+'</b>');
 						if (data.tcp_states) {
@@ -2364,23 +2314,21 @@ return view.extend({
 						}
 					}
 					if ((data.shape_kbit || 0) > 0) {
-						parts.push(_('Shaped') + ': <b style="color:'+C.shapeFg+'">🌊 '+fmtRate(data.shape_kbit)+'</b>');
+						parts.push(_('Shaped') + ': <b style="color:var(--tm-shape-fg)">🌊 '+fmtRate(data.shape_kbit)+'</b>');
 						var sm = self._shapeMap[data.ip || searchSelect.getValue()] || {};
-						if ((sm.backlog||0) > 0) parts.push(_('Queued') + ': <b style="color:'+C.shapeFg+'">'+fmtBytes(sm.backlog)+'</b>');
+						if ((sm.backlog||0) > 0) parts.push(_('Queued') + ': <b style="color:var(--tm-shape-fg)">'+fmtBytes(sm.backlog)+'</b>');
 						if ((sm.bytes||0) > 0) parts.push(_('Passed') + ': <b>'+fmtBytes(sm.bytes)+'</b>');
 					} else if ((data.rate_limit_kbit || 0) > 0) {
-						parts.push(_('Speed limit') + ': <b style="color:'+C.rateFg+'">⚡ '+fmtRate(data.rate_limit_kbit)+'</b>');
+						parts.push(_('Speed limit') + ': <b style="color:var(--tm-rate-fg)">⚡ '+fmtRate(data.rate_limit_kbit)+'</b>');
 						var dm = self._dropMap[data.ip || searchSelect.getValue()] || {};
 						if ((dm.packets||0) > 0) {
-							parts.push(_('Dropped') + ': <b style="color:'+C.dropFg+'">🚫 '+dm.packets+' pkts / '+fmtBytes(dm.bytes||0)+'</b>');
+							parts.push(_('Dropped') + ': <b style="color:var(--tm-drop-fg)">🚫 '+dm.packets+' pkts / '+fmtBytes(dm.bytes||0)+'</b>');
 						}
 					}
 					var wifiPart = data.wifi_blocked
-						? ' &nbsp;|&nbsp; <b style="color:'+C.stateWait+'">📵 ' + _('WiFi blocked') + '</b> ('+escHtml(data.mac||'') + ')'
-						: (data.mac ? ' &nbsp;|&nbsp; <span style="color:'+C.textFaint+'">MAC: '+escHtml(data.mac)+'</span>' : '');
-					statsDiv.style.cssText = 'padding:8px 14px;border-radius:4px;font-size:13px;margin-bottom:8px;' +
-						(data.blocked ? 'background:'+C.blockedBg+';border:1px solid '+C.blockedBorder+';color:'+C.blockedFg
-						             : 'background:'+C.infoBg   +';border:1px solid '+C.infoBorder+';color:'+C.infoFg);
+						? ' &nbsp;|&nbsp; <b style="color:var(--tm-state-wait)">📵 ' + _('WiFi blocked') + '</b> ('+escHtml(data.mac||'') + ')'
+						: (data.mac ? ' &nbsp;|&nbsp; <span style="color:var(--tm-text-faint)">MAC: '+escHtml(data.mac)+'</span>' : '');
+					statsDiv.className = 'tm-stats-bar ' + (data.blocked ? 'tm-stats-bar--blocked' : 'tm-stats-bar--info');
 					statsDiv.innerHTML = (data.blocked
 						? '<b>⛔ ' + _('BLOCKED') + '</b> — '+data.block_packets+' pkts, '+fmtBytes(data.block_bytes)+' ' + _('dropped') + ' &nbsp;|&nbsp; '
 						: '') + parts.join(' &nbsp;|&nbsp; ') + wifiPart;
@@ -2398,20 +2346,20 @@ return view.extend({
 				var matched = RATE_PRESETS.some(function(p) { return p.v === curRateStr; });
 				if (matched) {
 					ratePick.setValue(curRateStr);
-					customRow.style.display = 'none';
+					customRow.classList.add('tm-hidden');
 				} else if (curRate > 0) {
 					ratePick.setValue('custom');
 					customInput.value = curRate;
 					_customUnit = 'kbit'; updateUnitBtns();
-					customRow.style.display = 'flex';
+					customRow.classList.remove('tm-hidden');
 				} else {
 					ratePick.setValue('0');
-					customRow.style.display = 'none';
+					customRow.classList.add('tm-hidden');
 				}
 
 				while (connsDiv.firstChild) connsDiv.removeChild(connsDiv.firstChild);
 				if (!data.connections || data.connections.length === 0) {
-					connsDiv.appendChild(E('p', {'style':'color:'+C.textMute+';padding:12px 0'}, _('No active connections.')));
+					connsDiv.appendChild(E('p', {'style':'color:var(--tm-text-mute);padding:12px 0'}, _('No active connections.')));
 				} else {
 					var groupBy = o.groupBy || 'none';
 					var tbl;
@@ -2431,7 +2379,7 @@ return view.extend({
 							});
 						});
 						connsDiv.appendChild(E('div',{'style':'overflow-x:auto'},[tbl]));
-						connsDiv.appendChild(E('p',{'style':'color:'+C.textFaint+';font-size:11px;margin-top:6px'},
+						connsDiv.appendChild(E('p',{'style':'color:var(--tm-text-faint);font-size:11px;margin-top:6px'},
 							groups.length + ' ' + _('groups from') + ' ' + data.connections.length + ' ' + _('connections') + '. ' + _('Click header to sort.')));
 					} else {
 						tbl = buildTable(data.connections, self._sortCol, self._sortDir, o.rdns, self._connHiddenCols);
@@ -2448,7 +2396,7 @@ return view.extend({
 							});
 						});
 						connsDiv.appendChild(E('div',{'style':'overflow-x:auto'},[tbl]));
-						connsDiv.appendChild(E('p',{'style':'color:'+C.textFaint+';font-size:11px;margin-top:6px'},
+						connsDiv.appendChild(E('p',{'style':'color:var(--tm-text-faint);font-size:11px;margin-top:6px'},
 							data.connections.length + ' ' + _('connections') + '. ' + _('Click header to sort.')));
 
 						if (o.rdns) {
@@ -2464,35 +2412,14 @@ return view.extend({
 									Array.prototype.forEach.call(
 										connsDiv.querySelectorAll('td[data-dst="'+dst+'"]'),
 										function(cell) {
-											if (cached) { cell.textContent = cached; cell.style.color = C.hostname; }
-											else { cell.innerHTML = '<span style="color:'+C.textFaint+'">—</span>'; }
+											if (cached) { cell.textContent = cached; cell.style.color = ''; }
+											else { cell.innerHTML = '<span class="tm-c-faint">—</span>'; }
 										}
 									);
 									return;
 								}
-								callRdns(dst).then(function(res) {
-									if (gen !== self._queryGen) return;
-									var host = (res && res.host) ? res.host : null;
-									self._rdnsCache[dst] = host || null;
-									Array.prototype.forEach.call(
-										connsDiv.querySelectorAll('td[data-dst="'+dst+'"]'),
-										function(cell) {
-											if (host) {
-												cell.textContent = host;
-												cell.style.color = C.hostname;
-											} else {
-												cell.innerHTML = '<span style="color:'+C.textFaint+'">—</span>';
-											}
-										}
-									);
-								}).catch(function() {
-									if (gen !== self._queryGen) return;
-									self._rdnsCache[dst] = null;
-									Array.prototype.forEach.call(
-										connsDiv.querySelectorAll('td[data-dst="'+dst+'"]'),
-										function(cell) { cell.innerHTML = '<span style="color:'+C.textFaint+'">—</span>'; }
-									);
-								});
+								_rdnsQueue.push({dst: dst, gen: gen});
+								_rdnsDispatch();
 							});
 						}
 					}
@@ -2531,7 +2458,7 @@ return view.extend({
 			var lnk = 'cursor:pointer;text-decoration:underline;text-decoration-style:dashed';
 			var activeFilter = self._tableFilter;
 
-			statsDiv.style.cssText = 'padding:8px 14px;border-radius:4px;font-size:13px;margin-bottom:8px;background:'+C.infoBg+';border:1px solid '+C.infoBorder+';color:'+C.infoFg;
+			statsDiv.className = 'tm-stats-bar tm-stats-bar--info';
 			while (statsDiv.firstChild) statsDiv.removeChild(statsDiv.firstChild);
 
 			function mkFilterVal(filter, color, text) {
@@ -2542,16 +2469,16 @@ return view.extend({
 
 			var parts = [];
 			parts.push(E('span', {}, [document.createTextNode(_('Active') + ': '), E('b', {}, String(rows.length))]));
-			parts.push(E('span', {}, [document.createTextNode(_('Blocked') + ': '), mkFilterVal('blocked', C.blockedFg, String(blocked))]));
-			parts.push(E('span', {}, [document.createTextNode(_('WiFi') + ': '), mkFilterVal('wifi_blocked', C.stateWait, String(wifiBlk))]));
-			if (limited > 0) parts.push(E('span', {}, [document.createTextNode(_('Limited') + ': '), mkFilterVal('limited', C.rateFg, '⚡' + limited)]));
-			if (shaped > 0) parts.push(E('span', {}, [document.createTextNode(_('Shaped') + ': '), mkFilterVal('shaped', C.shapeFg, '🌊' + shaped)]));
+			parts.push(E('span', {}, [document.createTextNode(_('Blocked') + ': '), mkFilterVal('blocked', 'var(--tm-blocked-fg)', String(blocked))]));
+			parts.push(E('span', {}, [document.createTextNode(_('WiFi') + ': '), mkFilterVal('wifi_blocked', 'var(--tm-state-wait)', String(wifiBlk))]));
+			if (limited > 0) parts.push(E('span', {}, [document.createTextNode(_('Limited') + ': '), mkFilterVal('limited', 'var(--tm-rate-fg)', '⚡' + limited)]));
+			if (shaped > 0) parts.push(E('span', {}, [document.createTextNode(_('Shaped') + ': '), mkFilterVal('shaped', 'var(--tm-shape-fg)', '🌊' + shaped)]));
 			if (totalDropPkts > 0) parts.push(E('span', {}, [
-				document.createTextNode(_('Dropped') + ': '), E('b', {'style':'color:'+C.dropFg}, '🚫' + totalDropPkts)
+				document.createTextNode(_('Dropped') + ': '), E('b', {'style':'color:var(--tm-drop-fg)'}, '🚫' + totalDropPkts)
 			]));
 
 			parts.forEach(function(el, i) {
-				if (i > 0) statsDiv.appendChild(E('span', {'style':'margin:0 6px;color:'+C.textFaint}, '|'));
+				if (i > 0) statsDiv.appendChild(E('span', {'style':'margin:0 6px;color:var(--tm-text-faint)'}, '|'));
 				statsDiv.appendChild(el);
 				var filterEl = el.querySelector('[data-filter]');
 				if (filterEl) {
@@ -2560,14 +2487,14 @@ return view.extend({
 			});
 
 			if (activeFilter) {
-				statsDiv.appendChild(E('span', {'style':'margin-left:10px;cursor:pointer;color:'+C.textMute+';font-size:11px'}, '✕ ' + _('clear filter')));
+				statsDiv.appendChild(E('span', {'style':'margin-left:10px;cursor:pointer;color:var(--tm-text-mute);font-size:11px'}, '✕ ' + _('clear filter')));
 				statsDiv.lastChild.addEventListener('click', function() { self._tableFilter = null; renderSummary(rows); });
 			}
 
 			var filtered = applyTableFilter(rows);
 			while (connsDiv.firstChild) connsDiv.removeChild(connsDiv.firstChild);
 			if (filtered.length === 0) {
-				connsDiv.appendChild(E('p',{'style':'color:'+C.textMute+';padding:12px 0'}, _('No devices match filter.')));
+				connsDiv.appendChild(E('p',{'style':'color:var(--tm-text-mute);padding:12px 0'}, _('No devices match filter.')));
 			} else {
 				var tbl = buildSummaryTable(
 					filtered,
@@ -2597,7 +2524,7 @@ return view.extend({
 					self._hiddenCols
 				);
 				connsDiv.appendChild(E('div',{'style':'overflow-x:auto'},[tbl]));
-				connsDiv.appendChild(E('p',{'style':'color:'+C.textFaint+';font-size:11px;margin-top:6px'},
+				connsDiv.appendChild(E('p',{'style':'color:var(--tm-text-faint);font-size:11px;margin-top:6px'},
 					_('Click a row to inspect that device. Download speed updates every 2 seconds.')));
 			}
 		}
@@ -2607,6 +2534,7 @@ return view.extend({
 
 			callTrafficctl().then(function(rows) {
 				if (!Array.isArray(rows)) rows = [];
+				searchSelect.updateDevices(rows);
 				renderSummary(rows);
 				setStatus(statusDiv, 'ok', '✓ ' + _('Done'));
 				self._startBytesPoll();
@@ -2714,19 +2642,15 @@ return view.extend({
 			{key:'_throttle_kbit', label:_('Speed Limit')},
 			{key:'_drop_packets', label:_('Drops')}, {key:'_backlog', label:_('Queue')}
 		];
-		var chipBase = 'display:inline-block;padding:3px 10px;border-radius:12px;font-size:11px;cursor:pointer;user-select:none;margin:2px;transition:all .15s;font-weight:500';
-		var chipOn = chipBase + ';background:var(--tm-proto);color:#fff;border:1px solid var(--tm-proto)';
-		var chipOff = chipBase + ';background:var(--tm-bg);color:var(--tm-text-mute);border:1px solid var(--tm-border)';
-
-		var colChipsContainer = E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:0'});
+		var colChipsContainer = E('div', {'class':'tm-chips-wrap'});
 		colChipDefs.forEach(function(ct) {
 			var chip = E('span', {
-				'style': savedHidden[ct.key] ? chipOff : chipOn,
+				'class': savedHidden[ct.key] ? 'tm-col-chip tm-col-chip--off' : 'tm-col-chip tm-col-chip--on',
 				'data-tip': _('Click to toggle column visibility')
 			}, ct.label);
 			chip.addEventListener('click', function() {
-				if (self._hiddenCols[ct.key]) { delete self._hiddenCols[ct.key]; chip.style.cssText = chipOn; }
-				else { self._hiddenCols[ct.key] = true; chip.style.cssText = chipOff; }
+				if (self._hiddenCols[ct.key]) { delete self._hiddenCols[ct.key]; chip.className = 'tm-col-chip tm-col-chip--on'; }
+				else { self._hiddenCols[ct.key] = true; chip.className = 'tm-col-chip tm-col-chip--off'; }
 				var o = loadOpts(); o.hiddenCols = self._hiddenCols; saveOpts(o);
 				if (isAllMode()) runAll();
 			});
@@ -2742,48 +2666,45 @@ return view.extend({
 		];
 		var savedConnHidden = opts.connHiddenCols || {};
 		self._connHiddenCols = savedConnHidden;
-		var connColChipsContainer = E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:0'});
+		var connColChipsContainer = E('div', {'class':'tm-chips-wrap'});
 		connColDefs.forEach(function(ct) {
 			var chip = E('span', {
-				'style': savedConnHidden[ct.key] ? chipOff : chipOn,
+				'class': savedConnHidden[ct.key] ? 'tm-col-chip tm-col-chip--off' : 'tm-col-chip tm-col-chip--on',
 				'data-tip': _('Click to toggle column visibility')
 			}, ct.label);
 			chip.addEventListener('click', function() {
-				if (self._connHiddenCols[ct.key]) { delete self._connHiddenCols[ct.key]; chip.style.cssText = chipOn; }
-				else { self._connHiddenCols[ct.key] = true; chip.style.cssText = chipOff; }
+				if (self._connHiddenCols[ct.key]) { delete self._connHiddenCols[ct.key]; chip.className = 'tm-col-chip tm-col-chip--on'; }
+				else { self._connHiddenCols[ct.key] = true; chip.className = 'tm-col-chip tm-col-chip--off'; }
 				var o = loadOpts(); o.connHiddenCols = self._connHiddenCols; saveOpts(o);
 				if (!isAllMode()) runQuery();
 			});
 			connColChipsContainer.appendChild(chip);
 		});
 
-		var ob = 'border:1px solid '+C.optsBorder+';background:'+C.optsBg;
-		var sep = function() { return E('span',{'style':'border-left:1px solid '+C.border+';height:18px;margin:0 4px'}); };
-		var sectionLabel = function(t) { return E('div', {'style':'font-size:12px;font-weight:600;color:var(--tm-text-mute);margin-bottom:4px;margin-top:8px'}, t); };
+		var sep = function() { return E('span', {'class':'tm-sep'}); };
+		var sectionLabel = function(t) { return E('div', {'class':'tm-section-label'}, t); };
 
-		var settingsBody = E('div', {'style':'padding:0 14px 10px;display:none'});
+		var settingsBody = E('div', {'class':'tm-settings-body'});
 		var settingsCollapsed = true;
-		var settingsToggle = E('div', {
-			'style': 'padding:8px 14px;cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--tm-text-mute)'
-		}, [E('span', {'class':'tm-settings-arrow'}, '▸'), E('span', {}, _('Settings'))]);
+		var settingsToggle = E('div', {'class':'tm-settings-toggle'}, [E('span', {'class':'tm-settings-arrow'}, '▸'), E('span', {}, _('Settings'))]);
 
 		settingsToggle.addEventListener('click', function() {
 			settingsCollapsed = !settingsCollapsed;
-			settingsBody.style.display = settingsCollapsed ? 'none' : '';
+			settingsBody.classList.toggle('tm-hidden', settingsCollapsed);
 			settingsToggle.firstChild.textContent = settingsCollapsed ? '▸' : '▾';
 		});
 
 		// ── Collapsible subsection helper ──────────────────────────────────
 		function mkCollapsible(title, content, startOpen) {
-			var body = E('div', {'style': startOpen ? '' : 'display:none', 'class': 'tm-collapsible-body'});
+			var body = E('div', {'class': 'tm-collapsible-body' + (startOpen ? '' : ' tm-hidden')});
 			if (content) body.appendChild(content);
-			var arrow = E('span', {'style':'font-size:11px;color:'+C.textMute}, startOpen ? ' ▾' : ' ▸');
+			var arrow = E('span', {'class':'tm-c-mute', 'style':'font-size:11px'}, startOpen ? ' ▾' : ' ▸');
 			var label = sectionLabel(title);
 			label.style.cursor = 'pointer';
 			label.appendChild(arrow);
 			label.addEventListener('click', function() {
-				var open = body.style.display !== 'none';
-				body.style.display = open ? 'none' : '';
+				var open = !body.classList.contains('tm-hidden');
+				body.classList.toggle('tm-hidden');
 				arrow.textContent = open ? ' ▸' : ' ▾';
 			});
 			return {label: label, body: body, el: E('div', {}, [label, body])};
@@ -2793,14 +2714,14 @@ return view.extend({
 		var tgSection = mkCollapsible(_('Telegram Bot'), null, false);
 		var tgLoaded = false;
 		tgSection.label.addEventListener('click', function() {
-			if (!tgLoaded && tgSection.body.style.display !== 'none') {
+			if (!tgLoaded && !tgSection.body.classList.contains('tm-hidden')) {
 				tgLoaded = true;
 				loadTelegramUI(tgSection.body);
 			}
 		});
 
 		function loadTelegramUI(container) {
-			var statusSpan = E('span', {'style':'font-size:12px;margin-left:8px;color:'+C.textMute}, _('Loading…'));
+			var statusSpan = E('span', {'style':'font-size:12px;margin-left:8px;color:var(--tm-text-mute)'}, _('Loading…'));
 			container.appendChild(statusSpan);
 
 			callTelegramGet().then(function(cfg) {
@@ -2893,9 +2814,9 @@ return view.extend({
 				testBtn.addEventListener('click', function() {
 					testBtn.disabled = true;
 					testResult.textContent = _('Sending…');
-					testResult.style.color = C.textMute;
+					testResult.style.color = 'var(--tm-text-mute)';
 					var tk = tokenInput.value || '***';
-					callTelegramTest(tk, chatInput.value).then(function(res) {
+					callTelegramTest(tk, chatInput.value, templateArea.value || '').then(function(res) {
 						testResult.textContent = (res && res.ok) ? '✓ ' + (res.msg || 'OK') : '✗ ' + (res && res.msg || 'error');
 						testResult.style.color = (res && res.ok) ? 'var(--tm-state-ok)' : 'var(--tm-blocked-fg)';
 					}).catch(function(e) {
@@ -2913,11 +2834,12 @@ return view.extend({
 				// ── Mode segmented control ──
 				var controlMode = cfg.control_enabled !== false;
 				var controlSection = E('div', {});
+				var notifySection = E('div', {});
 				function setMode(ctrl) {
 					controlMode = ctrl;
 					segControl.className = 'tg-segmented__item' + (ctrl ? ' tg-segmented__item--active' : '');
 					segNotify.className = 'tg-segmented__item' + (!ctrl ? ' tg-segmented__item--active' : '');
-					controlSection.style.display = ctrl ? '' : 'none';
+					controlSection.classList.toggle('tm-hidden', !ctrl);
 					doSave();
 				}
 
@@ -2936,10 +2858,10 @@ return view.extend({
 				section.appendChild(E('div', {'class':'tg-row'}, [segmented]));
 
 				// ── Notifications ──
-				section.appendChild(E('div', {'class':'tg-divider'}, _('Notifications')));
+				notifySection.appendChild(E('div', {'class':'tg-divider'}, _('Notifications')));
 				var notifyNew = mkToggle('tm-tg-new', _('New devices'), cfg.notify_new_device, doSave);
 				var notifyKnown = mkToggle('tm-tg-known', _('Known devices'), cfg.notify_known_device, doSave);
-				section.appendChild(E('div', {'class':'tg-row'}, [notifyNew, notifyKnown]));
+				notifySection.appendChild(E('div', {'class':'tg-row'}, [notifyNew, notifyKnown]));
 
 				// ── Custom template ──
 				var templateArea = E('textarea', {
@@ -3006,7 +2928,7 @@ return view.extend({
 				var templateToggle = E('span', {
 					'style': 'font-size:12px;cursor:pointer;color:var(--tm-text-mute);user-select:none'
 				}, '▸ ' + _('Customize message'));
-				var templateBody = E('div', {'style':'display:none;margin-top:6px'});
+				var templateBody = E('div', {'class':'tm-hidden','style':'margin-top:6px'});
 				templateBody.appendChild(E('div', {'style':'display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap'}, [
 					E('div', {'style':'flex:1;min-width:200px'}, [templateArea]),
 					varRef
@@ -3016,11 +2938,11 @@ return view.extend({
 					previewBubble
 				]));
 				templateToggle.addEventListener('click', function() {
-					var show = templateBody.style.display === 'none';
-					templateBody.style.display = show ? '' : 'none';
+					var show = templateBody.classList.contains('tm-hidden');
+					templateBody.classList.toggle('tm-hidden');
 					templateToggle.textContent = (show ? '▾ ' : '▸ ') + _('Customize message');
 				});
-				section.appendChild(E('div', {'style':'margin-top:8px'}, [templateToggle, templateBody]));
+				notifySection.appendChild(E('div', {'style':'margin-top:8px'}, [templateToggle, templateBody]));
 
 				// ── Control section (conditionally visible) ──
 				controlSection.appendChild(E('div', {'class':'tg-divider'}, _('Control')));
@@ -3093,8 +3015,9 @@ return view.extend({
 						_('Flow: /devices → select device → inline keyboard with enabled actions above'))
 				]));
 
-				if (!controlMode) controlSection.style.display = 'none';
+				if (!controlMode) controlSection.classList.add('tm-hidden');
 				section.appendChild(controlSection);
+				section.appendChild(notifySection);
 				setupDone = true;
 			}).catch(function(e) {
 				statusSpan.textContent = '✗ ' + e.message;
@@ -3105,7 +3028,7 @@ return view.extend({
 		// ── Assemble settings sections ─────────────────────────────────────
 		settingsBody.appendChild(tgSection.el);
 
-		var displaySection = mkCollapsible(_('Display'), E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding-top:4px'}, [
+		var displaySection = mkCollapsible(_('Display'), E('div', {'class':'tm-settings-section-row'}, [
 			showStats, showConns, extStatsCheck, rdnsCheck, activityCheck,
 			sep(),
 			E('span', {'data-tip':_('Auto-refresh interval for summary table')}, [mkLabel(_('Refresh')+':'), refreshPick.el])
@@ -3116,19 +3039,18 @@ return view.extend({
 		var loggingSection = mkCollapsible(_('Logging & Persistence'), null, false);
 		var loggingLoaded = false;
 		loggingSection.label.addEventListener('click', function() {
-			if (!loggingLoaded && loggingSection.body.style.display !== 'none') {
+			if (!loggingLoaded && !loggingSection.body.classList.contains('tm-hidden')) {
 				loggingLoaded = true;
 				loadLoggingUI(loggingSection.body);
 			}
 		});
 
 		function loadLoggingUI(container) {
-			var statusSpan = E('span', {'style':'font-size:12px;color:'+C.textMute}, _('Loading…'));
+			var statusSpan = E('span', {'style':'font-size:12px;color:var(--tm-text-mute)'}, _('Loading…'));
 			container.appendChild(statusSpan);
 
 			callLoggingGet().then(function(cfg) {
 				while (container.firstChild) container.removeChild(container.firstChild);
-				var gap = 'display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding-top:4px';
 
 				var logStatus = E('span', {'class':'tg-save-status'});
 				var logTimer = null;
@@ -3167,10 +3089,10 @@ return view.extend({
 				var logTelegram = mkToggle('tm-log-telegram', _('Telegram'), cfg.log_telegram, doLogSave);
 				var logConfig = mkToggle('tm-log-config', _('Config'), cfg.log_config, doLogSave);
 
-				container.appendChild(E('div', {'style':gap}, [logEnabled, logSyslog, persistRules, logStatus]));
+				container.appendChild(E('div', {'class':'tm-log-row'}, [logEnabled, logSyslog, persistRules, logStatus]));
 				container.appendChild(E('div', {'style':'margin-top:6px'}, [
-					E('div', {'style':'font-size:11px;color:'+C.textMute+';margin-bottom:4px'}, _('Log categories')),
-					E('div', {'style':gap}, [logBlocks, logRatelimits, logShapes, logTelegram, logConfig])
+					E('div', {'style':'font-size:11px;color:var(--tm-text-mute);margin-bottom:4px'}, _('Log categories')),
+					E('div', {'class':'tm-log-row'}, [logBlocks, logRatelimits, logShapes, logTelegram, logConfig])
 				]));
 			}).catch(function(e) {
 				statusSpan.textContent = '✗ ' + e.message;
@@ -3179,13 +3101,13 @@ return view.extend({
 		}
 		settingsBody.appendChild(loggingSection.el);
 
-		var connFiltersRow = E('div', {'style':'display:none;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:6px'}, [
+		var connFiltersRow = E('div', {'class':'tm-conn-filters-row'}, [
 			E('span', {'data-tip':_('Filter connections by protocol')}, [mkLabel(_('Proto')+':'), protoPick.el]),
 			sep(),
 			E('span', {'data-tip':_('Group connections table rows')}, [mkLabel(_('Group')+':'), groupPick.el])
 		]);
-		var tableSection = mkCollapsible(_('Table & Speed'), E('div', {'style':'padding-top:4px'}, [
-			E('div', {'style':'display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:8px'}, [
+		var tableSection = mkCollapsible(_('Table & Speed'), E('div', {'class':'tm-table-speed-inner'}, [
+			E('div', {'class':'tm-table-speed-row'}, [
 				E('span', {'data-tip':_('Polling interval for per-device speed graph')}, [mkLabel(_('Poll')+':'), pollIntervalPick.el]),
 				sep(),
 				E('span', {'data-tip':_('Time window for speed averaging')}, [mkLabel(_('Window')+':'), avgWindowPick.el]),
@@ -3196,40 +3118,34 @@ return view.extend({
 			colChipsContainer,
 			connColChipsContainer,
 			connFiltersRow
-		]), true);
+		]), false);
 		settingsBody.appendChild(tableSection.el);
 
 		function updateTableSectionMode() {
 			var all = isAllMode();
-			colChipsContainer.style.display = all ? 'flex' : 'none';
-			connColChipsContainer.style.display = all ? 'none' : 'flex';
-			connFiltersRow.style.display = all ? 'none' : 'flex';
+			colChipsContainer.classList.toggle('tm-hidden', !all);
+			connColChipsContainer.classList.toggle('tm-hidden', all);
+			connFiltersRow.classList.toggle('tm-hidden', all);
 		}
 		updateTableSectionMode();
 
-		var settingsPanel = E('div', {'style':'border-radius:8px;margin-bottom:10px;background:var(--tm-section-action);border:1px solid var(--tm-border)'}, [
-			settingsToggle, settingsBody
-		]);
+		var settingsPanel = E('div', {'class':'tm-settings-panel'}, [settingsToggle, settingsBody]);
 
 		function loadActivityPanel(container) {
-			container.style.cssText = 'margin:8px 0;padding:8px 14px;border-radius:4px;border:1px solid var(--tm-border);background:var(--tm-bg-subtle)';
-			var statusSpan = E('span', {'style':'font-size:12px;color:'+C.textMute}, _('Loading…'));
+			container.className = 'tm-activity-panel';
+			var statusSpan = E('span', {'style':'font-size:12px;color:var(--tm-text-mute)'}, _('Loading…'));
 			container.appendChild(statusSpan);
 
 			callActivityLog(100).then(function(res) {
 				while (container.firstChild) container.removeChild(container.firstChild);
 				if (!res || !res.lines || !res.lines.length) {
-					container.appendChild(E('div', {'style':'font-size:12px;color:'+C.textMute}, _('No activity recorded yet.')));
+					container.appendChild(E('div', {'style':'font-size:12px;color:var(--tm-text-mute)'}, _('No activity recorded yet.')));
 					return;
 				}
-				var logArea = E('div', {
-					'style': 'max-height:250px;overflow-y:auto;font-family:monospace;font-size:11px;' +
-						'background:var(--tm-bg);border:1px solid var(--tm-border);border-radius:4px;padding:6px;' +
-						'white-space:pre-wrap;word-break:break-all;color:var(--tm-text)'
-				});
+				var logArea = E('div', {'class':'tm-log-area'});
 				var lines = res.lines.slice().reverse();
 				lines.forEach(function(line) {
-					logArea.appendChild(E('div', {'style':'padding:1px 0;border-bottom:1px solid var(--tm-border)'}, line));
+					logArea.appendChild(E('div', {'class':'tm-log-line'}, line));
 				});
 				var refreshBtn = E('button', {
 					'class': 'cbi-button',
@@ -3260,9 +3176,124 @@ return view.extend({
 			}
 		});
 
-		return E('div', {'class':'cbi-map', 'style':'color:'+C.hostname}, [
-			E('h2', {'style':'color:'+C.hostname}, _('Traffic Control')),
+		var docsUrl = 'https://openwrt.org/docs/guide-user/perf_and_log/flow_offloading';
+
+		var mkOffloadBanner = function(mode) {
+			if (!mode || mode === 'none') return null;
+
+			var bg, border, icon, body;
+			var para = function(text) { return E('p', {'style': 'margin:6px 0'}, text); };
+			var bold = function(text) { return E('strong', {}, text); };
+			var link = function(url, text) {
+				return E('a', {'href': url, 'target': '_blank',
+					'style': 'color:inherit;text-decoration:underline'}, text);
+			};
+
+			var openwrtUrl = 'https://openwrt.org/docs/guide-user/perf_and_log/flow_offloading';
+			var kernelUrl  = 'https://docs.kernel.org/networking/nf_flowtable.html#hardware-offload';
+			var nftUrl     = 'https://wiki.nftables.org/wiki-nftables/index.php/Flowtables';
+
+			var sep = E('span', {'style': 'opacity:0.35;margin:0 6px'}, '|');
+			var docLinks = para([
+				link(openwrtUrl, 'OpenWrt: Flow offloading ↗'), sep.cloneNode(true),
+				link(kernelUrl,  'Linux kernel: nf_flowtable ↗'), sep.cloneNode(true),
+				link(nftUrl,     'nftables: Flowtables ↗')
+			]);
+
+			if (mode === 'hardware-counter') {
+				bg     = 'rgba(41,128,185,0.10)';
+				border = '#2980b9';
+				icon   = '✔️';
+				body   = E('div', {}, [
+					para(bold(_('Hardware flow offloading is active — all features work.'))),
+					para([_('The router offloads packet forwarding to the hardware (NIC/SoC) for higher throughput. ' +
+						  'The flowtable '),
+						E('code', {}, 'counter'),
+						_(' flag (Linux 5.7+ / OpenWrt 22.03+ with fw4) keeps conntrack byte counts ' +
+						  'in sync — monitoring, shaping, and rate limiting all work normally.')]),
+					docLinks,
+				]);
+			} else if (mode === 'hardware') {
+				bg     = 'rgba(211,84,0,0.10)';
+				border = '#d35400';
+				icon   = '⚠️';
+				body   = E('div', {}, [
+					para(bold(_('Hardware flow offloading is active.'))),
+					para(_('The router offloads established connections from the CPU to the hardware (NIC/SoC), ' +
+						  'achieving 2–3× higher throughput and lower CPU usage.')),
+					para(_('In this mode the kernel\'s conntrack, firewall, and tc are bypassed for offloaded flows:')),
+					E('ul', {'class': 'tm-offload-ul'}, [
+						E('li', {}, _('Speed monitoring — conntrack byte counters are not updated')),
+						E('li', {}, _('Traffic shaping (tc/HTB) — bypassed for offloaded flows')),
+						E('li', {}, _('Rate limiting — applies only to new connections')),
+					]),
+					para([_('WiFi blocking and internet blocking of new connections still work. '),
+						_('Shaped devices are usually not offloaded (kernel detects the HTB qdisc).')]),
+					para(bold(_('How to get full functionality without disabling offload:'))),
+					para([_('The flowtable '),
+						E('code', {}, 'counter'),
+						_(' flag (Linux 5.7+, set automatically by fw4/nftables) periodically syncs ' +
+						  'hardware byte counts back to conntrack — trafficctl detects this and all features work normally.')]),
+					para(_('If your current firmware uses fw3 (iptables) or ships a kernel older than 5.7, ' +
+						  'a router with modern OpenWrt and fw4 support will have this working out of the box.')),
+					docLinks,
+				]);
+			} else {
+				bg     = 'rgba(243,156,18,0.10)';
+				border = '#f39c12';
+				icon   = 'ℹ️';
+				body   = E('div', {}, [
+					para(bold(_('Software flow offloading is active.'))),
+					para(_('The kernel fast-paths established connections through a flowtable, ' +
+						  'bypassing conntrack byte updates for higher throughput.')),
+					para(_('Speed is measured via nftables counters installed at a higher priority ' +
+						  '(before the flowtable), so graphs are accurate.')),
+					para(_('Traffic shaping and blocking are not affected.')),
+					docLinks,
+				]);
+			}
+
+			var banner = E('div', {
+				'class': 'tm-offload-banner',
+				'style': 'border:1px solid ' + border + ';background:' + bg
+			}, [
+				E('div', {'class': 'tm-offload-banner__row'}, [
+					E('span', {'class': 'tm-offload-banner__icon'}, icon),
+					E('div', {'class': 'tm-offload-banner__body'}, body),
+					E('span', {
+						'class': 'tm-offload-banner__close',
+						'title': _('Dismiss')
+					}, '×')
+				])
+			]);
+			banner.firstChild.lastChild.addEventListener('click', function() {
+				banner.classList.add('tm-hidden');
+			});
+			return banner;
+		};
+
+		var offloadBanner = E('div', {'id': 'tm-offload-banner', 'class': 'tm-hidden'});
+
+		// Debug: add ?offload_debug=1 to URL to preview all banner types at once
+		if (window.location.search.indexOf('offload_debug') !== -1) {
+			['hardware-counter', 'software', 'hardware'].forEach(function(mode) {
+				var b = mkOffloadBanner(mode);
+				if (b) offloadBanner.appendChild(b);
+			});
+			offloadBanner.classList.remove('tm-hidden');
+		} else {
+			callConfigGet().then(function(cfg) {
+				var b = mkOffloadBanner(cfg && cfg.offload_mode);
+				if (!b) return;
+				offloadBanner.appendChild(b);
+				offloadBanner.classList.remove('tm-hidden');
+			});
+		}
+
+		return E('div', {'class':'cbi-map', 'style':'color:var(--tm-text)'}, [
+			E('h2', {'style':'color:var(--tm-text)'}, _('Traffic Control')),
 			E('div', {'class':'cbi-section'}, [
+				offloadBanner,
 				E('div', {'style':'margin-bottom:10px'}, [
 						E('div', {'style':'display:flex;align-items:center;gap:10px;flex-wrap:wrap'}, [searchSelect.el, actionRow]),
 						quickBar
@@ -3275,7 +3306,7 @@ return view.extend({
 				connsDiv,
 				activityDiv
 			]),
-			E('div', {'id':'tm-version-footer','style':'text-align:right;font-size:10px;color:var(--tm-text-faint);padding:8px 4px 0;user-select:all'},
+			E('div', {'id':'tm-version-footer','class':'tm-version-footer'},
 				'trafficctl (' + TRAFFICCTL_BUILD + ')')
 		]);
 	},
