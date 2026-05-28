@@ -89,6 +89,9 @@ jobs:
       - name: Smoke-test the IPK
         run: sh tests/test_build_ipk.sh
 
+      - name: Preserve IPK before SDK
+        run: cp dist/*.ipk /tmp/
+
       - name: Build .apk via OpenWrt SDK
         uses: openwrt/gh-action-sdk@main
         env:
@@ -108,6 +111,7 @@ jobs:
             exit 1
           fi
           mkdir -p dist
+          cp /tmp/luci-app-trafficctl*.ipk dist/ 2>/dev/null || true
           DEST="dist/luci-app-trafficctl_${{ inputs.version }}-r${{ inputs.release_num }}_noarch.apk"
           cp "$APK" "$DEST"
           ln -f "$DEST" dist/luci-app-trafficctl_noarch.apk
