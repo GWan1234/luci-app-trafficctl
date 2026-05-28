@@ -1,0 +1,127 @@
+name: Manual Release Rebuild
+
+# Rebuilds and uploads artifacts to an existing GitHub Release.
+#
+# Default behaviour: checks out the tag matching the version and rebuilds
+# from it — this reproduces the original release verbatim (useful for
+# re-signing or reproducibility checks).
+#
+# Exceptional case: if the tag itself shipped with broken build scripts
+# (as v1.5.0 did — missing status.css, invalid APK), pass a ref override
+# (e.g. `main`) so the build uses fixed infrastructure. The artifacts
+# will then contain whatever that ref points at, labelled as the chosen
+# version — effectively rewriting the published release content.
+#
+# Trigger: Actions → Manual Release Rebuild → Run workflow → enter version.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version to rebuild (without v prefix, e.g. 1.5.0)'
+        required: true
+        type: string
+      release_num:
+        description: 'Package release number (default: 1)'
+        default: '1'
+        required: false
+        type: string
+      ref:
+        description: 'Git ref to build from (default: v<version> tag; override to a branch like main if the tag has broken build scripts)'
+        default: ''
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  rebuild:
+    name: Rebuild v${{ inputs.version }}
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Resolve build ref
+        id: resolve
+        run: |
+          REF="${{ inputs.ref }}"
+          [ -z "$REF" ] && REF="v${{ inputs.version }}"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "Building from: $REF"
+
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.resolve.outputs.ref }}
+          fetch-depth: 0
+
+      - name: Verify target release exists
+        run: |
+          TAG="v${{ inputs.version }}"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::Release $TAG does not exist. Create it via auto-release.yml first."
+            exit 1
+          fi
+          echo "Target release $TAG exists, proceeding."
+
+      - name: Locate and patch Makefile
+        run: |
+          # Handle both layouts: legacy (Makefile at root) and current
+          # (luci-app-trafficctl/Makefile) so we can rebuild any historical tag.
+          if [ -f luci-app-trafficctl/Makefile ]; then
+            MAKEFILE=luci-app-trafficctl/Makefile
+          elif [ -f Makefile ]; then
+            MAKEFILE=Makefile
+          else
+            echo "::error::No Makefile found at known locations"
+            exit 1
+          fi
+          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=${{ inputs.version }}/" "$MAKEFILE"
+          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=${{ inputs.release_num }}/" "$MAKEFILE"
+          echo "Patched $MAKEFILE:"
+          grep -E '^PKG_(VERSION|RELEASE)' "$MAKEFILE"
+
+      - name: Build .ipk (standalone)
+        run: ./build-ipk.sh "${{ inputs.version }}" "${{ inputs.release_num }}"
+
+      - name: Smoke-test the IPK
+        run: sh tests/test_build_ipk.sh
+
+      - name: Build .apk via OpenWrt SDK
+        uses: openwrt/gh-action-sdk@main
+        env:
+          ARCH: x86_64-25.12.4
+          FEEDNAME: trafficctl
+          PACKAGES: luci-app-trafficctl
+          NO_DEFAULT_FEEDS: 1
+          EXTRA_FEEDS: "src-git|luci|https://github.com/openwrt/luci.git;openwrt-25.12"
+          PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}
+          KEY_BUILD: ${{ secrets.USIGN_PRIVATE_KEY }}
+
+      - name: Collect APK
+        run: |
+          APK=$(find bin/ -name "luci-app-trafficctl*.apk" 2>/dev/null | head -1)
+          if [ -z "$APK" ]; then
+            echo "::error::APK not found in SDK output"
+            find bin/ -type f -name "*.apk" || true
+            exit 1
+          fi
+          cp "$APK" "dist/luci-app-trafficctl_${{ inputs.version }}-r${{ inputs.release_num }}_noarch.apk"
+          ls -la dist/
+
+      - name: Verify artifacts include status.css
+        run: |
+          set -e
+          for ART in dist/*.ipk; do
+            mkdir -p /tmp/verify-ipk && rm -rf /tmp/verify-ipk/*
+            (cd /tmp/verify-ipk && tar xzf "$GITHUB_WORKSPACE/$ART" && tar tzf data.tar.gz) | \
+              grep -q 'status\.css' || { echo "::error::status.css missing from $ART"; exit 1; }
+            echo "OK: status.css present in $ART"
+          done
+
+      - name: Upload artifacts to release v${{ inputs.version }}
+        run: |
+          TAG="v${{ inputs.version }}"
+          gh release upload "$TAG" dist/*.ipk dist/*.apk --clobber
+          echo "Uploaded artifacts to $TAG"
+          gh release view "$TAG" --json assets --jq '.assets[].name'
