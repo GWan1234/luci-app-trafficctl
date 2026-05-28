@@ -80,17 +80,13 @@ jobs:
       - name: Build .ipk (standalone)
         run: |
           ./build-ipk.sh "${{ inputs.version }}" "${{ inputs.release_num }}"
-          # Mirror auto-release: also produce generic-named copies for
-          # stable /releases/latest/download/ URLs (these get clobbered;
-          # the versioned -r<N> file stays as a distinct artifact).
           ln -f dist/luci-app-trafficctl_*_all.ipk dist/luci-app-trafficctl_all.ipk
           ln -f dist/luci-app-trafficctl_*_all.ipk dist/luci-app-trafficctl.ipk
+          ls -la dist/
+          cp dist/*.ipk /tmp/
 
       - name: Smoke-test the IPK
         run: sh tests/test_build_ipk.sh
-
-      - name: Preserve IPK before SDK
-        run: cp dist/*.ipk /tmp/
 
       - name: Build .apk via OpenWrt SDK
         uses: openwrt/gh-action-sdk@main
