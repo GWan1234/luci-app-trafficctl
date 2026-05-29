@@ -4,6 +4,72 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.6.6] — 2026-05-29
+
+### Bug Fixes
+
+- **Fix feed-based install** — `./scripts/feeds install -p trafficctl luci-app-trafficctl` was failing with `target pattern contains no '%'` because OpenWrt's `find -L … -mindepth 1` skipped the repository-root Makefile. The repository is now laid out with the package source in a `luci-app-trafficctl/` subdirectory, which is what OpenWrt's feed scanner expects. ([#7](https://github.com/YusDyr/luci-app-trafficctl/issues/7))
+- **Fix `/etc/config/trafficctl` clobbering on `opkg --force-reinstall`** — runtime state files (`shapes.json`, `telegram_known.json`) were listed as conffiles, which made opkg refuse to install on a fresh device. Conffiles now contain only `/etc/config/trafficctl`.
+- **Stop renaming `/etc/trafficmon/` to `/etc/trafficctl/`** — the previous migration code could collide with other `trafficmon`-named packages on the same router. Postinst no longer touches the old directory; existing installations should migrate manually if needed.
+
+### CI
+
+- New OpenWrt SDK feed-install regression test (3 SDK versions) reproduces the user-facing path that issue #7 was about.
+- New upgrade test (×2 SDK versions) installs the previously-released package, marks the config, installs the new build, and asserts the marker survives.
+- New dependency test (×3 versions) verifies that missing deps fail cleanly and that `opkg update` / `apk update` resolves them.
+- APK signing migrated from RSA to NIST P-256 (EC) keys — matches what `apk-tools v3` actually requires.
+- snapshot/x86-64 compat job now tolerates upstream `rpcd-mod-luci` / `rpcd-mod-ucode` post-install hook noise that doesn't affect our package.
+
+### Installation
+
+- Same install commands as v1.5.0+ — see the v1.5.0 entry below.
+
+---
+
+## [1.5.0] — 2026-05-27
+
+### Features
+
+- **Auto-detect software flow offload** ([#5](https://github.com/YusDyr/luci-app-trafficctl/issues/5)) — the realtime monitor now detects whether the router is running OpenWrt's software flow offload and switches its measurement strategy accordingly:
+  - **No offload** — conntrack byte counters are accurate; we read them.
+  - **Offload active** — conntrack stops accounting for fast-path packets after the flow is offloaded. We instead read an nftables counter map attached at `forward priority -200` (before the offload hook), which captures every packet.
+  - The choice is re-evaluated on each refresh, so toggling flow offload in OpenWrt doesn't break the speed graph.
+
+### Installation
+
+- `opkg install` (OpenWrt 21.02 – 24.10):
+  ```sh
+  opkg install https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk
+  ```
+- `apk add` (OpenWrt 25.12+):
+  ```sh
+  apk add --allow-untrusted https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.apk
+  ```
+- LuCI web UI: **System → Software → Upload Package**.
+
+---
+
+## [1.4.0] — 2026-05-27
+
+### Features
+
+- **APK package format for OpenWrt 25.12+** — releases now ship both `.ipk` (21.02 – 24.10) and `.apk` (25.12+, apk-tools v3) variants. APKs are built via the OpenWrt SDK so the resulting file uses the real APKv3 format (`ADBd` magic), not a fallback APKv2 archive that `apk-tools v3` refuses.
+- **Signed packages** — IPKs are signed with usign, APKs with a NIST P-256 EC key. Public keys live in `keys/`. Signatures are verified by `apk add` automatically and by `opkg` when `option check_signature` is set.
+- **Telegram bot test infrastructure** — added mock + integration + end-to-end test suites for the Telegram bot under `tests/`. All run on every PR.
+
+### Bug Fixes
+
+- **Don't shadow `awk`'s reserved word `load`** — variable rename in `trafficctl-summary.sh` keeps gawk happy on devices that use it instead of busybox awk.
+- Several CI debug-output and portability fixes for the Telegram E2E test runner.
+
+### CI
+
+- **Full compatibility matrix** — 52 combinations spanning OpenWrt 21.02 / 22.03 / 23.05 / 24.10.1 / 24.10.6 / 25.12.0 / 25.12.4 / snapshot × x86-64 / x86-generic / armsr / arm_a9 / arm_a15 / armvirt32 / mips_24kc / aarch64_cortex-a53.
+- Releases are now produced only by `feat:` / `fix:` / `perf:` commits — `ci:`, `refactor:`, `docs:` no longer trigger a version bump.
+- APK builds via `openwrt/gh-action-sdk` instead of a hand-rolled apk-tools wrapper.
+
+---
+
 ## [1.3.0](https://github.com/YusDyr/luci-app-trafficctl/compare/v1.2.1...v1.3.0) (2026-05-26)
 
 

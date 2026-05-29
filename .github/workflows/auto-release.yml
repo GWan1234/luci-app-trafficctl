@@ -64,32 +64,88 @@ jobs:
         if: steps.bump.outputs.bump != 'none'
         run: |
           TAG="${{ steps.bump.outputs.latest_tag }}"
+          REPO="${{ github.repository }}"
+
+          # Print one Markdown bullet per commit matching $TYPE_REGEX.
+          # Format:  - <subject without prefix> ([short-sha](commit-url))
+          #          <up to the first body paragraph, indented> (optional)
+          format_section() {
+            type_regex="$1"
+            git log "${TAG}..HEAD" --reverse --pretty=format:'%H%x09%s%x09%b%x1e' |
+              tr -d '\r' |
+              awk -v type_re="^${type_regex}(\\([^)]*\\))?:" \
+                  -v repo="$REPO" '
+                BEGIN { RS = "\x1e"; FS = "\t" }
+                {
+                  sha=$1; subj=$2; body=$3
+                  # Strip whitespace/newlines that creep in between records.
+                  gsub(/^[ \t\n\r]+|[ \t\n\r]+$/, "", sha)
+                  gsub(/^[ \t]+|[ \t]+$/, "", subj)
+                  if (subj !~ type_re) next
+                  short=substr(sha,1,7)
+                  # Strip "type(scope): " prefix.
+                  sub(type_re " *", "", subj)
+                  # Auto-link bare "#NN" refs to PR/issue.
+                  while (match(subj, /#[0-9]+/)) {
+                    n = substr(subj, RSTART+1, RLENGTH-1)
+                    subj = substr(subj,1,RSTART-1) "[#" n "](https://github.com/" repo "/issues/" n ")" substr(subj, RSTART+RLENGTH)
+                  }
+                  printf "- %s ([%s](https://github.com/%s/commit/%s))\n", subj, short, repo, sha
+
+                  # Emit body lines, stopping at first blank line (lead
+                  # paragraph only) — keeps squash-merge bodies from
+                  # flooding the release notes with nested bullets.
+                  n = split(body, lines, "\n")
+                  printed = 0
+                  for (i=1; i<=n; i++) {
+                    L = lines[i]
+                    gsub(/^[ \t]+|[ \t]+$/, "", L)
+                    # Stop at first blank line after we have already printed
+                    # at least one body line — that ends the lead paragraph.
+                    if (L == "") { if (printed) break; else continue }
+                    if (L ~ /^(Signed-off-by|Co-[Aa]uthored-[Bb]y|Reviewed-by|Reported-by|BREAKING CHANGE|Release-As):/) continue
+                    # Skip nested squash bullets (e.g. "* fix: ...") and
+                    # trailing horizontal rules from PR descriptions.
+                    if (L ~ /^\*[ \t]+(feat|fix|chore|docs|ci|refactor|perf|test|build|style|revert)(\([^)]*\))?:/) continue
+                    if (L ~ /^-{3,}$/) continue
+                    printf "  %s\n", L
+                    printed++
+                    if (printed >= 6) break
+                  }
+                }
+              '
+          }
+
           {
             echo 'body<<CHANGELOG_EOF'
             echo "## What's Changed"
             echo ""
 
-            # Features
-            FEATS=$(git log "${TAG}..HEAD" --pretty=format:"%s" | grep -E '^feat(\(.+\))?:' | sed 's/^feat\(([^)]*)\)\?:\s*//' || true)
+            FEATS=$(format_section "feat")
             if [ -n "$FEATS" ]; then
               echo "### Features"
-              echo "$FEATS" | while read -r line; do echo "- $line"; done
+              echo "$FEATS"
               echo ""
             fi
 
-            # Fixes
-            FIXES=$(git log "${TAG}..HEAD" --pretty=format:"%s" | grep -E '^fix(\(.+\))?:' | sed 's/^fix\(([^)]*)\)\?:\s*//' || true)
+            FIXES=$(format_section "fix")
             if [ -n "$FIXES" ]; then
               echo "### Bug Fixes"
-              echo "$FIXES" | while read -r line; do echo "- $line"; done
+              echo "$FIXES"
               echo ""
             fi
 
-            # Other notable
-            OTHER=$(git log "${TAG}..HEAD" --pretty=format:"%s" | grep -E '^(perf|refactor|ci)(\(.+\))?:' | sed 's/^[a-z]*\(([^)]*)\)\?:\s*//' || true)
+            PERF=$(format_section "perf")
+            if [ -n "$PERF" ]; then
+              echo "### Performance"
+              echo "$PERF"
+              echo ""
+            fi
+
+            OTHER=$(format_section "(refactor|ci)")
             if [ -n "$OTHER" ]; then
               echo "### Other"
-              echo "$OTHER" | while read -r line; do echo "- $line"; done
+              echo "$OTHER"
               echo ""
             fi
 
