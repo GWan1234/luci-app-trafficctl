@@ -227,8 +227,22 @@ Each test builds the `.ipk`, runs `opkg install --force-depends` inside the real
 ## Installation
 
 > **Which file do I need?**
+> - **Recommended**: v1.6.5+ (earlier releases are broken — missing status.css, invalid APK format)
 > - OpenWrt **21.02 — 24.10** → download `.ipk` (opkg)
 > - OpenWrt **25.12+** and snapshot → download `.apk` (apk)
+
+Each release includes multiple filenames for the same package:
+
+| Asset name | Purpose |
+|-----------|---------|
+| `luci-app-trafficctl.ipk` | Stable download URL (opkg) |
+| `luci-app-trafficctl_all.ipk` | Same file, OpenWrt naming convention |
+| `luci-app-trafficctl_X.Y.Z-1_all.ipk` | Same file, version-pinned |
+| `luci-app-trafficctl.apk` | Stable download URL (apk) |
+| `luci-app-trafficctl_noarch.apk` | Same file, OpenWrt naming convention |
+| `luci-app-trafficctl_X.Y.Z-r1_noarch.apk` | Same file, version-pinned |
+
+The "stable URL" links below always download from the latest release — the filename stays constant across versions.
 
 ### OpenWrt 25.12+ (.apk)
 
@@ -244,6 +258,7 @@ Each test builds the `.ipk`, runs `opkg install --force-depends` inside the real
 wget -O /etc/apk/keys/luci-app-trafficctl.pub https://raw.githubusercontent.com/YusDyr/luci-app-trafficctl/main/keys/apk-signing.pub
 # Install:
 cd /tmp && wget https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.apk && apk add luci-app-trafficctl.apk
+# If you get "modified conffile" on upgrade, add `--force-maintainer` to override
 ```
 
 **Option C — SSH (without key, quick install):**
@@ -274,24 +289,27 @@ ssh root@router 'opkg install https://github.com/YusDyr/luci-app-trafficctl/rele
 ### From source (OpenWrt build system)
 
 ```sh
-# Add to your feeds.conf:
+# Add to your feeds.conf (the package depends on luci, so make sure
+# luci is also configured — it is by default in feeds.conf.default):
 echo "src-git trafficctl https://github.com/YusDyr/luci-app-trafficctl.git" >> feeds.conf
 
-# Update and install:
-./scripts/feeds update trafficctl
-./scripts/feeds install luci-app-trafficctl
+# Update both feeds (luci must be updated before trafficctl is scanned):
+./scripts/feeds update luci trafficctl
+./scripts/feeds install -p trafficctl luci-app-trafficctl
 
-# Build:
+# Enable and build:
+echo 'CONFIG_PACKAGE_luci-app-trafficctl=m' >> .config
+make defconfig
 make package/luci-app-trafficctl/compile V=s
 ```
 
 ### Manual installation
 
-Copy the `root/` tree to the router's filesystem, then restart rpcd:
+Copy the `luci-app-trafficctl/root/` tree to the router's filesystem, then restart rpcd:
 
 ```sh
-scp -r root/* root@router:/
-scp -r htdocs/luci-static root@router:/www/
+scp -r luci-app-trafficctl/root/* root@router:/
+scp -r luci-app-trafficctl/htdocs/luci-static root@router:/www/
 ssh root@router 'chmod +x /usr/local/bin/trafficctl-*.sh /usr/libexec/rpcd/luci.trafficctl && /etc/init.d/rpcd restart'
 ```
 
@@ -372,8 +390,10 @@ opkg install curl
 
 ### Persistence
 
-- Shaping rules are always saved to `/etc/trafficmon/shapes.json` and restored on boot.
-- Block and rate-limit rules are optionally persistent when `persist_rules` is enabled in Settings > Logging & Persistence (saved to `/etc/trafficmon/rules.json`).
+**Note**: As of v1.6.5+, the runtime data directory is `/etc/trafficctl/` (previously `/etc/trafficmon/`).
+
+- Shaping rules are always saved to `/etc/trafficctl/shapes.json` and restored on boot.
+- Block and rate-limit rules are optionally persistent when `persist_rules` is enabled in Settings > Logging & Persistence (saved to `/etc/trafficctl/rules.json`).
 - On reboot, the hotplug script at `/etc/hotplug.d/iface/99-trafficctl-shapes` restores all saved rules (shapes, blocks, ratelimits) when the LAN interface comes up.
 
 ### Activity Logging
@@ -434,15 +454,15 @@ The frontend talks to a thin rpcd dispatcher over ubus. The Telegram bot provide
 
 | Path | Role |
 |------|------|
-| `htdocs/.../view/trafficctl/status.js` | Frontend — single ES5 file, no deps |
-| `root/usr/libexec/rpcd/luci.trafficctl` | rpcd backend — JSON-RPC dispatch |
-| `root/usr/local/bin/trafficctl-*.sh` | Backend scripts (monitoring + control) |
-| `root/usr/local/bin/trafficctl-fw.sh` | Firewall abstraction layer (sourced) |
-| `root/usr/local/bin/trafficctl-telegram.sh` | Telegram bot daemon (long polling) |
-| `root/etc/init.d/trafficctl-telegram` | procd init script for the bot |
-| `root/etc/hotplug.d/iface/99-trafficctl-shapes` | Boot persistence for tc + block + ratelimit rules |
-| `root/etc/hotplug.d/dhcp/99-trafficctl-newdevice` | Instant new-device detection via DHCP events |
-| `root/usr/share/rpcd/acl.d/` | ACL permissions |
+| `luci-app-trafficctl/htdocs/.../view/trafficctl/status.js` | Frontend — single ES5 file, no deps |
+| `luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl` | rpcd backend — JSON-RPC dispatch |
+| `luci-app-trafficctl/root/usr/local/bin/trafficctl-*.sh` | Backend scripts (monitoring + control) |
+| `luci-app-trafficctl/root/usr/local/bin/trafficctl-fw.sh` | Firewall abstraction layer (sourced) |
+| `luci-app-trafficctl/root/usr/local/bin/trafficctl-telegram.sh` | Telegram bot daemon (long polling) |
+| `luci-app-trafficctl/root/etc/init.d/trafficctl-telegram` | procd init script for the bot |
+| `luci-app-trafficctl/root/etc/hotplug.d/iface/99-trafficctl-shapes` | Boot persistence for tc + block + ratelimit rules |
+| `luci-app-trafficctl/root/etc/hotplug.d/dhcp/99-trafficctl-newdevice` | Instant new-device detection via DHCP events |
+| `luci-app-trafficctl/root/usr/share/rpcd/acl.d/` | ACL permissions |
 | `Makefile` | OpenWrt package build |
 | `docs/` | Extended docs (architecture, API, compat) |
 
@@ -482,3 +502,4 @@ Contributions are welcome. Please:
 Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for the full text.
 
 Copyright 2024-2026 Denis Iusupov.
+

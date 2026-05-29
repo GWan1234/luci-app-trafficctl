@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-trafficctl
-PKG_VERSION:=1.2.0
+PKG_VERSION:=1.5.0
 PKG_RELEASE:=1
 
 PKG_LICENSE:=Apache-2.0
@@ -15,10 +15,10 @@ LUCI_PKGARCH:=all
 
 include $(TOPDIR)/feeds/luci/luci.mk
 
+# Only list files that ship in the package and may be user-edited.
+# shapes.json / telegram_known.json are runtime state created by scripts.
 define Package/$(PKG_NAME)/conffiles
 /etc/config/trafficctl
-/etc/trafficmon/shapes.json
-/etc/trafficmon/telegram_known.json
 endef
 
 # call BuildPackage - OpenWrt buildroot will pick up the standard LuCI layout

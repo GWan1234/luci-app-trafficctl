@@ -6,6 +6,9 @@ PKG_VERSION="${1:-1.0.0}"
 PKG_RELEASE="${2:-1}"
 PKG_ARCH="all"
 
+# Package source tree (feed-compatible subdirectory layout)
+SRC="$(dirname "$0")/${PKG_NAME}"
+
 OUTDIR="dist"
 WORKDIR=$(mktemp -d)
 
@@ -15,9 +18,10 @@ trap 'rm -rf "$WORKDIR"' EXIT
 DATA="$WORKDIR/data"
 mkdir -p "$DATA"
 
-cp -a root/* "$DATA/"
+cp -a "$SRC/root/"* "$DATA/"
 mkdir -p "$DATA/www/luci-static/resources/view/trafficctl"
-cp htdocs/luci-static/resources/view/trafficctl/status.js "$DATA/www/luci-static/resources/view/trafficctl/"
+cp "$SRC/htdocs/luci-static/resources/view/trafficctl/status.js" "$DATA/www/luci-static/resources/view/trafficctl/"
+cp "$SRC/htdocs/luci-static/resources/view/trafficctl/status.css" "$DATA/www/luci-static/resources/view/trafficctl/"
 
 # Ensure scripts are executable
 chmod +x "$DATA/usr/local/bin/trafficctl-"*.sh
@@ -43,10 +47,12 @@ Description: Per-device traffic monitoring, rate limiting (nft/iptables),
  traffic shaping (tc/HTB), internet blocking, and WiFi MAC filtering.
 EOF
 
+# Conffiles must list ONLY files that ship in data.tar.gz and may be user-edited.
+# shapes.json / telegram_known.json are runtime state created by scripts at
+# runtime — they're NOT in the package, so listing them as conffiles makes
+# opkg complain "Failed to open file" on every install.
 cat > "$CTRL/conffiles" <<EOF
 /etc/config/trafficctl
-/etc/trafficmon/shapes.json
-/etc/trafficmon/telegram_known.json
 EOF
 
 cat > "$CTRL/preinst" <<'EOF'
@@ -62,8 +68,7 @@ chmod +x "$CTRL/preinst"
 cat > "$CTRL/postinst" <<'EOF'
 #!/bin/sh
 if [ -z "${IPKG_INSTROOT}" ]; then
-    /etc/init.d/rpcd restart
-    # Restart telegram bot if it was enabled
+    /etc/init.d/rpcd restart 2>/dev/null || true
     if [ -x /etc/init.d/trafficctl-telegram ]; then
         /etc/init.d/trafficctl-telegram start 2>/dev/null || true
     fi
