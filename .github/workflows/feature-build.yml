@@ -1,0 +1,86 @@
+name: Feature Build
+
+# Builds an IPK from any feature/* branch and publishes it as a
+# floating pre-release so the download URL stays stable across pushes.
+#
+# Release tag:  build-feature-<branch-slug>
+# Download URL: …/releases/download/build-feature-<slug>/luci-app-trafficctl.ipk
+
+on:
+  push:
+    branches:
+      - 'feature/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build IPK — ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Derive metadata
+        id: meta
+        run: |
+          SAFE=$(echo "${GITHUB_REF_NAME}" | tr '/' '-' | tr '_' '-' | sed 's/[^a-zA-Z0-9-]//g')
+          SHA="${GITHUB_SHA:0:7}"
+          DATE=$(date -u +"%Y-%m-%d %H:%M UTC")
+          echo "safe=$SAFE"         >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA"           >> "$GITHUB_OUTPUT"
+          echo "tag=build-${SAFE}"  >> "$GITHUB_OUTPUT"
+          echo "date=$DATE"         >> "$GITHUB_OUTPUT"
+
+      - name: Build .ipk
+        run: |
+          ./build-ipk.sh "0.0.0-${{ steps.meta.outputs.sha }}" 0
+          ln -f dist/luci-app-trafficctl_*_all.ipk dist/luci-app-trafficctl.ipk
+          ls -la dist/luci-app-trafficctl.ipk
+
+      - name: Smoke-test the IPK
+        run: sh tests/test_build_ipk.sh
+
+      - name: Delete previous floating release (if any)
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          gh release delete "$TAG" --yes 2>/dev/null || true
+          git push origin ":refs/tags/$TAG"  2>/dev/null || true
+
+      - name: Publish pre-release
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          SHA="${{ steps.meta.outputs.sha }}"
+          DATE="${{ steps.meta.outputs.date }}"
+          BRANCH="${GITHUB_REF_NAME}"
+          REPO="${GITHUB_REPOSITORY}"
+
+          gh release create "$TAG" dist/luci-app-trafficctl.ipk \
+            --prerelease \
+            --title "Dev: ${BRANCH} @ ${SHA}" \
+            --notes "$(cat <<NOTES
+## Dev build — \`${BRANCH}\`
+
+Built from [\`${SHA}\`](https://github.com/${REPO}/commit/${GITHUB_SHA}) · ${DATE}
+
+> ⚠️ Pre-release for testing only — not for production.
+
+### Install (OpenWrt 21.02 – 24.10)
+
+\`\`\`sh
+opkg install https://github.com/${REPO}/releases/download/${TAG}/luci-app-trafficctl.ipk
+\`\`\`
+
+Or via LuCI → **System → Software → Upload Package**.
+
+### Update
+
+Re-run the same command — opkg will reinstall over the existing version.
+NOTES
+)"
