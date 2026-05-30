@@ -2843,7 +2843,7 @@ return view.extend({
 						saveStatus.textContent = _('Applying…');
 						saveStatus.style.color = 'var(--tc-muted)';
 						callConfigSet(undefined, undefined, swCb.checked, hwCb.checked).then(function(res) {
-							saveStatus.textContent = (res && res.ok) ? '✓' : '✗';
+							saveStatus.textContent = (res && res.ok) ? '✓ ' + _('Applied — firewall reloading') : '✗';
 							saveStatus.style.color = (res && res.ok) ? 'var(--tc-ok)' : 'var(--tc-err)';
 						}).catch(function(e) {
 							saveStatus.textContent = '✗';
@@ -2852,22 +2852,43 @@ return view.extend({
 					}, 400);
 				}
 
-				var swToggleEl = mkToggle('tc-offload-sw', _('Software'), cfg.sw, function() {
+				// Current mode badge
+				var modeLabels = {
+					'none':              ['⊘', _('No offload'),              'var(--tc-muted)'],
+					'software':          ['◑', _('Software offload'),        'var(--tc-speed)'],
+					'hardware-counter':  ['●', _('Hardware offload'),        'var(--tc-warn)'],
+					'hardware':          ['●', _('Hardware offload'),        'var(--tc-warn)']
+				};
+				var ml = modeLabels[cfg.offload_mode] || ['?', cfg.offload_mode, 'var(--tc-muted)'];
+				var modeBadge = E('div', {'style':'margin-bottom:10px;font-size:12px'}, [
+					E('span', {'style':'color:'+ml[2]+';font-size:15px;margin-right:4px'}, ml[0]),
+					E('span', {'style':'color:var(--tc-muted)'}, _('Current mode: ')),
+					E('b', {}, ml[1])
+				]);
+
+				// SW toggle row
+				var swToggleEl = mkToggle('tc-offload-sw', _('Software flow offload'), cfg.sw, function() {
 					hwCb.disabled = !swCb.checked;
-					if (!swCb.checked) hwCb.checked = false;
+					if (!swCb.checked) { hwCb.checked = false; }
 					doSave();
 				});
 				swCb = swToggleEl.querySelector('input');
+				var swDesc = E('div', {'class':'tc-offload-desc'},
+					_('Accelerates routing in the kernel via nftables flowtable. Speed monitoring and traffic shaping work normally.'));
 
-				var hwToggleEl = mkToggle('tc-offload-hw', _('Hardware'), cfg.hw, doSave);
+				// HW toggle row
+				var hwToggleEl = mkToggle('tc-offload-hw', _('Hardware flow offload'), cfg.hw, doSave);
 				hwCb = hwToggleEl.querySelector('input');
 				if (!cfg.sw) hwCb.disabled = true;
+				var hwDesc = E('div', {'class':'tc-offload-desc'},
+					_('Offloads routing to the hardware engine (PPE/NPU). Requires software offload. ' +
+					  '⚠ On many platforms (e.g. Mediatek Filogic) the driver does not report byte counters back to the kernel — real-time speed monitoring will show zero.'));
 
-				var note = E('div', {'style':'font-size:11px;color:var(--tc-muted);margin-top:6px'},
-					_('Hardware offload disables real-time speed monitoring on platforms that do not implement the stats callback (e.g. Mediatek Filogic). Firewall rules reload takes ~2 s after save.'));
-
-				container.appendChild(E('div', {'class':'tc-log-row'}, [swToggleEl, hwToggleEl, saveStatus]));
-				container.appendChild(note);
+				container.appendChild(modeBadge);
+				container.appendChild(E('div', {'class':'tc-offload-row'}, [swToggleEl, saveStatus]));
+				container.appendChild(swDesc);
+				container.appendChild(E('div', {'class':'tc-offload-row tc-offload-row--hw'}, [hwToggleEl]));
+				container.appendChild(hwDesc);
 			}).catch(function(e) {
 				statusSpan.textContent = '✗ ' + (e.message || e);
 				statusSpan.style.color = 'var(--tc-err)';
