@@ -119,11 +119,6 @@ var callShapeStats = rpc.declare({
 	expect: { result: [] }
 });
 
-var callRdns = rpc.declare({
-	object: 'luci.trafficctl',
-	method: 'rdns',
-	params: ['ip']
-});
 
 var callTelegramGet = rpc.declare({
 	object: 'luci.trafficctl',
@@ -166,16 +161,17 @@ var callVersion = rpc.declare({
 	method: 'version'
 });
 
-var callOffloadGet = rpc.declare({
+var callConfigSet = rpc.declare({
 	object: 'luci.trafficctl',
-	method: 'offload_get',
-	expect: {}
+	method: 'config_set',
+	params: ['enabled', 'default_mode', 'sw', 'hw']
 });
 
-var callOffloadSet = rpc.declare({
-	object: 'luci.trafficctl',
-	method: 'offload_set',
-	params: ['sw', 'hw']
+var callNetworkRrdnsLookup = rpc.declare({
+	object: 'network.rrdns',
+	method: 'lookup',
+	params: ['addrs', 'timeout', 'limit'],
+	expect: { '': {} }
 });
 
 var callConfigGet = rpc.declare({
@@ -1472,6 +1468,7 @@ return view.extend({
 		});
 
 		var extStatsDiv = E('div', { 'class': opts.extendedStats ? '' : 'tc-hidden' });
+		var deviceGraphDiv = E('div', { 'class': 'tc-device-graph tc-hidden' });
 		var activityDiv = E('div', { 'class': opts.showActivity ? '' : 'tc-hidden' });
 
 		var refreshPick = mkChipPick([
@@ -1514,41 +1511,32 @@ return view.extend({
 		var statsDiv  = E('div', { 'style': 'margin:8px 0', 'class': opts.showStats === false ? 'tc-hidden' : '' });
 		var connsDiv  = E('div', { 'class': opts.showConns === false ? 'tc-hidden' : '' });
 
-		var _rdnsQueue   = [];
-		var _rdnsFlying  = 0;
-		var _rdnsMax     = 4;
-		var _rdnsDispatch = function() {
-			while (_rdnsFlying < _rdnsMax && _rdnsQueue.length > 0) {
-				var item = _rdnsQueue.shift();
-				if (item.gen !== self._queryGen) continue;
-				(function(it) {
-					_rdnsFlying++;
-					callRdns(it.dst).then(function(res) {
-						_rdnsFlying--;
-						_rdnsDispatch();
-						if (it.gen !== self._queryGen) return;
-						var host = (res && res.host) ? res.host : null;
-						self._rdnsCache[it.dst] = host || null;
-						Array.prototype.forEach.call(
-							connsDiv.querySelectorAll('[data-dst="'+it.dst+'"]'),
-							function(cell) {
-								if (host) { cell.textContent = host; cell.style.color = ''; }
-								else { cell.innerHTML = '<span class="tc-c-faint">—</span>'; }
-							}
-						);
-					}).catch(function() {
-						_rdnsFlying--;
-						_rdnsDispatch();
-						if (it.gen !== self._queryGen) return;
-						self._rdnsCache[it.dst] = null;
-						Array.prototype.forEach.call(
-							connsDiv.querySelectorAll('[data-dst="'+it.dst+'"]'),
-							function(cell) { cell.innerHTML = '<span class="tc-c-faint">—</span>'; }
-						);
-					});
-				})(item);
-			}
-		};
+		function _rdnsBatch(addrs, gen) {
+			if (!addrs.length) return;
+			callNetworkRrdnsLookup(addrs, 5000, addrs.length).then(function(replies) {
+				if (gen !== self._queryGen) return;
+				addrs.forEach(function(dst) {
+					var host = (replies && replies[dst]) || null;
+					self._rdnsCache[dst] = host;
+					Array.prototype.forEach.call(
+						connsDiv.querySelectorAll('[data-dst="'+dst+'"]'),
+						function(cell) {
+							if (host) { cell.textContent = host; cell.style.color = ''; }
+							else { cell.innerHTML = '<span class="tc-c-faint">—</span>'; }
+						}
+					);
+				});
+			}).catch(function() {
+				if (gen !== self._queryGen) return;
+				addrs.forEach(function(dst) {
+					self._rdnsCache[dst] = null;
+					Array.prototype.forEach.call(
+						connsDiv.querySelectorAll('[data-dst="'+dst+'"]'),
+						function(cell) { cell.innerHTML = '<span class="tc-c-faint">—</span>'; }
+					);
+				});
+			});
+		}
 
 		// Speed graph popup on spark cell hover
 		var graphPopup = E('div', {'class':'tc-graph-popup tc-hidden'});
@@ -1993,14 +1981,32 @@ return view.extend({
 				} else {
 					updateSpeedCells();
 				}
+				updateDeviceGraph();
 			}).catch(function(){});
+		}
+
+		function updateDeviceGraph() {
+			var ip = searchSelect.getValue();
+			if (!ip || ip === '__all__') {
+				deviceGraphDiv.classList.add('tc-hidden');
+				return;
+			}
+			var hist = self._fullHistory[ip];
+			if (!hist || hist.length < 2) return;
+			var sm = self._shapeMap[ip], dm = self._dropMap[ip];
+			var lk = (sm && sm.rate_kbit > 0) ? sm.rate_kbit : ((dm && dm.rate_kbit > 0) ? dm.rate_kbit : 0);
+			var w = deviceGraphDiv.offsetWidth || 560;
+			var svg = renderFullGraph(hist, lk, w, 160);
+			if (!svg) return;
+			while (deviceGraphDiv.firstChild) deviceGraphDiv.removeChild(deviceGraphDiv.firstChild);
+			deviceGraphDiv.appendChild(svg);
+			deviceGraphDiv.classList.remove('tc-hidden');
 		}
 
 		function runSingle(ip) {
 			var o = loadOpts();
 			var proto = (o.proto && o.proto !== 'all') ? o.proto : '';
 			self._queryGen++;
-			_rdnsQueue.length = 0;
 			var gen = self._queryGen;
 
 			setStatus(statusDiv, 'loading', _('Running…'));
@@ -2110,13 +2116,11 @@ return view.extend({
 							data.connections.length + ' ' + _('connections') + '. ' + _('Click header to sort.')));
 
 						if (o.rdns) {
-							var seen = {};
+							var seen = {}, uncached = [];
 							data.connections.forEach(function(c) {
 								var dst = c.dst || '';
-								if (!dst || seen[dst]) return;
-								if (PRIVATE_RE.test(dst)) return;
+								if (!dst || seen[dst] || PRIVATE_RE.test(dst)) return;
 								seen[dst] = true;
-								// Use cached result if available
 								if (self._rdnsCache[dst] !== undefined) {
 									var cached = self._rdnsCache[dst];
 									Array.prototype.forEach.call(
@@ -2126,11 +2130,11 @@ return view.extend({
 											else { cell.innerHTML = '<span class="tc-c-faint">—</span>'; }
 										}
 									);
-									return;
+								} else {
+									uncached.push(dst);
 								}
-								_rdnsQueue.push({dst: dst, gen: gen});
-								_rdnsDispatch();
 							});
+							_rdnsBatch(uncached, gen);
 						}
 					}
 				}
@@ -2270,6 +2274,7 @@ return view.extend({
 			updateUrlParams(o);
 			updateModeUI();
 			if (ip === '__all__') {
+				deviceGraphDiv.classList.add('tc-hidden');
 				runAll();
 			} else {
 				self._stopBytesPoll();
@@ -2825,7 +2830,7 @@ return view.extend({
 			var statusSpan = E('span', {'style':'font-size:12px;color:var(--tc-muted)'}, _('Loading…'));
 			container.appendChild(statusSpan);
 
-			callOffloadGet().then(function(cfg) {
+			callConfigGet().then(function(cfg) {
 				while (container.firstChild) container.removeChild(container.firstChild);
 
 				var saveStatus = E('span', {'class':'tg-save-status'});
@@ -2837,7 +2842,7 @@ return view.extend({
 					saveTimer = setTimeout(function() {
 						saveStatus.textContent = _('Applying…');
 						saveStatus.style.color = 'var(--tc-muted)';
-						callOffloadSet(swCb.checked, hwCb.checked).then(function(res) {
+						callConfigSet(undefined, undefined, swCb.checked, hwCb.checked).then(function(res) {
 							saveStatus.textContent = (res && res.ok) ? '✓' : '✗';
 							saveStatus.style.color = (res && res.ok) ? 'var(--tc-ok)' : 'var(--tc-err)';
 						}).catch(function(e) {
@@ -3081,6 +3086,7 @@ return view.extend({
 				settingsPanel,
 				statsDiv,
 				extStatsDiv,
+				deviceGraphDiv,
 				connsDiv,
 				activityDiv
 			]),

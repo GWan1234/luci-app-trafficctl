@@ -384,6 +384,15 @@
 }
 
 /* ── Extended stats panel ────────────────────────────────────────── */
+.tc-device-graph {
+    margin: 8px 0;
+    border: 1px solid var(--tc-border);
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--tc-bg-alt);
+}
+.tc-device-graph svg { display: block; width: 100%; }
+
 .tc-ext-panel {
     border: 1px solid var(--tc-border);
     border-radius: 4px;
