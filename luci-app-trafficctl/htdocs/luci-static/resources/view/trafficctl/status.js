@@ -597,70 +597,81 @@ function renderFullGraph(history, limitKbit, width, height) {
 	return svg;
 }
 
+function isDarkTheme() {
+	var dm = document.documentElement.getAttribute('data-darkmode');
+	if (dm === 'true') return true;
+	if (dm === 'false') return false;
+	try {
+		var bg = window.getComputedStyle(document.body).backgroundColor;
+		var m = bg.match(/rgb[a]?\((\d+)[,\s]+(\d+)[,\s]+(\d+)/);
+		if (m && (0.299 * +m[1] + 0.587 * +m[2] + 0.114 * +m[3]) < 80) return true;
+	} catch(e) {}
+	return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+}
+
 function injectStyles() {
-	if (document.getElementById('tm-style')) return;
-	var s = document.createElement('style');
-	s.id = 'tm-style';
-	s.textContent =
-		':root {' +
-			'--tm-bg:        #ffffff;' +
-			'--tm-bg-alt:    #f7fafc;' +
-			'--tm-bg-subtle: #f7f8fa;' +
-			'--tm-text:      #1a202c;' +
-			'--tm-text-mute: #718096;' +
-			'--tm-text-faint:#a0aec0;' +
-			'--tm-border:    #e2e8f0;' +
-			'--tm-th-bg:     #4a5568;' +
-			'--tm-th-fg:     #ffffff;' +
-			'--tm-proto:     #2b6cb0;' +
-			'--tm-service:   #805ad5;' +
-			'--tm-state-ok:  #276749;' +
-			'--tm-state-wait:#c53030;' +
-			'--tm-state-close:#c05621;' +
-			'--tm-info-bg:   #ebf8ff;' +
-			'--tm-info-border:#90cdf4;' +
-			'--tm-info-fg:   #2c5282;' +
-			'--tm-blocked-bg:#fff5f5;' +
-			'--tm-blocked-border:#fc8181;' +
-			'--tm-blocked-fg:#c53030;' +
-			'--tm-rate-fg:   #c05621;' +
-			'--tm-drop-fg:   #9b2c2c;' +
-			'--tm-speed:     #3182ce;' +
-			'--tm-shape-fg:  #2b6cb0;' +
-			'--tm-hover:     #ebf8ff;' +
-			'--tm-section-action: #f0f4f8;' +
-			'--tm-section-data:   #ffffff;' +
-		'}' +
-		':root[data-darkmode="true"],' +
-		'html[data-darkmode="true"],' +
-		'body.dark, .dark {' +
-			'--tm-bg:        #1e1e1e;' +
-			'--tm-bg-alt:    #262626;' +
-			'--tm-bg-subtle: #242424;' +
-			'--tm-text:      #e2e8f0;' +
-			'--tm-text-mute: #a0aec0;' +
-			'--tm-text-faint:#718096;' +
-			'--tm-border:    #3a3a3a;' +
-			'--tm-th-bg:     #2d3748;' +
-			'--tm-th-fg:     #e2e8f0;' +
-			'--tm-proto:     #63b3ed;' +
-			'--tm-service:   #b794f4;' +
-			'--tm-state-ok:  #68d391;' +
-			'--tm-state-wait:#fc8181;' +
-			'--tm-state-close:#f6ad55;' +
-			'--tm-info-bg:   #1a365d;' +
-			'--tm-info-border:#2c5282;' +
-			'--tm-info-fg:   #bee3f8;' +
-			'--tm-blocked-bg:#3d1818;' +
-			'--tm-blocked-border:#9b2c2c;' +
-			'--tm-blocked-fg:#fc8181;' +
-			'--tm-rate-fg:   #f6ad55;' +
-			'--tm-drop-fg:   #fc8181;' +
-			'--tm-speed:     #63b3ed;' +
-			'--tm-shape-fg:  #63b3ed;' +
-			'--tm-hover:     #2d3748;' +
-			'--tm-section-action: #252a30;' +
-			'--tm-section-data:   #1e1e1e;' +
+	var el = document.getElementById('tm-style');
+	if (!el) { el = document.createElement('style'); el.id = 'tm-style'; document.head.appendChild(el); }
+	var D = isDarkTheme();
+	el.textContent =
+		':root{' +
+			(D ?
+				'--tm-bg:#1e1e1e;' +
+				'--tm-bg-alt:#262626;' +
+				'--tm-bg-subtle:#242424;' +
+				'--tm-text:#e2e8f0;' +
+				'--tm-text-mute:#a0aec0;' +
+				'--tm-text-faint:#718096;' +
+				'--tm-border:#3a3a3a;' +
+				'--tm-th-bg:#2d3748;' +
+				'--tm-th-fg:#e2e8f0;' +
+				'--tm-proto:#63b3ed;' +
+				'--tm-service:#b794f4;' +
+				'--tm-state-ok:#68d391;' +
+				'--tm-state-wait:#fc8181;' +
+				'--tm-state-close:#f6ad55;' +
+				'--tm-info-bg:#1a365d;' +
+				'--tm-info-border:#2c5282;' +
+				'--tm-info-fg:#bee3f8;' +
+				'--tm-blocked-bg:#3d1818;' +
+				'--tm-blocked-border:#9b2c2c;' +
+				'--tm-blocked-fg:#fc8181;' +
+				'--tm-rate-fg:#f6ad55;' +
+				'--tm-drop-fg:#fc8181;' +
+				'--tm-speed:#63b3ed;' +
+				'--tm-shape-fg:#63b3ed;' +
+				'--tm-hover:#2d3748;' +
+				'--tm-section-action:#252a30;' +
+				'--tm-section-data:#1e1e1e;'
+			:
+				'--tm-bg:#ffffff;' +
+				'--tm-bg-alt:#f7fafc;' +
+				'--tm-bg-subtle:#f7f8fa;' +
+				'--tm-text:#1a202c;' +
+				'--tm-text-mute:#718096;' +
+				'--tm-text-faint:#a0aec0;' +
+				'--tm-border:#e2e8f0;' +
+				'--tm-th-bg:#4a5568;' +
+				'--tm-th-fg:#ffffff;' +
+				'--tm-proto:#2b6cb0;' +
+				'--tm-service:#805ad5;' +
+				'--tm-state-ok:#276749;' +
+				'--tm-state-wait:#c53030;' +
+				'--tm-state-close:#c05621;' +
+				'--tm-info-bg:#ebf8ff;' +
+				'--tm-info-border:#90cdf4;' +
+				'--tm-info-fg:#2c5282;' +
+				'--tm-blocked-bg:#fff5f5;' +
+				'--tm-blocked-border:#fc8181;' +
+				'--tm-blocked-fg:#c53030;' +
+				'--tm-rate-fg:#c05621;' +
+				'--tm-drop-fg:#9b2c2c;' +
+				'--tm-speed:#3182ce;' +
+				'--tm-shape-fg:#2b6cb0;' +
+				'--tm-hover:#ebf8ff;' +
+				'--tm-section-action:#f0f4f8;' +
+				'--tm-section-data:#ffffff;'
+			) +
 		'}' +
 		'@keyframes tm-spin{to{transform:rotate(360deg)}}' +
 		'@keyframes tm-pulse{0%,100%{opacity:.5}50%{opacity:1}}' +
@@ -714,7 +725,18 @@ function injectStyles() {
 		'.tg-eye{cursor:pointer;font-size:14px;user-select:none;line-height:1}' +
 		'.tg-template-hint{font-size:10px;color:var(--tm-text-faint);margin-top:2px}' +
 		'.tg-save-status{font-size:11px;margin-left:8px;transition:opacity .3s}';
-	document.head.appendChild(s);
+}
+
+function watchTheme() {
+	var obs = new MutationObserver(injectStyles);
+	obs.observe(document.documentElement, {attributes: true, attributeFilter: ['data-darkmode']});
+	if (window.matchMedia) {
+		try {
+			window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', injectStyles);
+		} catch(e) {
+			window.matchMedia('(prefers-color-scheme: dark)').addListener(injectStyles);
+		}
+	}
 }
 
 
@@ -1565,6 +1587,7 @@ return view.extend({
 		opts = applyUrlParams(opts);
 		saveOpts(opts);
 		injectStyles();
+		watchTheme();
 
 		var devices = [];
 		(leasesRaw || '').split('\n').forEach(function(line) {
