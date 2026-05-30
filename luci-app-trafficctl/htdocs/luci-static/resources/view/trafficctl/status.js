@@ -1518,7 +1518,7 @@ return view.extend({
 						var host = (res && res.host) ? res.host : null;
 						self._rdnsCache[it.dst] = host || null;
 						Array.prototype.forEach.call(
-							connsDiv.querySelectorAll('td[data-dst="'+it.dst+'"]'),
+							connsDiv.querySelectorAll('[data-dst="'+it.dst+'"]'),
 							function(cell) {
 								if (host) { cell.textContent = host; cell.style.color = ''; }
 								else { cell.innerHTML = '<span class="tc-c-faint">—</span>'; }
@@ -1530,7 +1530,7 @@ return view.extend({
 						if (it.gen !== self._queryGen) return;
 						self._rdnsCache[it.dst] = null;
 						Array.prototype.forEach.call(
-							connsDiv.querySelectorAll('td[data-dst="'+it.dst+'"]'),
+							connsDiv.querySelectorAll('[data-dst="'+it.dst+'"]'),
 							function(cell) { cell.innerHTML = '<span class="tc-c-faint">—</span>'; }
 						);
 					});
@@ -2064,7 +2064,7 @@ return view.extend({
 					if (groupBy !== 'none') {
 						var groups = groupConnections(data.connections, groupBy);
 						tbl = buildGroupedTable(groups, self._sortCol === 'bytes' || self._sortCol === 'count' ? self._sortCol : 'bytes', self._sortDir);
-						Array.prototype.forEach.call(tbl.querySelectorAll('th'), function(th) {
+						Array.prototype.forEach.call(tbl.querySelectorAll('.th'), function(th) {
 							th.addEventListener('click', function() {
 								var col = th.getAttribute('data-col');
 								if (self._sortCol === col) {
@@ -2081,7 +2081,7 @@ return view.extend({
 							groups.length + ' ' + _('groups from') + ' ' + data.connections.length + ' ' + _('connections') + '. ' + _('Click header to sort.')));
 					} else {
 						tbl = buildTable(data.connections, self._sortCol, self._sortDir, o.rdns, self._connHiddenCols);
-						Array.prototype.forEach.call(tbl.querySelectorAll('th'), function(th) {
+						Array.prototype.forEach.call(tbl.querySelectorAll('.th'), function(th) {
 							th.addEventListener('click', function() {
 								var col = th.getAttribute('data-col');
 								if (self._sortCol === col) {
@@ -2108,7 +2108,7 @@ return view.extend({
 								if (self._rdnsCache[dst] !== undefined) {
 									var cached = self._rdnsCache[dst];
 									Array.prototype.forEach.call(
-										connsDiv.querySelectorAll('td[data-dst="'+dst+'"]'),
+										connsDiv.querySelectorAll('[data-dst="'+dst+'"]'),
 										function(cell) {
 											if (cached) { cell.textContent = cached; cell.style.color = ''; }
 											else { cell.innerHTML = '<span class="tc-c-faint">—</span>'; }
@@ -2382,7 +2382,7 @@ return view.extend({
 		var sep = function() { return E('span', {'class':'tc-sep'}); };
 		var sectionLabel = function(t) { return E('div', {'class':'tc-section-label'}, t); };
 
-		var settingsBody = E('div', {'class':'tc-settings-body'});
+		var settingsBody = E('div', {'class':'tc-settings-body tc-hidden'});
 		var settingsCollapsed = true;
 		var settingsToggle = E('div', {'class':'tc-settings-toggle'}, [E('span', {}, '▸'), E('span', {}, _('Settings'))]);
 
