@@ -1,6 +1,6 @@
 # API Reference
 
-All backend functionality is exposed through shell scripts in `/usr/local/bin/trafficctl-*.sh`. The LuCI frontend calls them via JSON-RPC through the rpcd backend at `/usr/libexec/rpcd/trafficctl`.
+All backend functionality is exposed through shell scripts in `/usr/local/bin/trafficctl-*.sh`. The LuCI frontend calls them via JSON-RPC through the rpcd backend at `/usr/libexec/rpcd/luci.trafficctl`.
 
 ---
 
@@ -34,8 +34,8 @@ The frontend calls these via `rpc.declare()`:
 | `macfilter_add` | `trafficctl-macfilter-add.sh` | `ip` |
 | `macfilter_remove` | `trafficctl-macfilter-remove.sh` | `ip` |
 | `rdns` | `trafficctl-rdns.sh` | `ip` |
-| `config_get` | (inline) | (none) |
-| `config_set` | (inline) | `enabled`, `default_mode` |
+| `config_get` | (inline) | (none) — returns `enabled`, `default_mode`, `offload_mode`, `sw`, `hw` |
+| `config_set` | (inline) | `enabled`, `default_mode`, `sw`, `hw` (all optional) |
 | `telegram_config_get` | (inline) | (none) |
 | `telegram_config_set` | (inline) | `enabled`, `bot_token`, `chat_id`, `poll_interval`, `notify_new_device`, `notify_known_device`, `btn_block_inet`, `btn_block_wifi`, `btn_limiter`, `btn_shaper` |
 | `telegram_test` | `trafficctl-telegram-test.sh` | `bot_token`, `chat_id` |
@@ -197,7 +197,8 @@ Returns `[]` if tc is not installed or no HTB qdisc exists.
 
 ### trafficctl-rdns.sh
 
-Reverse DNS lookup for a single IP.
+Reverse DNS lookup for a single IP. Used by the Telegram bot and the rpcd `rdns` ubus
+method. The LuCI frontend uses `network.rrdns.lookup` directly for batch resolution.
 
 **Arguments:** `<ip>`
 
@@ -207,7 +208,8 @@ Reverse DNS lookup for a single IP.
 {"ip": "140.82.121.3", "host": "lb-140-82-121-3-iad.github.com"}
 ```
 
-Uses `dig -x` with `+time=1 +tries=1`. Requires `bind-dig`.
+Uses `ubus call network.rrdns lookup` (rpcd-mod-rrdns, ships with rpcd) with BusyBox
+`nslookup` as a fallback. No `bind-dig` required.
 
 ---
 
@@ -261,7 +263,7 @@ Manage tc/HTB traffic shaping.
 {"ok": true, "ip": "192.168.0.111", "classid": "1:6f", "info": "rate 10000Kbit"}
 ```
 
-**Persistence:** Writes to `/etc/trafficmon/shapes.json` on every add/remove.
+**Persistence:** Writes to `/etc/trafficctl/shapes.json` on every add/remove.
 
 ---
 
@@ -309,7 +311,7 @@ Bot daemon using Telegram long polling. Runs under procd.
 | `act:unshape:<ip>` | Remove shaper |
 | `act:back` | Return to device list |
 
-**Known devices file:** `/etc/trafficmon/telegram_known.json` -- tracks MACs for new device notifications.
+**Known devices file:** `/etc/trafficctl/telegram_known.json` -- tracks MACs for new device notifications.
 
 ### trafficctl-telegram-test.sh
 
@@ -323,4 +325,4 @@ Validates token format and chat_id, sends a test message. Returns `{"ok":true,"m
 
 ## rpcd ACL
 
-The ACL file at `/usr/share/rpcd/acl.d/luci-app-trafficctl.json` grants execution permissions. The rpcd backend at `/usr/libexec/rpcd/trafficctl` handles method dispatch and parameter validation.
+The ACL file at `/usr/share/rpcd/acl.d/luci-app-trafficctl.json` grants execution permissions. The rpcd backend at `/usr/libexec/rpcd/luci.trafficctl` handles method dispatch and parameter validation.

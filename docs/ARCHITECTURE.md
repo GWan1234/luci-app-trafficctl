@@ -26,16 +26,17 @@ graph TD
     subgraph "Router (Server)"
         subgraph "rpcd + uhttpd"
             ACL["luci-app-trafficctl.json<br/>(ACL definitions)"]
-            RPC["/usr/libexec/rpcd/trafficctl<br/>(JSON-RPC dispatch)"]
+            RPC["/usr/libexec/rpcd/luci.trafficctl<br/>(JSON-RPC dispatch)"]
         end
 
         subgraph "Query Scripts — /usr/local/bin/"
             SUM["trafficctl-summary.sh<br/>(all active devices)"]
             DEV["trafficctl-device.sh<br/>(per-device connections)"]
             BYT["trafficctl-bytes.sh<br/>(conntrack byte counters)"]
+            BYTNFT["trafficctl-bytes-nft.sh<br/>(nft counter init helper)"]
             RLS["trafficctl-ratelimit-stats.sh<br/>(nft drop counters)"]
             SHS["trafficctl-shape-stats.sh<br/>(tc class stats)"]
-            RDNS["trafficctl-rdns.sh<br/>(reverse DNS lookup)"]
+            RDNS["trafficctl-rdns.sh<br/>(reverse DNS — Telegram/CLI)"]
         end
 
         subgraph "Action Scripts — /usr/local/bin/"
@@ -61,7 +62,7 @@ graph TD
         end
 
         subgraph "Persistence"
-            SHAPES["/etc/trafficmon/shapes.json"]
+            SHAPES["/etc/trafficctl/shapes.json"]
             HOTPLUG["/etc/hotplug.d/iface/<br/>99-trafficctl-shapes"]
         end
     end
@@ -140,14 +141,10 @@ sequenceDiagram
     D->>D: tc class check (shape status)
     D-->>B: {ip, name, mac, conn_type, connections[], ...}
 
-    par rDNS resolution (if enabled)
-        B->>R: rdns(dst_ip_1)
-        R->>DNS: dig -x dst_ip_1
-        DNS-->>B: {ip, host}
-    and
-        B->>R: rdns(dst_ip_2)
-        R->>DNS: dig -x dst_ip_2
-        DNS-->>B: {ip, host}
+    opt rDNS resolution (if enabled)
+        B->>R: network.rrdns.lookup(addrs[], timeout, limit)
+        Note over R: rpcd-mod-rrdns resolves all IPs in one batch
+        R-->>B: {ip1: "host1", ip2: "host2", ...}
     end
 ```
 
@@ -326,15 +323,22 @@ Speed is calculated as `(bytes_now - bytes_prev) / dt` for both download and upl
 - `_speedHistory` -- sliding window (trimmed to avgWindow/pollInterval samples) for sparkline and averaging.
 - `_fullHistory` -- never trimmed, used by the popup graph to show the entire session.
 
-### Popup Graph Features
+### Graph Features
 
+Two rendering contexts use the same `renderFullGraph()` function:
+
+**Hover popup** (any sparkline): interactive SVG overlay.
+**Inline device graph** (device detail view): static SVG rendered below the action buttons when a specific device is selected. Updates on every bytes poll.
+
+Both share:
 - Dual lines: download (solid blue) + upload (dashed green)
 - Gradient area fill with linear gradient
 - Min/max band (rolling window ±5 points)
-- Interactive crosshair with precise DL/UL values
 - Rate limit line (from shapeMap or summary data)
 - Nice Y-axis ticks (multiples of 100/500 Kbit/s, min 5 grid lines)
 - 98th percentile scaling (outliers don't crush the graph)
+
+The popup additionally has an interactive crosshair with precise DL/UL values.
 
 Polling stops when:
 - The browser tab is hidden (`document.hidden === true`).
@@ -368,12 +372,12 @@ This approach disconnects only the target client. All other WiFi clients remain 
 
 | Feature | Persisted | Storage | Rationale |
 |---------|-----------|---------|-----------|
-| Shaping (tc/HTB) | Always | `shapes.json` | Long-term bandwidth allocation |
-| Rate limiting (nft policer) | Optional (`persist_rules`) | `rules.json` | Configurable -- may be temporary or permanent |
-| Internet blocking | Optional (`persist_rules`) | `rules.json` | Configurable -- may be temporary or permanent |
+| Shaping (tc/HTB) | Always | `/etc/trafficctl/shapes.json` | Long-term bandwidth allocation |
+| Rate limiting (nft policer) | Optional (`persist_rules`) | `/etc/trafficctl/rules.json` | Configurable -- may be temporary or permanent |
+| Internet blocking | Optional (`persist_rules`) | `/etc/trafficctl/rules.json` | Configurable -- may be temporary or permanent |
 | WiFi MAC filtering | Always | `uci commit wireless` | Committed to `/etc/config/wireless` |
 
-The hotplug script triggers on `ACTION=ifup` and `INTERFACE=lan`, with a readiness loop (waits up to 10s for tc to be available on the bridge device). When `persist_rules` is enabled, blocks and ratelimits are saved/removed from `/etc/trafficmon/rules.json` alongside shape operations.
+The hotplug script triggers on `ACTION=ifup` and `INTERFACE=lan`, with a readiness loop (waits up to 10s for tc to be available on the bridge device). When `persist_rules` is enabled, blocks and ratelimits are saved/removed from `/etc/trafficctl/rules.json` alongside shape operations.
 
 ---
 
@@ -394,7 +398,7 @@ Telegram API  ←──curl long poll──  trafficctl-telegram.sh (procd)
 - **Polling:** `getUpdates?timeout=N` acts as both fetch and sleep — no separate timer needed.
 - **Security:** Only responds to messages from the configured `chat_id`. Unauthorized messages are silently dropped.
 - **Device cache:** Summary output is cached for 5 seconds in `/tmp/trafficctl_tg_devices.json`.
-- **Known devices:** `/etc/trafficmon/telegram_known.json` tracks MACs for new device notifications.
+- **Known devices:** `/etc/trafficctl/telegram_known.json` tracks MACs for new device notifications.
 - **Configuration:** UCI section `trafficctl.telegram` with token, chat_id, notification and button toggles. Token is masked (never returned to the frontend).
 - **Init:** procd `respawn 3600 5 5` + `service_triggers` for auto-reload on UCI commit.
 

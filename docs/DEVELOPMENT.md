@@ -21,11 +21,12 @@ scp luci-app-trafficctl/root/usr/local/bin/trafficctl-*.sh root@192.168.0.1:/usr
 ssh root@192.168.0.1 'chmod +x /usr/local/bin/trafficctl-*.sh'
 
 # Deploy rpcd backend
-scp luci-app-trafficctl/root/usr/libexec/rpcd/trafficctl root@192.168.0.1:/usr/libexec/rpcd/
-ssh root@192.168.0.1 'chmod +x /usr/libexec/rpcd/trafficctl && /etc/init.d/rpcd restart'
+scp luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl root@192.168.0.1:/usr/libexec/rpcd/
+ssh root@192.168.0.1 'chmod +x /usr/libexec/rpcd/luci.trafficctl && /etc/init.d/rpcd restart'
 
 # Deploy frontend
 scp luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.js \
+    luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/status.css \
     root@192.168.0.1:/www/luci-static/resources/view/trafficctl/
 ```
 
@@ -74,7 +75,8 @@ make package/luci-app-trafficctl/compile V=s
 ```
 luci-app-trafficctl/
 ├── luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/
-│   └── status.js                        # Frontend (single ES5 file, ~1800 lines)
+│   ├── status.js                        # Frontend (single ES5 file, ~3100 lines)
+│   └── status.css                       # Frontend styles (~610 lines)
 ├── luci-app-trafficctl/root/
 │   ├── etc/
 │   │   ├── config/trafficctl            # UCI config placeholder
@@ -82,12 +84,13 @@ luci-app-trafficctl/
 │   │       └── 99-trafficctl-shapes     # Restore tc rules on boot
 │   ├── usr/
 │   │   ├── libexec/rpcd/
-│   │   │   └── trafficctl              # rpcd backend (JSON-RPC dispatch)
+│   │   │   └── luci.trafficctl         # rpcd backend (JSON-RPC dispatch)
 │   │   ├── local/bin/
 │   │   │   ├── trafficctl-fw.sh        # Firewall abstraction (sourced)
 │   │   │   ├── trafficctl-summary.sh   # All-device summary
 │   │   │   ├── trafficctl-device.sh    # Per-device detail
-│   │   │   ├── trafficctl-bytes.sh     # Byte counters for speed
+│   │   │   ├── trafficctl-bytes.sh     # Byte counters for speed (conntrack)
+│   │   │   ├── trafficctl-bytes-nft.sh # nft counter init helper
 │   │   │   ├── trafficctl-block.sh     # Internet block
 │   │   │   ├── trafficctl-unblock.sh   # Internet unblock
 │   │   │   ├── trafficctl-shape.sh     # tc/HTB shaping
@@ -96,7 +99,7 @@ luci-app-trafficctl/
 │   │   │   ├── trafficctl-ratelimit-stats.sh
 │   │   │   ├── trafficctl-macfilter-add.sh
 │   │   │   ├── trafficctl-macfilter-remove.sh
-│   │   │   └── trafficctl-rdns.sh      # Reverse DNS
+│   │   │   └── trafficctl-rdns.sh      # Reverse DNS (Telegram/CLI)
 │   │   └── share/
 │   │       ├── luci/menu.d/
 │   │       │   └── luci-app-trafficctl.json
@@ -234,18 +237,18 @@ GitHub Actions (`.github/workflows/`) runs on every push and PR:
 
 **"Permission denied" from LuCI:**
 - Check ACL file exists at `/usr/share/rpcd/acl.d/luci-app-trafficctl.json`
-- Ensure rpcd backend is executable: `chmod +x /usr/libexec/rpcd/trafficctl`
+- Ensure rpcd backend is executable: `chmod +x /usr/libexec/rpcd/luci.trafficctl`
 - Restart rpcd: `/etc/init.d/rpcd restart`
 
 **Script works via SSH but not from LuCI:**
-- rpcd backend needs `list` and method handlers. Check `/usr/libexec/rpcd/trafficctl`.
+- rpcd backend needs `list` and method handlers. Check `/usr/libexec/rpcd/luci.trafficctl`.
 
 **tc commands fail:**
 - Verify `tc-full` (not minimal `tc`): `opkg install tc-full kmod-sched-htb`
 - Check kernel module: `lsmod | grep sch_htb`
 
 **Shaping not restored after reboot:**
-- Check `/etc/trafficmon/shapes.json` exists with valid JSON
+- Check `/etc/trafficctl/shapes.json` exists with valid JSON
 - Test hotplug manually: `ACTION=ifup INTERFACE=lan sh /etc/hotplug.d/iface/99-trafficctl-shapes`
 
 **Debug logging:**
