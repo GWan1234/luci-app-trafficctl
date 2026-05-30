@@ -166,6 +166,18 @@ var callVersion = rpc.declare({
 	method: 'version'
 });
 
+var callOffloadGet = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'offload_get',
+	expect: {}
+});
+
+var callOffloadSet = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'offload_set',
+	params: ['sw', 'hw']
+});
+
 var callConfigGet = rpc.declare({
 	object: 'luci.trafficctl',
 	method: 'config_get'
@@ -2798,6 +2810,65 @@ return view.extend({
 			});
 		}
 		settingsBody.appendChild(loggingSection.el);
+
+		// ── Flow Offload section (lazy-loaded) ─────────────────────────────
+		var offloadSection = mkCollapsible(_('Flow Offload'), null, false);
+		var offloadLoaded = false;
+		offloadSection.label.addEventListener('click', function() {
+			if (!offloadLoaded && !offloadSection.body.classList.contains('tc-hidden')) {
+				offloadLoaded = true;
+				loadOffloadUI(offloadSection.body);
+			}
+		});
+
+		function loadOffloadUI(container) {
+			var statusSpan = E('span', {'style':'font-size:12px;color:var(--tc-muted)'}, _('Loading…'));
+			container.appendChild(statusSpan);
+
+			callOffloadGet().then(function(cfg) {
+				while (container.firstChild) container.removeChild(container.firstChild);
+
+				var saveStatus = E('span', {'class':'tg-save-status'});
+				var saveTimer = null;
+				var swCb, hwCb;
+
+				function doSave() {
+					if (saveTimer) clearTimeout(saveTimer);
+					saveTimer = setTimeout(function() {
+						saveStatus.textContent = _('Applying…');
+						saveStatus.style.color = 'var(--tc-muted)';
+						callOffloadSet(swCb.checked, hwCb.checked).then(function(res) {
+							saveStatus.textContent = (res && res.ok) ? '✓' : '✗';
+							saveStatus.style.color = (res && res.ok) ? 'var(--tc-ok)' : 'var(--tc-err)';
+						}).catch(function(e) {
+							saveStatus.textContent = '✗';
+							saveStatus.style.color = 'var(--tc-err)';
+						});
+					}, 400);
+				}
+
+				var swToggleEl = mkToggle('tc-offload-sw', _('Software'), cfg.sw, function() {
+					hwCb.disabled = !swCb.checked;
+					if (!swCb.checked) hwCb.checked = false;
+					doSave();
+				});
+				swCb = swToggleEl.querySelector('input');
+
+				var hwToggleEl = mkToggle('tc-offload-hw', _('Hardware'), cfg.hw, doSave);
+				hwCb = hwToggleEl.querySelector('input');
+				if (!cfg.sw) hwCb.disabled = true;
+
+				var note = E('div', {'style':'font-size:11px;color:var(--tc-muted);margin-top:6px'},
+					_('Hardware offload disables real-time speed monitoring on platforms that do not implement the stats callback (e.g. Mediatek Filogic). Firewall rules reload takes ~2 s after save.'));
+
+				container.appendChild(E('div', {'class':'tc-log-row'}, [swToggleEl, hwToggleEl, saveStatus]));
+				container.appendChild(note);
+			}).catch(function(e) {
+				statusSpan.textContent = '✗ ' + (e.message || e);
+				statusSpan.style.color = 'var(--tc-err)';
+			});
+		}
+		settingsBody.appendChild(offloadSection.el);
 
 		var connFiltersRow = E('div', {'class':'tc-conn-filters-row'}, [
 			E('span', {'data-tip':_('Filter connections by protocol')}, [mkLabel(_('Proto')+':'), protoPick.el]),

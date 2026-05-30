@@ -49,6 +49,8 @@ list)
 	printf '"logging_config_get":{},'
 	printf '"logging_config_set":{"enabled":"bool","log_file":"str","max_lines":"int","syslog":"bool","log_blocks":"bool","log_ratelimits":"bool","log_shapes":"bool","log_telegram":"bool","log_config":"bool"},'
 	printf '"activity_log":{"lines":"int"},'
+	printf '"offload_get":{},'
+	printf '"offload_set":{"sw":"bool","hw":"bool"},'
 	printf '"version":{}'
 	printf '}'
 	;;
@@ -334,6 +336,25 @@ call)
 		else
 			echo '{"ok":true,"lines":[]}'
 		fi
+		;;
+	offload_get)
+		sw=$(uci -q get firewall.@defaults[0].flow_offloading)
+		hw=$(uci -q get firewall.@defaults[0].flow_offloading_hw)
+		mode=$(tctl_get_offload_mode)
+		printf '{"sw":%s,"hw":%s,"mode":"%s"}' \
+			"$([ "$sw" = "1" ] && echo true || echo false)" \
+			"$([ "$hw" = "1" ] && echo true || echo false)" \
+			"$mode"
+		;;
+	offload_set)
+		read -r input
+		sw=$(echo "$input" | jsonfilter -e '@.sw' 2>/dev/null)
+		hw=$(echo "$input" | jsonfilter -e '@.hw' 2>/dev/null)
+		[ -n "$sw" ] && uci set "firewall.@defaults[0].flow_offloading=$([ "$sw" = "true" ] && echo 1 || echo 0)"
+		[ -n "$hw" ] && uci set "firewall.@defaults[0].flow_offloading_hw=$([ "$hw" = "true" ] && echo 1 || echo 0)"
+		uci commit firewall
+		/etc/init.d/firewall reload >/dev/null 2>&1 &
+		echo '{"ok":true}'
 		;;
 	version)
 		ver=$(opkg info luci-app-trafficctl 2>/dev/null | awk '/^Version:/{print $2}')
