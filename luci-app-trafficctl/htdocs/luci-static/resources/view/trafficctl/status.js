@@ -2899,19 +2899,28 @@ return view.extend({
 			]);
 
 			if (mode === 'hardware-counter') {
-				bg     = 'rgba(41,128,185,0.10)';
-				border = '#2980b9';
-				icon   = '✔️';
+				bg     = 'rgba(211,84,0,0.10)';
+				border = '#d35400';
+				icon   = '⚠️';
 				body   = E('div', {}, [
-					para(bold(_('Hardware flow offloading is active — all features work.'))),
-					para([_('The router offloads packet forwarding to the hardware (NIC/SoC) for higher throughput. ' +
-						  'The flowtable '),
+					para(bold(_('Hardware flow offloading active — real-time speed monitoring unavailable.'))),
+					para([_('The flowtable '),
 						E('code', {}, 'counter'),
-						_(' flag (Linux 5.7+ / OpenWrt 22.03+ with fw4) keeps conntrack byte counts ' +
-						  'in sync — monitoring, shaping, and rate limiting all work normally.')]),
+						_(' flag should sync hardware byte counts back to conntrack, but on many ' +
+						  'platforms (e.g. Mediatek Filogic) the driver does not implement the stats ' +
+						  'callback, so conntrack counters remain frozen for active flows.')]),
+					para(bold(_('To restore speed monitoring:'))),
+					E('ul', {'class': 'tc-offload-ul'}, [
+						E('li', {}, [
+							_('Disable hardware offload (keeps software offload): '),
+							E('code', {}, 'uci set firewall.@defaults[0].flow_offloading_hw=0 && uci commit firewall && fw4 reload'),
+						]),
+						E('li', {}, _('Or disable all flow offload in LuCI → Network → Firewall → General Settings.')),
+					]),
+					para(_('Blocking, rate limiting, and traffic shaping continue to work regardless.')),
 					docLinks,
 				]);
-			} else if (mode === 'hardware') {
+				} else if (mode === 'hardware') {
 				bg     = 'rgba(211,84,0,0.10)';
 				border = '#d35400';
 				icon   = '⚠️';
