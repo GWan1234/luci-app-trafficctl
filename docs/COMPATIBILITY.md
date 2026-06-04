@@ -62,13 +62,13 @@ The package contains no compiled code (all shell scripts and JavaScript), so it 
 
 If `tc` is not installed, the shaping feature gracefully degrades: the UI still works but shaper actions return an error message explaining what to install.
 
-### For Reverse DNS (optional)
+### For Reverse DNS
 
-| Package | Purpose | Size |
-|---------|---------|------|
-| `bind-dig` | DNS reverse lookup tool | ~200 KB |
+Reverse DNS uses `ubus call network.rrdns lookup` — the same built-in rpcd module that
+the LuCI connections page uses. It is provided by `rpcd-mod-rrdns`, which ships with
+`rpcd` on all modern OpenWrt builds and requires no separate install.
 
-Without `bind-dig`, reverse DNS lookups silently return empty hostnames.
+BusyBox `nslookup` (always available) is used as a fallback if rpcd-mod-rrdns is absent.
 
 ### For Interface Detection (optional)
 

@@ -191,7 +191,7 @@ I hope it turns out as useful for you as it has been for me.
 | `iw-full` | Interface detection | WiFi band identification |
 | `bridge-utils` | Interface detection | LAN port identification (brctl) |
 | `curl` + `jsonfilter` | Telegram bot | jsonfilter is part of base OpenWrt |
-| `bind-dig` | Reverse DNS | Optional, for hostname resolution |
+| `rpcd-mod-rrdns` | Reverse DNS | Included with `rpcd`; enables rDNS in LuCI, Telegram, and CLI |
 
 ## Compatibility
 
@@ -209,16 +209,16 @@ Runs on all architectures (no compiled code, pure shell + LuCI JavaScript).
 
 **CI-tested on 52 combinations** — every push is verified against real OpenWrt rootfs containers:
 
-| | x86‑64 | x86‑generic | mips\_24kc | aarch64 | arm\_a9 | arm\_a15 | armsr | i386 |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **21.02.6** | ✓ | | | ✓ | | ✓ | | |
-| **22.03.7** | ✓ | | | ✓ | | ✓ | | |
-| **23.05.6** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| **24.10.1** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| **24.10.6** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| **25.12.0** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| **25.12.4** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| **snapshot** | ✓ | | ✓ | ✓ | | | ✓ | |
+| | x86‑64 | x86‑generic | mips\_24kc | aarch64 | arm\_a9 | arm\_a15 | armsr | armvirt32 | i386 |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| **21.02.6** | ✓ | | | ✓ | | ✓ | | ✓ | |
+| **22.03.7** | ✓ | | | ✓ | | ✓ | | ✓ | |
+| **23.05.6** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | | ✓ |
+| **24.10.1** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | | ✓ |
+| **24.10.6** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | | ✓ |
+| **25.12.0** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | | ✓ |
+| **25.12.4** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | | ✓ |
+| **snapshot** | ✓ | | ✓ | ✓ | | | ✓ | | |
 
 Each test builds the `.ipk`, runs `opkg install --force-depends` inside the real OpenWrt rootfs container for that version/arch, then verifies all files are present and all scripts pass `ash -n` syntax check.
 
@@ -328,8 +328,7 @@ apk add tc-full kmod-sched-core kmod-sched-htb
 # For interface detection (WiFi band + LAN port)
 apk add iw-full bridge-utils
 
-# For reverse DNS (optional)
-apk add bind-dig
+# rpcd-mod-rrdns is included with rpcd (no extra install needed)
 
 # For Telegram bot (optional)
 apk add curl
@@ -350,8 +349,7 @@ opkg install tc-full kmod-sched-core kmod-sched-htb
 # For interface detection (WiFi band + LAN port)
 opkg install iw-full bridge-utils
 
-# For reverse DNS (optional)
-opkg install bind-dig
+# rpcd-mod-rrdns is included with rpcd (no extra install needed)
 
 # For Telegram bot (optional)
 opkg install curl
@@ -455,6 +453,7 @@ The frontend talks to a thin rpcd dispatcher over ubus. The Telegram bot provide
 | Path | Role |
 |------|------|
 | `luci-app-trafficctl/htdocs/.../view/trafficctl/status.js` | Frontend — single ES5 file, no deps |
+| `luci-app-trafficctl/htdocs/.../view/trafficctl/status.css` | Frontend styles |
 | `luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl` | rpcd backend — JSON-RPC dispatch |
 | `luci-app-trafficctl/root/usr/local/bin/trafficctl-*.sh` | Backend scripts (monitoring + control) |
 | `luci-app-trafficctl/root/usr/local/bin/trafficctl-fw.sh` | Firewall abstraction layer (sourced) |
