@@ -117,7 +117,7 @@ In practice, both achieve the same result (excess packets are dropped), but the 
 
 1. **IPv4 only** -- The current implementation only handles IPv4 addresses. IPv6 connections are not tracked, blocked, or shaped.
 
-2. **Single LAN subnet assumption** -- The shaping class ID encoding (`third_octet * 256 + fourth_octet`) assumes all devices are on 192.168.x.x. Non-standard subnets (10.x.x.x) will work for blocking and limiting but may have class ID collisions if multiple /24s are used.
+2. **Multiple LAN subnets** -- Device discovery is multi-bridge / multi-VLAN aware: all interfaces in non-WAN firewall zones are scanned (VPN/tunnel zones such as WireGuard/AmneziaWG are excluded because they are masqueraded). The one remaining caveat is the **shaping** class ID encoding (`third_octet * 256 + fourth_octet`): two devices on different subnets that share the same last two octets (e.g. `192.168.0.5` and `10.0.0.5`) map to the same HTB class. Monitoring, blocking and rate-limiting are unaffected; only simultaneous shaping of such a colliding pair is.
 
 3. **DHCP lease dependency** -- Device names and MACs are resolved from `/tmp/dhcp.leases`. Devices with static IPs that bypass DHCP will show as IP addresses only.
 

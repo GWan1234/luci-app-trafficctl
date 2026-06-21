@@ -11,8 +11,6 @@
 
 . /usr/local/bin/trafficctl-fw.sh
 
-LAN_DEV=$(tctl_get_lan_device)
-LAN_SUBNET=$(ip -4 addr show dev "$LAN_DEV" 2>/dev/null | grep -oE 'inet [0-9.]+/[0-9]+' | head -1 | awk '{print $2}')
 CONN_CACHE="/tmp/trafficctl_conn_cache"
 [ -f "$CONN_CACHE" ] || : > "$CONN_CACHE"
 
@@ -20,10 +18,14 @@ PORT_MAP_FILE="/tmp/.trafficctl_portmap.$$"
 # shellcheck disable=SC2064
 trap "rm -f '$PORT_MAP_FILE'" EXIT INT TERM
 
-LAN_PREFIX=$(echo "$LAN_SUBNET" | cut -d. -f1-3)
-LAN_IP=$(echo "$LAN_SUBNET" | cut -d/ -f1)
-
-[ -z "$LAN_PREFIX" ] && { echo '[]'; exit 0; }
+# Enumerate every LAN subnet (multi-bridge / multi-VLAN aware), once.
+LAN_SUBNETS=$(tctl_lan_subnets)
+[ -z "$LAN_SUBNETS" ] && { echo '[]'; exit 0; }
+LAN_DEVS=$(echo "$LAN_SUBNETS" | awk '{print $1}' | sort -u)
+# Membership spec for awk: "netbase:block:routerint ..." (no awk bit-ops needed)
+MATCH_SPEC=$(echo "$LAN_SUBNETS" | awk '{printf "%s%s:%s:%s",(NR>1?" ":""),$2,$3,$4}')
+# Device that carries the tc/HTB shaper (shaping is single-bridge by design).
+PRIMARY_LAN_DEV=$(tctl_get_lan_device)
 
 # Get WiFi station→interface mapping: "mac iface_name band"
 get_wifi_stations() {
@@ -45,23 +47,27 @@ get_wifi_stations() {
     done
 }
 
-# Get bridge MAC→port interface mapping: "mac port_iface"
+# Get bridge MAC→port interface mapping across all LAN bridges: "mac port_iface"
 get_bridge_macs() {
-    for pdir in /sys/class/net/"$LAN_DEV"/brif/*/; do
-        [ -d "$pdir" ] || continue
-        local iface pno
-        iface=$(basename "$pdir")
-        pno=$(cat "${pdir}port_no" 2>/dev/null)
-        [ -z "$pno" ] && continue
-        printf "%d %s\n" "$(( pno ))" "$iface"
-    done > "$PORT_MAP_FILE"
-    brctl showmacs "$LAN_DEV" 2>/dev/null | awk -v pmf="$PORT_MAP_FILE" '
-    BEGIN { while ((getline line < pmf) > 0) { split(line, p, " "); portname[p[1]] = p[2] } }
-    NR > 1 && $3 == "no" {
-        mac = tolower($2)
-        port = $1 + 0
-        if (port in portname) print mac, portname[port]
-    }'
+    local dev
+    for dev in $LAN_DEVS; do
+        [ -d "/sys/class/net/$dev/brif" ] || continue
+        for pdir in /sys/class/net/"$dev"/brif/*/; do
+            [ -d "$pdir" ] || continue
+            local iface pno
+            iface=$(basename "$pdir")
+            pno=$(cat "${pdir}port_no" 2>/dev/null)
+            [ -z "$pno" ] && continue
+            printf "%d %s\n" "$(( pno ))" "$iface"
+        done > "$PORT_MAP_FILE"
+        brctl showmacs "$dev" 2>/dev/null | awk -v pmf="$PORT_MAP_FILE" '
+        BEGIN { while ((getline line < pmf) > 0) { split(line, p, " "); portname[p[1]] = p[2] } }
+        NR > 1 && $3 == "no" {
+            mac = tolower($2)
+            port = $1 + 0
+            if (port in portname) print mac, portname[port]
+        }'
+    done
     rm -f "$PORT_MAP_FILE"
 }
 
@@ -69,23 +75,44 @@ get_bridge_macs() {
 # Emit "ip total tcp udp conns" for every active LAN source in one read,
 # replicating the previous per-IP accounting (original-direction bytes of the
 # first tuple that belongs to a LAN device). Replaces N full conntrack reads.
-CT_SUMMARY=$(awk -v prefix="$LAN_PREFIX" -v lanip="$LAN_IP" '
+CT_SUMMARY=$(awk -v spec="$MATCH_SPEC" '
+function ip2int(ip,   a) {
+    split(ip, a, ".")
+    return a[1]*16777216 + a[2]*65536 + a[3]*256 + a[4]
+}
+# Return the index of the LAN subnet that contains ip, or 0.
+function lan_idx(ip,   si, k) {
+    si = ip2int(ip)
+    for (k = 1; k <= ns; k++)
+        if (si - (si % blk[k]) == base[k]) return k
+    return 0
+}
+BEGIN {
+    ns = split(spec, parts, " ")
+    for (k = 1; k <= ns; k++) {
+        split(parts[k], kv, ":")
+        base[k] = kv[1] + 0; blk[k] = kv[2] + 0; rtr[k] = kv[3] + 0
+    }
+}
 {
     proto=""
     for (i=1; i<=NF; i++) {
         if ($i == "tcp") proto="tcp"
         else if ($i == "udp") proto="udp"
     }
-    # first src= field whose value is on the LAN
-    srcidx=0; src=""
+    # first src= field that belongs to one of our LAN subnets
+    srcidx=0; src=""; sk=0
     for (i=1; i<=NF; i++) {
         if (index($i, "src=") == 1) {
             v=substr($i, 5)
-            if (v ~ "^"prefix"\\.") { src=v; srcidx=i; break }
+            k=lan_idx(v)
+            if (k > 0) { src=v; srcidx=i; sk=k; break }
         }
     }
-    if (src == "" || src == lanip) next
-    if (src ~ /\.255$/) next
+    if (src == "") next
+    si=ip2int(src)
+    # skip the router itself, the network address and the broadcast address
+    if (si == rtr[sk] || si == base[sk] || si == base[sk] + blk[sk] - 1) next
     seen=0; got_dst=0; found=0; b=0
     for (i=srcidx; i<=NF; i++) {
         if (i == srcidx) { seen=1; continue }
@@ -111,7 +138,7 @@ END {
         printf "%s %d %d %d %d\n", ip, total[ip]+0, tcp[ip]+0, udp[ip]+0, conns[ip]
 }' /proc/net/nf_conntrack 2>/dev/null)
 
-ACTIVE_IPS=$(echo "$CT_SUMMARY" | awk 'NF{print $1}')
+ACTIVE_IPS=$(echo "$CT_SUMMARY" | awk 'NF{print $1}' | sort -t. -k1,1n -k2,2n -k3,3n -k4,4n)
 [ -z "$ACTIVE_IPS" ] && { echo '[]'; exit 0; }
 
 # ── Prefetch all shared state once ─────────────────────────────────────────
@@ -131,7 +158,7 @@ fi
 # tc HTB classes → "classid rate_kbit" map (one tc call, parsed once)
 TC_MAP=""
 if command -v tc >/dev/null 2>&1; then
-    TC_MAP=$(tc class show dev "$LAN_DEV" 2>/dev/null | awk '
+    TC_MAP=$(tc class show dev "$PRIMARY_LAN_DEV" 2>/dev/null | awk '
     /^class htb 1:/ {
         classid=$3
         minor=classid; sub(/^1:/,"",minor)
