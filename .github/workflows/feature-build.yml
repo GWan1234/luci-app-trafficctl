@@ -126,25 +126,25 @@ jobs:
             --prerelease \
             --title "Dev: ${BRANCH} @ ${SHA}" \
             --notes "$(cat <<NOTES
-## Dev build — \`${BRANCH}\`
+          ## Dev build — \`${BRANCH}\`
 
-Built from [\`${SHA}\`](https://github.com/${REPO}/commit/${GITHUB_SHA}) · ${DATE}
+          Built from [\`${SHA}\`](https://github.com/${REPO}/commit/${GITHUB_SHA}) · ${DATE}
 
-> ⚠️ Pre-release for testing only — not for production.
+          > ⚠️ Pre-release for testing only — not for production.
 
-| File | OpenWrt version | Command |
-|------|----------------|---------|
-| \`luci-app-trafficctl.ipk\` | 21.02 – 24.10 | \`opkg install <url>\` |
-| \`luci-app-trafficctl.apk\` | 25.12+ | \`apk add --allow-untrusted <url>\` |
+          | File | OpenWrt version | Command |
+          |------|----------------|---------|
+          | \`luci-app-trafficctl.ipk\` | 21.02 – 24.10 | \`opkg install <url>\` |
+          | \`luci-app-trafficctl.apk\` | 25.12+ | \`apk add --allow-untrusted <url>\` |
 
-### Install
+          ### Install
 
-\`\`\`sh
-# OpenWrt 21.02 – 24.10
-opkg install https://github.com/${REPO}/releases/download/${TAG}/luci-app-trafficctl.ipk
+          \`\`\`sh
+          # OpenWrt 21.02 – 24.10
+          opkg install https://github.com/${REPO}/releases/download/${TAG}/luci-app-trafficctl.ipk
 
-# OpenWrt 25.12+
-apk add --allow-untrusted https://github.com/${REPO}/releases/download/${TAG}/luci-app-trafficctl.apk
-\`\`\`
-NOTES
-)"
+          # OpenWrt 25.12+
+          apk add --allow-untrusted https://github.com/${REPO}/releases/download/${TAG}/luci-app-trafficctl.apk
+          \`\`\`
+          NOTES
+          )"
