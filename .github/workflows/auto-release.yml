@@ -177,6 +177,10 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=${{ steps.bump.outputs.new_version }}/" luci-app-trafficctl/Makefile
           sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=1/" luci-app-trafficctl/Makefile
+          # Fail loudly if the substitution did not take (e.g. Makefile format
+          # changed) instead of tagging a release with an unbumped version.
+          grep -qx "PKG_VERSION:=${{ steps.bump.outputs.new_version }}" luci-app-trafficctl/Makefile \
+            || { echo "ERROR: PKG_VERSION was not updated in the Makefile"; exit 1; }
           git add luci-app-trafficctl/Makefile
           git commit -m "chore: bump version to ${{ steps.bump.outputs.new_version }}"
           git tag "${{ steps.bump.outputs.new_tag }}"

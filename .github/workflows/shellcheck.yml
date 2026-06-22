@@ -16,10 +16,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Run ShellCheck
-        uses: ludeeus/action-shellcheck@2.0.0
-        with:
-          scandir: luci-app-trafficctl/root/usr/local/bin
-          additional_files: luci-app-trafficctl/root/etc/hotplug.d/iface/99-trafficctl-shapes luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl luci-app-trafficctl/root/etc/init.d/trafficctl-telegram
-        env:
-          SHELLCHECK_OPTS: -x -e SC1091
+      # Explicit scan of EVERY shell script (detected by shebang), failing on
+      # any warning or error. The previous ludeeus/action-shellcheck step only
+      # scanned root/usr/local/bin: its `additional_files` were passed as full
+      # paths but the action treats them as `find -name` basename globs, so the
+      # init.d / rpcd / hotplug scripts were silently never checked.
+      - name: Run ShellCheck (warnings fail)
+        run: |
+          shellcheck --version
+          mapfile -t files < <(
+            grep -rlE '^#!.*(sh|bash|dash|ash)' \
+              luci-app-trafficctl/root build-ipk.sh build-apk.sh tests \
+              | grep -v node_modules | sort -u
+          )
+          echo "Scanning ${#files[@]} shell scripts:"
+          printf '  %s\n' "${files[@]}"
+          shellcheck -x -e SC1091 -S warning "${files[@]}"
