@@ -57,71 +57,28 @@ jobs:
     needs: build-packages
     strategy:
       fail-fast: false
+      # x86-64 only, on purpose. luci-app-trafficctl is Architecture: all
+      # (pure shell + JavaScript, no compiled code), so behaviour does not vary
+      # by CPU arch — only by OpenWrt version (opkg vs apk, conffile handling).
+      # We therefore test every supported version on x86-64, which is
+      # representative. Non-x86-64 arches were previously listed but never ran:
+      # OpenWrt publishes its rootfs container images for linux/amd64 only, so
+      # `docker pull` of an aarch64/arm/mips/i386 rootfs fails with "no matching
+      # manifest" — there is no image to emulate. Listing them only produced
+      # fake-green skips (verified empirically), so they are dropped rather than
+      # pretended-tested.
       matrix:
         include:
-          # 21.02 (legacy naming)
-          - { version: "21.02", arch: "x86-64",    image: "x86-64-v21.02.6" }
-          - { version: "21.02", arch: "aarch64",   image: "aarch64_cortex-a53-v21.02.6" }
-          - { version: "21.02", arch: "arm_a15",   image: "arm_cortex-a15_neon-vfpv4-v21.02.6" }
-          - { version: "21.02", arch: "armvirt32",  image: "armvirt-32-v21.02.6" }
-          # 22.03 (legacy naming)
-          - { version: "22.03", arch: "x86-64",    image: "x86-64-v22.03.7" }
-          - { version: "22.03", arch: "aarch64",   image: "aarch64_cortex-a53-v22.03.7" }
-          - { version: "22.03", arch: "arm_a15",   image: "arm_cortex-a15_neon-vfpv4-v22.03.7" }
-          - { version: "22.03", arch: "armvirt32",  image: "armvirt-32-v22.03.7" }
-          # 23.05
-          - { version: "23.05", arch: "x86-64",    image: "x86-64-v23.05.6" }
-          - { version: "23.05", arch: "x86-generic", image: "x86-generic-v23.05.6" }
-          - { version: "23.05", arch: "mips_24kc", image: "mips_24kc-v23.05.6" }
-          - { version: "23.05", arch: "aarch64",   image: "aarch64_generic-v23.05.6" }
-          - { version: "23.05", arch: "arm_a9",    image: "arm_cortex-a9_vfpv3-d16-v23.05.6" }
-          - { version: "23.05", arch: "arm_a15",   image: "arm_cortex-a15_neon-vfpv4-v23.05.6" }
-          - { version: "23.05", arch: "armsr",     image: "armsr-armv8-v23.05.6" }
-          - { version: "23.05", arch: "i386",      image: "i386_pentium4-v23.05.6" }
-          # 24.10 (first available)
-          - { version: "24.10.1", arch: "x86-64",    image: "x86-64-v24.10.1" }
-          - { version: "24.10.1", arch: "x86-generic", image: "x86-generic-v24.10.1" }
-          - { version: "24.10.1", arch: "mips_24kc", image: "mips_24kc-v24.10.1" }
-          - { version: "24.10.1", arch: "aarch64",   image: "aarch64_generic-v24.10.1" }
-          - { version: "24.10.1", arch: "arm_a9",    image: "arm_cortex-a9_vfpv3-d16-v24.10.1" }
-          - { version: "24.10.1", arch: "arm_a15",   image: "arm_cortex-a15_neon-vfpv4-v24.10.1" }
-          - { version: "24.10.1", arch: "armsr",     image: "armsr-armv8-v24.10.1" }
-          - { version: "24.10.1", arch: "i386",      image: "i386_pentium4-v24.10.1" }
-          # 24.10 (latest)
-          - { version: "24.10.6", arch: "x86-64",    image: "x86-64-v24.10.6" }
-          - { version: "24.10.6", arch: "x86-generic", image: "x86-generic-v24.10.6" }
-          - { version: "24.10.6", arch: "mips_24kc", image: "mips_24kc-v24.10.6" }
-          - { version: "24.10.6", arch: "aarch64",   image: "aarch64_generic-v24.10.6" }
-          - { version: "24.10.6", arch: "arm_a9",    image: "arm_cortex-a9_vfpv3-d16-v24.10.6" }
-          - { version: "24.10.6", arch: "arm_a15",   image: "arm_cortex-a15_neon-vfpv4-v24.10.6" }
-          - { version: "24.10.6", arch: "armsr",     image: "armsr-armv8-v24.10.6" }
-          - { version: "24.10.6", arch: "i386",      image: "i386_pentium4-v24.10.6" }
-          # 25.12 (first)
-          - { version: "25.12.0", arch: "x86-64",    image: "x86-64-v25.12.0" }
-          - { version: "25.12.0", arch: "x86-generic", image: "x86-generic-v25.12.0" }
-          - { version: "25.12.0", arch: "mips_24kc", image: "mips_24kc-v25.12.0" }
-          - { version: "25.12.0", arch: "aarch64",   image: "aarch64_generic-v25.12.0" }
-          - { version: "25.12.0", arch: "arm_a9",    image: "arm_cortex-a9_vfpv3-d16-v25.12.0" }
-          - { version: "25.12.0", arch: "arm_a15",   image: "arm_cortex-a15_neon-vfpv4-v25.12.0" }
-          - { version: "25.12.0", arch: "armsr",     image: "armsr-armv8-v25.12.0" }
-          - { version: "25.12.0", arch: "i386",      image: "i386_pentium4-v25.12.0" }
-          # 25.12 (latest stable)
-          - { version: "25.12.4", arch: "x86-64",    image: "x86-64-v25.12.4" }
-          - { version: "25.12.4", arch: "x86-generic", image: "x86-generic-v25.12.4" }
-          - { version: "25.12.4", arch: "mips_24kc", image: "mips_24kc-v25.12.4" }
-          - { version: "25.12.4", arch: "aarch64",   image: "aarch64_generic-v25.12.4" }
-          - { version: "25.12.4", arch: "arm_a9",    image: "arm_cortex-a9_vfpv3-d16-v25.12.4" }
-          - { version: "25.12.4", arch: "arm_a15",   image: "arm_cortex-a15_neon-vfpv4-v25.12.4" }
-          - { version: "25.12.4", arch: "armsr",     image: "armsr-armv8-v25.12.4" }
-          - { version: "25.12.4", arch: "i386",      image: "i386_pentium4-v25.12.4" }
-          # snapshot (latest dev)
-          - { version: "snapshot", arch: "x86-64",    image: "x86-64-snapshot" }
-          - { version: "snapshot", arch: "mips_24kc", image: "mips_24kc-snapshot" }
-          - { version: "snapshot", arch: "aarch64",   image: "aarch64_generic-snapshot" }
-          - { version: "snapshot", arch: "armsr",     image: "armsr-armv8-snapshot" }
+          - { version: "21.02",   arch: "x86-64", image: "x86-64-v21.02.6" }
+          - { version: "22.03",   arch: "x86-64", image: "x86-64-v22.03.7" }
+          - { version: "23.05",   arch: "x86-64", image: "x86-64-v23.05.6" }
+          - { version: "24.10.1", arch: "x86-64", image: "x86-64-v24.10.1" }
+          - { version: "24.10.6", arch: "x86-64", image: "x86-64-v24.10.6" }
+          - { version: "25.12.0", arch: "x86-64", image: "x86-64-v25.12.0" }
+          - { version: "25.12.4", arch: "x86-64", image: "x86-64-v25.12.4" }
+          - { version: "snapshot", arch: "x86-64", image: "x86-64-snapshot" }
     steps:
       - uses: actions/checkout@v6
-      - uses: docker/setup-qemu-action@v4
       - uses: actions/download-artifact@v5
         with:
           name: packages
@@ -138,12 +95,11 @@ jobs:
       - name: Install and verify in OpenWrt ${{ matrix.version }} (${{ matrix.arch }})
         run: |
           IMAGE="ghcr.io/openwrt/rootfs:${{ matrix.image }}"
+          # x86-64 images are always pullable; a pull failure here is a real
+          # problem (registry/availability), so fail rather than skip.
           if ! docker pull "$IMAGE" 2>/tmp/pull-err; then
-            if grep -q "no matching manifest" /tmp/pull-err; then
-              echo "::warning::Image $IMAGE not available for this platform, skipping"
-              exit 0
-            fi
             cat /tmp/pull-err >&2
+            echo "::error::Could not pull $IMAGE"
             exit 1
           fi
           if [ "${{ steps.fmt.outputs.format }}" = "apk" ]; then
