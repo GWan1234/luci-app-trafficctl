@@ -20,4 +20,6 @@ jobs:
         with:
           node-version: '20'
       - run: npm ci
-      - run: npx eslint luci-app-trafficctl/htdocs/
+      # --max-warnings 0 makes ANY eslint warning fail CI (defence in depth on
+      # top of the config promoting rules to "error").
+      - run: npx eslint --max-warnings 0 luci-app-trafficctl/htdocs/
