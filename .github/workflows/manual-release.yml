@@ -58,7 +58,11 @@ jobs:
       - name: Verify target release exists
         run: |
           TAG="v${{ inputs.version }}"
-          gh release view "$TAG" || echo "::warning::Release $TAG not found, will create it"
+          # This workflow REBUILDS an existing release; the later
+          # `gh release upload --clobber` cannot create a missing one and would
+          # fail after a full build. Fail fast and clearly instead.
+          gh release view "$TAG" >/dev/null \
+            || { echo "::error::Release $TAG does not exist — nothing to rebuild"; exit 1; }
 
       - name: Locate and patch Makefile
         run: |
