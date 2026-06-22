@@ -46,7 +46,7 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: packages
           path: dist/
@@ -121,8 +121,8 @@ jobs:
           - { version: "snapshot", arch: "armsr",     image: "armsr-armv8-snapshot" }
     steps:
       - uses: actions/checkout@v6
-      - uses: docker/setup-qemu-action@v3
-      - uses: actions/download-artifact@v4
+      - uses: docker/setup-qemu-action@v4
+      - uses: actions/download-artifact@v5
         with:
           name: packages
           path: dist/
@@ -213,7 +213,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           name: packages
           path: dist/
@@ -274,7 +274,7 @@ jobs:
           - { version: "25.12.4", image: "x86-64-v25.12.4", format: "apk" }
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           name: packages
           path: dist/
