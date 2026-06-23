@@ -97,9 +97,15 @@ jobs:
           IMAGE="ghcr.io/openwrt/rootfs:${{ matrix.image }}"
           # x86-64 images are always pullable; a pull failure here is a real
           # problem (registry/availability), so fail rather than skip.
-          if ! docker pull "$IMAGE" 2>/tmp/pull-err; then
+          pulled=0
+          for attempt in 1 2 3; do
+            if docker pull "$IMAGE" 2>/tmp/pull-err; then pulled=1; break; fi
+            echo "docker pull attempt $attempt for $IMAGE failed; retrying..." >&2
+            sleep $((attempt * 5))
+          done
+          if [ "$pulled" != "1" ]; then
             cat /tmp/pull-err >&2
-            echo "::error::Could not pull $IMAGE"
+            echo "::error::Could not pull $IMAGE after 3 attempts"
             exit 1
           fi
           if [ "${{ steps.fmt.outputs.format }}" = "apk" ]; then
@@ -138,10 +144,16 @@ jobs:
       - uses: actions/checkout@v6
       - name: Run feed install test in ${{ matrix.sdk_image }}
         run: |
-          docker pull "${{ matrix.sdk_image }}" || {
+          pulled=0
+          for attempt in 1 2 3; do
+            if docker pull "${{ matrix.sdk_image }}"; then pulled=1; break; fi
+            echo "docker pull attempt $attempt failed; retrying..." >&2
+            sleep $((attempt * 5))
+          done
+          if [ "$pulled" != "1" ]; then
             echo "::warning::SDK image ${{ matrix.sdk_image }} not pullable, skipping"
             exit 0
-          }
+          fi
           docker run --rm \
             -v "$PWD:/src:ro" \
             --entrypoint /bin/sh \
@@ -205,7 +217,12 @@ jobs:
           mv "$OLD_PKG" "dist/${OLD_BASE}"
 
           IMAGE="ghcr.io/openwrt/rootfs:${{ matrix.image }}"
-          docker pull "$IMAGE"
+          pulled=0
+          for attempt in 1 2 3; do
+            if docker pull "$IMAGE"; then pulled=1; break; fi
+            sleep $((attempt * 5))
+          done
+          [ "$pulled" = "1" ] || { echo "::error::Could not pull $IMAGE after 3 attempts"; exit 1; }
           docker run --rm \
             --entrypoint /bin/sh \
             -v "$PWD/dist:/dist" \
@@ -243,7 +260,12 @@ jobs:
             PKG="/dist/luci-app-trafficctl_0.0.0-test-1_all.ipk"
           fi
           IMAGE="ghcr.io/openwrt/rootfs:${{ matrix.image }}"
-          docker pull "$IMAGE"
+          pulled=0
+          for attempt in 1 2 3; do
+            if docker pull "$IMAGE"; then pulled=1; break; fi
+            sleep $((attempt * 5))
+          done
+          [ "$pulled" = "1" ] || { echo "::error::Could not pull $IMAGE after 3 attempts"; exit 1; }
           docker run --rm \
             --entrypoint /bin/sh \
             -v "$PWD/dist:/dist" \
