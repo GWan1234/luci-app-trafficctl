@@ -127,13 +127,22 @@ Returns detailed connection information for a single device.
       "port": 443,
       "service": "https",
       "bytes": 17261,
-      "state": "ESTABLISHED"
+      "state": "ESTABLISHED",
+      "oif": "wan2"
     }
   ],
   "rate_limit_kbit": 0,
   "shape_kbit": 10000
 }
 ```
+
+Each connection's `oif` is the egress interface, resolved via
+`ip route get <dst> mark <mark>` from the connection's conntrack fwmark. It is
+only populated for **policy-routed** connections (a non-zero connmark, e.g.
+mwan3, which restores the routing mark). For connections with mark `0` (plain
+single-WAN, or policy-routing that doesn't restore the connmark such as podkop)
+`oif` is empty. The LuCI connections table exposes it as an optional, hidden-by-default
+"Iface" column.
 
 ---
 
