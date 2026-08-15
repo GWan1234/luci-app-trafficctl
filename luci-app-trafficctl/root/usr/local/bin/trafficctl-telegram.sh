@@ -668,7 +668,7 @@ main() {
 
 	logger -t trafficctl-tg "Bot started, chat_id=$TG_CHAT_ID"
 
-	local offset response ok update_count i
+	local offset response ok i
 	local update update_id msg_chat_id msg_text cb_id cb_data cb_msg_id
 	local config_reload_at newdev_check_at
 	config_reload_at=$(($(date +%s) + 60))
@@ -691,10 +691,13 @@ main() {
 		ok=$(echo "$response" | jsonfilter -e '@.ok' 2>/dev/null)
 		[ "$ok" = "true" ] || { sleep 5; continue; }
 
-		update_count=$(echo "$response" | jsonfilter -l '@.result' 2>/dev/null || echo 0)
+		# Iterate results by index until one comes back empty. Do NOT use
+		# `jsonfilter -l '@.result'` to get a count: on newer jsonfilter
+		# (OpenWrt 25.12 / APK and snapshot) it returns an empty string, which
+		# left update_count empty and turned `[ "$i" -lt "$update_count" ]` into
+		# a BusyBox "sh: out of range" loop that never processed commands (#22).
 		i=0
-		while [ "$i" -lt "$update_count" ]; do
-			update=$(echo "$response" | jsonfilter -e "@.result[$i]" 2>/dev/null)
+		while update=$(echo "$response" | jsonfilter -e "@.result[$i]" 2>/dev/null); [ -n "$update" ]; do
 			update_id=$(echo "$update" | jsonfilter -e '@.update_id' 2>/dev/null)
 			[ -n "$update_id" ] && offset=$((update_id + 1))
 			echo "$offset" > "$OFFSET_FILE"
