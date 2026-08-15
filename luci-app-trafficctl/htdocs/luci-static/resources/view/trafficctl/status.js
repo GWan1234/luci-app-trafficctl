@@ -674,7 +674,8 @@ function buildTable(conns, sortCol, sortDir, rdnsMode, hiddenCols) {
 		{ key:'port',    label: _('Port'),     num:true  },
 		{ key:'service', label: _('Service'),  num:false },
 		{ key:'bytes',   label: _('Bytes'),    num:true  },
-		{ key:'state',   label: _('State'),    num:false }
+		{ key:'state',   label: _('State'),    num:false },
+		{ key:'oif',     label: _('Iface'),    num:false }
 	];
 	var hid = hiddenCols || {};
 	var cols = allCols.filter(function(c) { return !hid[c.key]; });
@@ -717,7 +718,8 @@ function buildTable(conns, sortCol, sortDir, rdnsMode, hiddenCols) {
 			port:    E('div', { 'class': 'td tc-right tc-mono' }, String(r.port || '')),
 			service: E('div', { 'class': 'td tc-c-speed' }, escHtml(r.service || (SERVICE_PORTS[r.port]||''))),
 			bytes:   E('div', { 'class': 'td tc-right tc-mono tc-fw-bold' }, fmtBytes(r.bytes)),
-			state:   E('div', { 'class': 'td tc-fw-bold' + scCls }, state)
+			state:   E('div', { 'class': 'td tc-fw-bold' + scCls }, state),
+			oif:     E('div', { 'class': 'td tc-mono' }, r.oif ? escHtml(r.oif) : E('span', { 'class': 'tc-c-faint' }, '—'))
 		};
 		var cells = cols.map(function(c) { return cellMap[c.key]; });
 		return E('div', { 'class': 'tr' }, cells);
@@ -2329,9 +2331,12 @@ return view.extend({
 			{key:'proto', label:_('Proto')}, {key:'dst', label:_('Dst IP')},
 			{key:'host', label:_('Hostname')}, {key:'port', label:_('Port')},
 			{key:'service', label:_('Service')}, {key:'bytes', label:_('Bytes')},
-			{key:'state', label:_('State')}
+			{key:'state', label:_('State')}, {key:'oif', label:_('Iface')}
 		];
-		var savedConnHidden = opts.connHiddenCols || {};
+		// 'oif' (egress interface) is only populated for policy-routed (mwan3)
+		// connections, so hide it by default; users on such setups enable it
+		// via the column chip.
+		var savedConnHidden = opts.connHiddenCols || { oif: true };
 		self._connHiddenCols = savedConnHidden;
 		var connColChipsContainer = E('div', {'class':'tc-chips-wrap'});
 		connColDefs.forEach(function(ct) {

@@ -233,8 +233,37 @@ CW=$(echo "$META_LINE" | awk '{print $8}')
 [ -z "$CW" ] && CW=0
 
 # Build connections JSON array
-CONNS_OUT=$(echo "$CONNTRACK_DATA" | awk -v ip="$IP" -v pf="$PROTO_FILTER" '
-BEGIN { n=0 }
+# Resolve egress interface per destination for policy-routed connections
+# (mwan3 etc.). Only connections carrying a NON-zero conntrack mark are
+# resolved: `ip route get <dst> mark <mark>` honours the fwmark ip-rules, so it
+# reports the WAN that mwan3 actually selected. mark=0 connections (no policy
+# routing, e.g. plain single-WAN or podkop) are left blank instead of showing a
+# misleading main-table egress.
+OIF_MAP="/tmp/trafficctl_oif_$$"
+: > "$OIF_MAP"
+if command -v ip >/dev/null 2>&1; then
+    echo "$CONNTRACK_DATA" | awk -v ip="$IP" '
+    { dst=""; mark="0"; sk="src=" ip; seen=0; got=0
+      for (i=1; i<=NF; i++) {
+          if ($i==sk && !seen) { seen=1; continue }
+          if (seen && !got && index($i,"dst=")==1) { dst=substr($i,5); got=1 }
+          if (index($i,"mark=")==1) mark=substr($i,6)
+      }
+      if (dst!="" && dst!=ip && mark!="0" && mark!="") print dst, mark
+    }' | sort -u | while read -r dip dmark; do
+        [ -n "$dip" ] || continue
+        dev=$(ip route get "$dip" mark "$dmark" 2>/dev/null | grep -oE 'dev [^ ]+' | head -1 | cut -d' ' -f2)
+        case "$dev" in lo|"") continue ;; esac
+        echo "$dip $dev" >> "$OIF_MAP"
+    done
+fi
+
+CONNS_OUT=$(echo "$CONNTRACK_DATA" | awk -v ip="$IP" -v pf="$PROTO_FILTER" -v oifmap="$OIF_MAP" '
+BEGIN {
+    n=0
+    while ((getline line < oifmap) > 0) { split(line, p, " "); oifdev[p[1]] = p[2] }
+    close(oifmap)
+}
 {
     proto=""
     for (i=1; i<=NF; i++) {
@@ -275,11 +304,14 @@ BEGIN { n=0 }
     else if (dport == "993") svc="imaps"
     else if (dport == "8080") svc="http-alt"
 
+    oif = ""
+    if (dst in oifdev) oif = oifdev[dst]
     if (n > 0) printf ","
-    printf "{\"proto\":\"%s\",\"dst\":\"%s\",\"host\":\"\",\"port\":%s,\"service\":\"%s\",\"bytes\":%d,\"state\":\"%s\"}", proto, dst, dport, svc, bytes, state
+    printf "{\"proto\":\"%s\",\"dst\":\"%s\",\"host\":\"\",\"port\":%s,\"service\":\"%s\",\"bytes\":%d,\"state\":\"%s\",\"oif\":\"%s\"}", proto, dst, dport, svc, bytes, state, oif
     n++
 }
 ')
+rm -f "$OIF_MAP"
 
 # Optionally resolve DNS for connection destinations
 if [ "$DO_RDNS" = "1" ]; then
