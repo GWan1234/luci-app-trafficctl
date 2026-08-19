@@ -636,3 +636,7 @@
 	cursor: help;
 	white-space: nowrap;
 }
+
+/* Split down/up speed cell */
+.tc-spd-dn { font-size: 11px; line-height: 1.25; }
+.tc-spd-up { font-size: 10px; line-height: 1.25; color: var(--tc-muted); }

@@ -14,7 +14,7 @@
 	}
 })();
 
-var TRAFFICCTL_BUILD = '20260820b';
+var TRAFFICCTL_BUILD = '20260820c';
 console.log('[trafficctl] build:' + TRAFFICCTL_BUILD);
 
 // Per-device DPI app breakdown from netifyd, keyed by IP. Stays empty when the
@@ -244,6 +244,22 @@ function fmtRate(kbit) {
 	if (mbit >= 1) return (mbit % 1 === 0 ? mbit.toFixed(0) : mbit.toFixed(1)) + ' Mbit/s';
 	return kbit + ' kbit/s';
 }
+
+// Render a "↓ down / ↑ up" speed cell. Both halves come from the same
+// bytes_in/bytes_out sample, so they are always consistent with each other.
+function renderSpeedCell(cell, sd) {
+	while (cell.firstChild) cell.removeChild(cell.firstChild);
+	if (!sd) {
+		cell.className = 'td tc-right tc-mono tc-speed-idle';
+		cell.appendChild(document.createTextNode('—'));
+		return;
+	}
+	var active = (sd.current > 1024) || (sd.up > 1024);
+	cell.className = 'td tc-right tc-mono ' + (active ? 'tc-speed-active' : 'tc-speed-idle');
+	cell.appendChild(E('div', { 'class': 'tc-spd-dn' }, '↓ ' + fmtSpeed(sd.current)));
+	cell.appendChild(E('div', { 'class': 'tc-spd-up' }, '↑ ' + fmtSpeed(sd.up || 0)));
+}
+
 function escHtml(s) {
 	return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
@@ -895,9 +911,14 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		var macEl = r.mac ? E('a', { 'href':'/cgi-bin/luci/admin/network/dhcp','target':'_blank','rel':'noopener','class':'tc-link','title':_('Open DHCP/DNS bindings'),'onclick':'event.stopPropagation()' }, r.mac) : '';
 		cellMap.mac  = E('div', { 'class': 'td tc-mono tc-sm tc-c-muted' }, macEl || '');
 
-		cellMap._speed = E('div', { 'class': 'td tc-right tc-mono', 'data-speed-ip': r.ip, 'title': sd ? (_('Avg')+': '+fmtSpeed(sd.avg)+' / '+_('Max')+': '+fmtSpeed(sd.max)) : _('Calculating…') });
-		if (sd && sd.current > 1024) { cellMap._speed.className = 'td tc-right tc-mono tc-speed-active'; cellMap._speed.textContent = fmtSpeed(sd.current); }
-		else { cellMap._speed.className = 'td tc-right tc-mono tc-speed-idle'; cellMap._speed.textContent = sd ? fmtSpeed(sd.current) : '—'; }
+		// Down and up are measured separately (bytes_in / bytes_out); showing
+		// only the download half hid the entire upload side of every device.
+		cellMap._speed = E('div', {
+			'class': 'td tc-right tc-mono',
+			'data-speed-ip': r.ip,
+			'title': sd ? (_('Avg')+': '+fmtSpeed(sd.avg)+' / '+_('Max')+': '+fmtSpeed(sd.max)) : _('Calculating…')
+		});
+		renderSpeedCell(cellMap._speed, sd);
 
 		var sparkTip = r._throttle_kbit > 0 ? (_('Limit') + ': ' + fmtRate(r._throttle_kbit)) : '';
 		cellMap._spark = E('div', { 'class': 'td tc-center', 'style': 'padding:2px 4px', 'data-spark-ip': r.ip, 'data-tip': sparkTip || undefined });
@@ -1938,12 +1959,7 @@ return view.extend({
 				var s = self._speedMap[ip];
 				var cell = connsDiv.querySelector('td[data-speed-ip="'+ip+'"]');
 				if (!cell) return;
-				if (s.current > 1024) {
-					cell.className = 'tc-speed-active';
-				} else {
-					cell.className = 'tc-speed-idle';
-				}
-				cell.textContent = fmtSpeed(s.current);
+				renderSpeedCell(cell, s);
 				cell.title = _('Avg')+': '+fmtSpeed(s.avg)+' / '+_('Max')+': '+fmtSpeed(s.max);
 
 				var sparkCell = connsDiv.querySelector('td[data-spark-ip="'+ip+'"]');
@@ -2073,6 +2089,7 @@ return view.extend({
 							self._speedHistory[d.ip].forEach(function(h){ if (h.speed > max) max = h.speed; });
 							self._speedMap[d.ip] = {
 								current: speed,
+								up: speedUp,
 								avg: ewma,
 								max: max
 							};
@@ -2085,6 +2102,7 @@ return view.extend({
 							hist.forEach(function(h){ sum += h.speed; if (h.speed > sMax) sMax = h.speed; });
 							self._speedMap[d.ip] = {
 								current: speed,
+								up: speedUp,
 								avg: sum / hist.length,
 								max: sMax
 							};
