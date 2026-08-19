@@ -6,6 +6,13 @@ config trafficctl 'main'
 	# clients that have no kernel route on this router. Subnets with a
 	# "via" route over a LAN interface are picked up automatically.
 	option extra_subnets ''
+	# Resolve names for devices with no DHCP lease here (routed/downstream
+	# clients) via reverse DNS. rdns_server is a space-separated list of
+	# resolvers tried in order before the system resolver — point it at the
+	# downstream router (e.g. a MikroTik) so its lease names get used.
+	option resolve_names '1'
+	option rdns_server ''
+	option rdns_ttl '300'
 
 config logging 'logging'
 	option enabled '1'

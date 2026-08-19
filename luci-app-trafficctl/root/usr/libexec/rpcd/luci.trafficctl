@@ -41,6 +41,9 @@ list)
 	printf '"shape_status":{"ip":"str"},'
 	printf '"shape_stats":{},'
 	printf '"rdns":{"ip":"str"},'
+	printf '"names_list":{},'
+	printf '"name_set":{"ip":"str","name":"str"},'
+	printf '"name_clear":{"ip":"str"},'
 	printf '"portfw_list":{},'
 	printf '"portfw_ctl":{"action":"str","scope":"str","proto":"str","ip":"str","port":"str","rate_kbit":"int"},'
 	printf '"config_get":{},'
@@ -175,6 +178,34 @@ call)
 			echo '{"ok":false,"msg":"ip required"}'
 		else
 			"$SCRIPTS/trafficctl-rdns.sh" "$ip"
+		fi
+		;;
+	names_list)
+		printf '{"result":'
+		"$SCRIPTS/trafficctl-names.sh" list
+		printf '}'
+		;;
+	name_set)
+		read -r input
+		ip=$(echo "$input" | jsonfilter -e '@.ip' 2>/dev/null)
+		name=$(echo "$input" | jsonfilter -e '@.name' 2>/dev/null)
+		if [ -z "$ip" ]; then
+			echo '{"ok":false,"msg":"ip required"}'
+		elif [ -z "$name" ]; then
+			# Empty name means "forget the alias" so the UI can clear a name
+			# by submitting a blank field.
+			"$SCRIPTS/trafficctl-names.sh" remove "$ip"
+		else
+			"$SCRIPTS/trafficctl-names.sh" set "$ip" "$name"
+		fi
+		;;
+	name_clear)
+		read -r input
+		ip=$(echo "$input" | jsonfilter -e '@.ip' 2>/dev/null)
+		if [ -z "$ip" ]; then
+			echo '{"ok":false,"msg":"ip required"}'
+		else
+			"$SCRIPTS/trafficctl-names.sh" remove "$ip"
 		fi
 		;;
 	portfw_list)

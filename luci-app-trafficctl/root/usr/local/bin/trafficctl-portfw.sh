@@ -232,7 +232,9 @@ do_list() {
     # open:    orig dport in port && no NAT (reply src == orig dst) && the
     #          client is not on a monitored subnet
     local STATS
-    STATS=$(awk -v entrylist="$entries" -v spec="$MATCH_SPEC" '
+    local ENTRY_FILE="/tmp/.trafficctl_pfw_entries.$$"
+    printf '%s' "$entries" > "$ENTRY_FILE"
+    STATS=$(awk -v ef="$ENTRY_FILE" -v spec="$MATCH_SPEC" '
     function ip2int(ip,   a) {
         split(ip, a, ".")
         return a[1]*16777216 + a[2]*65536 + a[3]*256 + a[4]
@@ -257,15 +259,15 @@ do_list() {
             split(sp[k], kv, ":")
             base[k] = kv[1] + 0; blk[k] = kv[2] + 0
         }
-        ne = split(entrylist, el, "\n")
         n = 0
-        for (k = 1; k <= ne; k++) {
-            if (el[k] == "") continue
+        while ((getline line < ef) > 0) {
+            if (line == "") continue
             n++
-            split(el[k], f, "|")
+            split(line, f, "|")
             eid[n] = f[1]; ekind[n] = f[2]; eproto[n] = f[3]
             eip[n] = f[4]; eport[n] = f[5]
         }
+        close(ef)
     }
     {
         proto = ""
@@ -316,6 +318,7 @@ do_list() {
         for (k = 1; k <= n; k++)
             printf "%s %d %d %d %d\n", eid[k], conns[k]+0, clients[k]+0, bin[k]+0, bout[k]+0
     }' "${TCTL_CT_FILE:-/proc/net/nf_conntrack}" 2>/dev/null)
+    rm -f "$ENTRY_FILE"
 
     # Emit JSON
     printf '['

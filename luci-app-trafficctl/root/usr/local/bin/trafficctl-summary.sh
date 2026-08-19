@@ -181,6 +181,19 @@ NOW=$(date +%s)
 LEASES=$(cat /tmp/dhcp.leases 2>/dev/null)
 NEIGH=$(ip neigh show 2>/dev/null)
 
+# Manual aliases (highest precedence) and the reverse-DNS name cache. Devices
+# behind a downstream router have no lease here, so these two are the only way
+# they get a name instead of "*".
+ALIASES=$(cat /etc/trafficctl/names 2>/dev/null)
+RDNS_CACHE_FILE="/tmp/trafficctl_rdns_cache"
+RDNS_CACHE=$(cat "$RDNS_CACHE_FILE" 2>/dev/null)
+RDNS_ENABLED=$(uci -q get trafficctl.main.resolve_names 2>/dev/null)
+RDNS_TTL=$(uci -q get trafficctl.main.rdns_ttl 2>/dev/null)
+[ "$RDNS_TTL" -gt 0 ] 2>/dev/null || RDNS_TTL=300
+# IPs needing a (re)lookup, filled in during the emit loop and handed to the
+# detached refresher at the end so this poll never blocks on DNS.
+RDNS_PENDING=""
+
 # Firewall dumps (IP-independent — fetched once, grepped per device below)
 if [ "$TCTL_FW" = "nft" ]; then
     FWD_DUMP=$(nft list chain inet fw4 forward 2>/dev/null)
@@ -219,8 +232,25 @@ WIFI_STATIONS=$(get_wifi_stations)
 BRIDGE_MACS=$(get_bridge_macs)
 
 # ── Per-device helpers (operate on prefetched blobs, no new forks of nft/tc) ─
+# Name precedence: manual alias > DHCP lease > cached reverse DNS.
 lookup_name() {
-    echo "$LEASES" | awk -v ip="$1" '$3 == ip {print $4; exit}'
+    local ip="$1" name
+    name=$(echo "$ALIASES" | awk -v ip="$ip" '$1 == ip {sub(/^[^ ]+ +/, ""); print; exit}')
+    [ -n "$name" ] && { echo "$name"; return; }
+    name=$(echo "$LEASES" | awk -v ip="$ip" '$3 == ip && $4 != "*" {print $4; exit}')
+    [ -n "$name" ] && { echo "$name"; return; }
+    [ "$RDNS_ENABLED" = "0" ] && return
+    echo "$RDNS_CACHE" | awk -v ip="$ip" '$1 == ip && $2 != "-" {print $2; exit}'
+}
+
+# True when the cache holds no fresh entry for this IP (hit or negative), so
+# the caller should queue a background lookup.
+rdns_stale() {
+    local ip="$1" ts
+    [ "$RDNS_ENABLED" = "0" ] && return 1
+    ts=$(echo "$RDNS_CACHE" | awk -v ip="$ip" '$1 == ip {print $3; exit}')
+    [ -z "$ts" ] && return 0
+    [ $(( NOW - ts )) -ge "$RDNS_TTL" ]
 }
 
 lookup_mac() {
@@ -292,7 +322,10 @@ for ip in $ACTIVE_IPS; do
     WIFI_BLK=$(lookup_wifi_blocked "$MAC")
     RATE_LIM=$(lookup_rate_limit "$ip")
     SHAPE=$(lookup_shape_kbit "$ip")
-    [ -z "$NAME" ] && NAME="*"
+    if [ -z "$NAME" ]; then
+        NAME="*"
+        rdns_stale "$ip" && RDNS_PENDING="$RDNS_PENDING $ip"
+    fi
 
     CONN_TYPE=""
     CONN_LAST=""
@@ -347,3 +380,12 @@ for ip in $ACTIVE_IPS; do
         "$RATE_LIM" "$SHAPE"
 done
 printf "]\n"
+
+# Kick off name resolution for whatever is still unnamed. Detached and capped:
+# the results land in the cache and show up on the next poll.
+if [ -n "$RDNS_PENDING" ]; then
+    # shellcheck disable=SC2086 # deliberate word-splitting into arguments
+    set -- $RDNS_PENDING
+    [ $# -gt 8 ] && shift $(( $# - 8 ))
+    /usr/local/bin/trafficctl-rdns-refresh.sh "$@" >/dev/null 2>&1 &
+fi

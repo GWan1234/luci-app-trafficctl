@@ -2,6 +2,7 @@
 'require view';
 'require rpc';
 'require fs';
+'require ui';
 
 (function() {
 	if (!document.querySelector('link[href*="trafficctl/status.css"]')) {
@@ -120,6 +121,12 @@ var callShapeStats = rpc.declare({
 });
 
 
+var callNameSet = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'name_set',
+	params: ['ip', 'name']
+});
+
 var callTelegramGet = rpc.declare({
 	object: 'luci.trafficctl',
 	method: 'telegram_config_get'
@@ -229,6 +236,51 @@ function fmtRate(kbit) {
 }
 function escHtml(s) {
 	return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Manual device naming. Routed devices (behind a downstream router) have no
+// DHCP lease on this router, so an alias — or a PTR record the backend
+// resolves — is the only way they get a name instead of "*".
+function promptRename(ip, current, onDone) {
+	var input = E('input', {
+		'type': 'text',
+		'class': 'cbi-input-text',
+		'value': current === '*' ? '' : current,
+		'placeholder': _('Device name'),
+		'style': 'width:100%'
+	});
+
+	var doSave = function() {
+		var v = (input.value || '').replace(/[^a-zA-Z0-9 _.()-]/g, '').substring(0, 32);
+		callNameSet(ip, v).then(function(res) {
+			ui.hideModal();
+			if (res && res.ok === false) {
+				ui.addNotification(null, E('p', res.msg || _('Rename failed')), 'error');
+				return;
+			}
+			if (onDone) onDone(v);
+		}).catch(function(e) {
+			ui.hideModal();
+			ui.addNotification(null, E('p', e.message), 'error');
+		});
+	};
+
+	input.addEventListener('keydown', function(ev) {
+		if (ev.key === 'Enter') { ev.preventDefault(); doSave(); }
+	});
+
+	var cancelBtn = E('button', { 'class': 'btn' }, _('Cancel'));
+	cancelBtn.addEventListener('click', function() { ui.hideModal(); });
+	var saveBtn = E('button', { 'class': 'btn cbi-button-positive' }, _('Save'));
+	saveBtn.addEventListener('click', doSave);
+
+	ui.showModal(_('Rename device') + ' — ' + ip, [
+		E('p', { 'class': 'tc-c-muted', 'style': 'font-size:12px' },
+			_('Overrides the DHCP lease or DNS name. Leave empty to clear the custom name.')),
+		E('div', { 'style': 'margin:10px 0' }, input),
+		E('div', { 'class': 'right' }, [cancelBtn, ' ', saveBtn])
+	]);
+	setTimeout(function() { input.focus(); input.select(); }, 50);
 }
 
 function mkEthIcon(size) {
@@ -813,7 +865,19 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		var sd = speedMap[r.ip];
 		var cellMap = {};
 
-		cellMap.name = E('div', { 'class': 'td tc-fw-bold tc-c-speed' }, escHtml(r.name));
+		var nameText = E('span', {}, escHtml(r.name));
+		var renameBtn = E('span', {
+			'class': 'tc-rename',
+			'title': _('Rename device')
+		}, '✎');
+		renameBtn.addEventListener('click', function(ev) {
+			ev.stopPropagation();
+			promptRename(r.ip, r.name, function(newName) {
+				r.name = newName || '*';
+				nameText.textContent = r.name;
+			});
+		});
+		cellMap.name = E('div', { 'class': 'td tc-fw-bold tc-c-speed tc-name-cell' }, [nameText, renameBtn]);
 		cellMap.ip   = E('div', { 'class': 'td tc-mono' }, escHtml(r.ip));
 		var macEl = r.mac ? E('a', { 'href':'/cgi-bin/luci/admin/network/dhcp','target':'_blank','rel':'noopener','class':'tc-link','title':_('Open DHCP/DNS bindings'),'onclick':'event.stopPropagation()' }, r.mac) : '';
 		cellMap.mac  = E('div', { 'class': 'td tc-mono tc-sm tc-c-muted' }, macEl || '');

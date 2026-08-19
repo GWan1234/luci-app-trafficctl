@@ -22,6 +22,8 @@ jobs:
         run: bash tests/test_bytes_nft.sh
       - name: Port-forward control tests
         run: bash tests/test_portfw.sh
+      - name: Device naming tests
+        run: bash tests/test_names.sh
       - name: Telegram unit tests
         run: bash tests/test_telegram.sh
       - name: Telegram mock tests
