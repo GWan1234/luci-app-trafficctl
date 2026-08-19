@@ -176,10 +176,12 @@ parse_flows() {
 }
 
 do_collect() {
-    local secs="${1:-3}" raw parsed tmp
-    case "$secs" in ''|*[!0-9]*) secs=3 ;; esac
+    # The aggregator publishes on an interval (~15s), so a short sample window
+    # usually catches nothing at all — wait long enough to span one report.
+    local secs="${1:-18}" raw parsed tmp
+    case "$secs" in ''|*[!0-9]*) secs=18 ;; esac
     [ "$secs" -lt 1 ] && secs=1
-    [ "$secs" -gt 15 ] && secs=15
+    [ "$secs" -gt 60 ] && secs=60
 
     netify_enabled || { echo '{"ok":false,"msg":"netify integration disabled"}'; return 0; }
 
@@ -230,9 +232,9 @@ do_list() {
 }
 
 do_raw() {
-    local secs="${1:-3}"
-    case "$secs" in ''|*[!0-9]*) secs=3 ;; esac
-    [ "$secs" -gt 15 ] && secs=15
+    local secs="${1:-18}"
+    case "$secs" in ''|*[!0-9]*) secs=18 ;; esac
+    [ "$secs" -gt 60 ] && secs=60
     feed_lines "$secs"
 }
 

@@ -205,7 +205,7 @@ if [ "$(uci -q get trafficctl.main.netify_enabled 2>/dev/null)" != "0" ] && [ -S
         sed -n 's/.*"ip":"\([^"]*\)","top":"\([^"]*\)".*/\1 \2/p')
     NETIFY_AGE=$(( NOW - $(date -r "$NETIFY_CACHE_FILE" +%s 2>/dev/null || echo 0) ))
     NETIFY_INTERVAL=$(uci -q get trafficctl.main.netify_interval 2>/dev/null)
-    [ "$NETIFY_INTERVAL" -gt 0 ] 2>/dev/null || NETIFY_INTERVAL=30
+    [ "$NETIFY_INTERVAL" -gt 0 ] 2>/dev/null || NETIFY_INTERVAL=45
     if [ "$NETIFY_AGE" -ge "$NETIFY_INTERVAL" ]; then
         /usr/local/bin/trafficctl-netify.sh collect >/dev/null 2>&1 &
     fi
