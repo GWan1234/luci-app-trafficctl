@@ -23,6 +23,13 @@ if ! nft list chain inet trafficctl_mon mon_forward 2>/dev/null | grep -q "saddr
         'update @bytes_out { ip daddr counter }' 2>/dev/null
 fi
 
+# Dynamic counter maps are unsupported on some kernels ("Not supported").
+# Without this check the maps silently never exist, every rule fails, and the
+# script returns [] forever — per-device speed just stops working.
+if ! nft list map inet trafficctl_mon bytes_in >/dev/null 2>&1; then
+    TCTL_FORCE_CONNTRACK=1 exec /usr/local/bin/trafficctl-bytes.sh
+fi
+
 IN=$(nft list map inet trafficctl_mon bytes_in 2>/dev/null)
 OUT=$(nft list map inet trafficctl_mon bytes_out 2>/dev/null)
 

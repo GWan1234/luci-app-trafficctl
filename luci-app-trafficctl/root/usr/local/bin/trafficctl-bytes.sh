@@ -9,8 +9,18 @@
 # for fast-path packets. Use nftables counters at forward priority -200 (before the
 # flowtable at -150) which capture every packet regardless of offload state.
 # Only pure "none" mode has accurate conntrack counters.
+# Modes whose counters ARE synced back to conntrack ("*-counter") keep the
+# conntrack path accurate; only the uncountered ones need the nft fallback.
+# TCTL_FORCE_CONNTRACK is set by that fallback when the kernel lacks dynamic
+# counter maps, so we don't bounce between the two.
 _offload=$(tctl_get_offload_mode)
-[ "$_offload" != "none" ] && [ "$TCTL_FW" = "nft" ] && exec /usr/local/bin/trafficctl-bytes-nft.sh
+case "$_offload" in
+    none|*-counter) ;;
+    *)
+        [ "$TCTL_FW" = "nft" ] && [ -z "$TCTL_FORCE_CONNTRACK" ] && \
+            exec /usr/local/bin/trafficctl-bytes-nft.sh
+        ;;
+esac
 
 # All monitored subnets (connected LANs + routed downstream subnets +
 # trafficctl.main.extra_subnets), as awk membership spec.

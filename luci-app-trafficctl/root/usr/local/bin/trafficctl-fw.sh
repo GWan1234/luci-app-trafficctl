@@ -543,7 +543,15 @@ tctl_get_offload_mode() {
             echo "hardware"
         fi
     elif [ "$sw" = "1" ]; then
-        echo "software"
+        # A counter-flagged flowtable syncs offloaded byte counts back to
+        # conntrack, so conntrack accounting stays valid — worth
+        # distinguishing, because the nft-map fallback needs dynamic counter
+        # maps that many kernels don't support.
+        if nft list flowtables 2>/dev/null | grep -q "counter"; then
+            echo "software-counter"
+        else
+            echo "software"
+        fi
     else
         echo "none"
     fi
