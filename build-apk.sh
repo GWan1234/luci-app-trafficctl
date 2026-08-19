@@ -22,8 +22,8 @@ mkdir -p "$DATA"
 
 cp -a "$SRC/root/"* "$DATA/"
 mkdir -p "$DATA/www/luci-static/resources/view/trafficctl"
-cp "$SRC/htdocs/luci-static/resources/view/trafficctl/status.js" "$DATA/www/luci-static/resources/view/trafficctl/"
-cp "$SRC/htdocs/luci-static/resources/view/trafficctl/status.css" "$DATA/www/luci-static/resources/view/trafficctl/"
+# Copy every view/asset so new files (portfw.js, ...) can't be missed
+cp "$SRC/htdocs/luci-static/resources/view/trafficctl/"* "$DATA/www/luci-static/resources/view/trafficctl/"
 
 chmod +x "$DATA/usr/local/bin/trafficctl-"*.sh
 chmod +x "$DATA/usr/libexec/rpcd/luci.trafficctl"

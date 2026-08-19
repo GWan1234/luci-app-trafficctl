@@ -127,7 +127,7 @@ BEGIN {
         # (routed /31 and /32 entries have no network/broadcast hosts to skip)
         if (rtr[sk] && si == rtr[sk]) next
         if (blk[sk] > 2 && (si == base[sk] || si == base[sk] + blk[sk] - 1)) next
-        knd = (rtr[sk] ? "l" : "r")
+        if (rtr[sk]) knd = "l"; else knd = "r"
     } else {
         # No subnet matched. NAT fallback: if the reply-direction dst differs
         # from the original src, this router SNAT/masqueraded the flow, so the

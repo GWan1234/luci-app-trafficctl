@@ -21,8 +21,9 @@ All package files live under `luci-app-trafficctl/` (feed-compatible layout — 
 luci-app-trafficctl/
   Makefile                                  — OpenWrt package Makefile (LuCI)
   htdocs/luci-static/resources/view/trafficctl/
-    status.js                               — Main frontend (single-file LuCI view)
-    status.css                              — Frontend styles
+    status.js                               — Main frontend (single-file LuCI view, "Devices" tab)
+    portfw.js                               — "Port Forwards" tab (inbound traffic control)
+    status.css                              — Frontend styles (shared by both views)
   root/usr/local/bin/
     trafficctl-fw.sh                        — Shared library (fw detection, validation, persistence helpers)
     trafficctl-summary.sh                   — All devices summary (JSON array)
@@ -31,6 +32,7 @@ luci-app-trafficctl/
     trafficctl-unblock.sh                   — Unblock internet
     trafficctl-macfilter-add.sh             — WiFi MAC deny (hostapd_cli, no wifi reload)
     trafficctl-macfilter-remove.sh          — WiFi MAC allow
+    trafficctl-portfw.sh                    — Port-forward/open-port list + inbound pause/limit
     trafficctl-ratelimit.sh                 — nft policing (drop-based)
     trafficctl-ratelimit-stats.sh           — Limiter counters
     trafficctl-shape.sh                     — tc/HTB shaping (queue-based)
@@ -120,6 +122,7 @@ ssh root@192.168.0.1 sh -c '"cat > /www/luci-static/resources/view/trafficctl/st
 - Persistent shapes stored in `/etc/trafficctl/shapes.json`
 - Persistent blocks/ratelimits stored in `/etc/trafficctl/rules.json` (when `persist_rules` enabled)
 - Note: Only `/etc/config/trafficctl` is tracked as a conffile for package upgrades; runtime JSON files are non-essential and can be regenerated
+- Port-forward control: own nft table `inet tctl_pfw`, chains at forward/input priority -190 (post-DNAT, before the flowtable offload rule); pause = drop rule + conntrack flush, limit = `limit rate over` drop. Rule comments `tctl_pfw_<pause|limit>_<proto>_<ip|local>_<port>` are the source of truth for state
 - Speed measurement: conntrack bytes (BEFORE tc shaper), so reported speed may exceed shaped limit
 - Spike filter: cap speed at 125 MB/s (1 Gbit/s), discard anomalous samples
 - Y-axis scaling: 98th percentile, nice ticks (multiples of 100/500 Kbit/s, min 5 gridlines)
