@@ -57,6 +57,16 @@ case "$2" in
 esac
 MOCK
 
+IP_LOG="$TMPDIR/ip.log"
+cat > "$MOCKBIN/ip" <<MOCK
+#!/bin/sh
+echo "\$*" >> "$IP_LOG"
+case "\$*" in
+    "link show tctl-ifb0") exit 1 ;;   # not created yet
+esac
+exit 0
+MOCK
+
 cat > "$MOCKBIN/nft" <<MOCK
 #!/bin/sh
 echo "\$*" >> "$NFT_LOG"
@@ -70,6 +80,7 @@ cat > "$MOCKBIN/tc" <<MOCK
 #!/bin/sh
 echo "\$*" >> "$TC_LOG"
 case "\$*" in
+    "class show dev tctl-ifb0") echo "class htb 1:1 root rate 1000Mbit" ;;
     *"class show"*) exit 0 ;;
 esac
 exit 0
@@ -137,22 +148,38 @@ assert_contains "shaper: download class on LAN device" \
 assert_contains "shaper: download filter matches dst" \
     "filter add dev br-lan parent 1:0 prio 10 protocol ip u32 match ip dst 192.168.1.50/32" "$TC"
 
-assert_contains "shaper: upload class on WAN device" \
-    "class add dev eth1 parent 1:1 classid 1:132 htb rate 5000kbit" "$TC"
-assert_contains "shaper: upload filter matches src" \
-    "filter add dev eth1 parent 1:0 prio 10 protocol ip u32 match ip src 192.168.1.50/32" "$TC"
+# Upload must be shaped PRE-NAT on an IFB fed from LAN ingress. At WAN egress
+# the source is already masqueraded to the router's WAN address, so a per-client
+# src filter there would match nothing.
+assert_contains "shaper: upload class on the IFB device" \
+    "class add dev tctl-ifb0 parent 1:1 classid 1:132 htb rate 5000kbit" "$TC"
+assert_contains "shaper: upload filter matches src on IFB" \
+    "filter add dev tctl-ifb0 parent 1:0 prio 10 protocol ip u32 match ip src 192.168.1.50/32" "$TC"
 
-assert_contains "shaper: root qdisc built on WAN device too" \
-    "qdisc add dev eth1 root handle 1: htb" "$TC"
+IPL=$(cat "$IP_LOG")
+assert_contains "shaper: IFB device created" "link add name tctl-ifb0 type ifb" "$IPL"
+assert_contains "shaper: IFB device brought up" "link set tctl-ifb0 up" "$IPL"
+
+assert_contains "shaper: ingress qdisc on first bridge port" \
+    "qdisc add dev lan1 handle ffff: ingress" "$TC"
+assert_contains "shaper: ingress mirrored into the IFB" \
+    "action mirred egress redirect dev tctl-ifb0" "$TC"
+
+if printf '%s' "$TC" | grep -q "filter add dev eth1 .*match ip src"; then
+    FAIL=$((FAIL + 1))
+    printf "FAIL: shaper: upload filtered on WAN egress, where NAT has already rewritten the source\n"
+else
+    PASS=$((PASS + 1))
+fi
 
 # ── shaper: removal clears both ──────────────────────────────────────────────
 : > "$TC_LOG"
 PATH="$MOCKBIN:$PATH" sh "$SHAPE" remove 192.168.1.50 >/dev/null 2>&1
 TC=$(cat "$TC_LOG")
 assert_contains "shaper: removes LAN class" "class del dev br-lan classid 1:132" "$TC"
-assert_contains "shaper: removes WAN class" "class del dev eth1 classid 1:132" "$TC"
+assert_contains "shaper: removes IFB class" "class del dev tctl-ifb0 classid 1:132" "$TC"
 assert_contains "shaper: removes upload filter" \
-    "filter del dev eth1 parent 1:0 prio 10 protocol ip u32 match ip src 192.168.1.50/32" "$TC"
+    "filter del dev tctl-ifb0 parent 1:0 prio 10 protocol ip u32 match ip src 192.168.1.50/32" "$TC"
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

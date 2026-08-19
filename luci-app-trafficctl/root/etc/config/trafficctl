@@ -18,6 +18,8 @@ config trafficctl 'main'
 	option netify_enabled '1'
 	option netify_socket '/var/run/netifyd/netifyd.sock'
 	option netify_interval '30'
+	# IFB device used to shape upload pre-NAT (needs kmod-ifb).
+	option shape_ifb 'tctl-ifb0'
 
 config logging 'logging'
 	option enabled '1'

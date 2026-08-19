@@ -10,7 +10,14 @@ LAN_DEV=$(tctl_get_lan_device)
 # Upload is shaped on the WAN device's egress — the only place LAN->WAN
 # traffic can be queued. Shaping the LAN device alone (as this did originally)
 # only ever touches the download direction.
-WAN_DEV=$(tctl_get_wan_device)
+# Upload is shaped on an IFB device fed from LAN-side ingress, NOT on the WAN
+# device: by the time a packet reaches WAN egress, POSTROUTING has already
+# masqueraded its source to the router's WAN address, so a per-client
+# "match ip src" filter there matches nothing. Redirecting ingress into an IFB
+# shapes it while the client's real source address is still intact — which is
+# also what makes it work for routed/downstream clients.
+IFB_DEV=$(uci -q get trafficctl.main.shape_ifb 2>/dev/null)
+[ -z "$IFB_DEV" ] && IFB_DEV="tctl-ifb0"
 
 ACTION="$1"
 IP="$2"
@@ -38,6 +45,28 @@ ensure_root_qdisc() {
     tc class add dev "$dev" parent 1: classid 1:1 htb rate 1000mbit ceil 1000mbit burst 125000b cburst 125000b
     tc class add dev "$dev" parent 1:1 classid 1:fffe htb rate 1000mbit ceil 1000mbit burst 125000b cburst 125000b prio 0
     tc qdisc add dev "$dev" parent 1:fffe fq_codel 2>/dev/null
+}
+
+# Bring up the IFB device and mirror LAN-side ingress into it. Needs kmod-ifb
+# and act_mirred; returns non-zero when either is missing so callers can report
+# download-only shaping instead of pretending upload is limited.
+ensure_ifb() {
+    local dev
+    if ! ip link show "$IFB_DEV" >/dev/null 2>&1; then
+        ip link add name "$IFB_DEV" type ifb 2>/dev/null || return 1
+    fi
+    ip link set "$IFB_DEV" up 2>/dev/null || return 1
+    ensure_root_qdisc "$IFB_DEV" || return 1
+
+    for dev in $(tctl_ingress_devices); do
+        tc qdisc show dev "$dev" ingress 2>/dev/null | grep -q 'qdisc ingress' || \
+            tc qdisc add dev "$dev" handle ffff: ingress 2>/dev/null
+        tc filter show dev "$dev" parent ffff: 2>/dev/null | grep -q mirred || \
+            tc filter add dev "$dev" parent ffff: protocol ip prio 1 u32 \
+                match u32 0 0 action mirred egress redirect dev "$IFB_DEV" 2>/dev/null
+    done
+    # Useless unless at least the IFB root exists.
+    tc class show dev "$IFB_DEV" 2>/dev/null | grep -q "class htb 1:1 "
 }
 
 # Attach one shaping class on a device, matching the given IP in the given
@@ -123,11 +152,11 @@ do_add() {
         return 1
     fi
 
-    # Upload: queue on the WAN device, matching traffic sourced from the client.
-    # Reported separately so a WAN-side failure doesn't look like a total failure.
+    # Upload: shaped pre-NAT on the IFB device fed from LAN ingress.
+    # Reported separately so a missing kmod-ifb doesn't look like total failure.
     local ul_ok=1
-    if [ -n "$WAN_DEV" ] && [ -d "/sys/class/net/$WAN_DEV" ]; then
-        shape_attach "$WAN_DEV" src "$IP" "$classid" "$RATE" "$burst_bytes" || ul_ok=0
+    if ensure_ifb; then
+        shape_attach "$IFB_DEV" src "$IP" "$classid" "$RATE" "$burst_bytes" || ul_ok=0
     else
         ul_ok=0
     fi
@@ -136,7 +165,7 @@ do_add() {
     if [ "$ul_ok" = "1" ]; then
         echo "{\"ok\":true,\"msg\":\"shape ${RATE} kbit/s applied to $IP both directions (class $classid)\"}"
     else
-        echo "{\"ok\":true,\"msg\":\"shape ${RATE} kbit/s applied to $IP (download only — WAN device $WAN_DEV unavailable)\"}"
+        echo "{\"ok\":true,\"msg\":\"shape ${RATE} kbit/s applied to $IP (download only — upload needs kmod-ifb: opkg/apk install kmod-ifb kmod-sched)\"}"
     fi
 }
 
@@ -145,7 +174,7 @@ do_remove() {
     classid=$(ip_to_classid "$IP")
 
     shape_detach "$LAN_DEV" dst "$IP" "$classid"
-    [ -n "$WAN_DEV" ] && shape_detach "$WAN_DEV" src "$IP" "$classid"
+    shape_detach "$IFB_DEV" src "$IP" "$classid"
 
     remove_shape "$IP"
     echo "{\"ok\":true,\"msg\":\"shape removed for $IP\"}"
