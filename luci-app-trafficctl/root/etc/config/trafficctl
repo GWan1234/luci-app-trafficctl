@@ -2,6 +2,10 @@ config trafficctl 'main'
 	option enabled '1'
 	option default_mode 'limiter'
 	option persist_rules '0'
+	# Extra subnets to monitor (space-separated CIDRs), for downstream-router
+	# clients that have no kernel route on this router. Subnets with a
+	# "via" route over a LAN interface are picked up automatically.
+	option extra_subnets ''
 
 config logging 'logging'
 	option enabled '1'

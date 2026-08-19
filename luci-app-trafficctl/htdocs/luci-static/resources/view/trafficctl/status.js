@@ -738,7 +738,7 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		{ key:'tcp',              label:'TCP',          num:true,  tip: _('TCP bytes transferred'), hide:true },
 		{ key:'udp',              label:'UDP',          num:true,  tip: _('UDP bytes transferred'), hide:true },
 		{ key:'blocked',          label: _('Inet'),     num:false, tip: _('Internet access status (paused = traffic blocked)') },
-		{ key:'conn_type',        label: _('Link'),     num:false, tip: _('Connection interface (WiFi band or LAN port)') },
+		{ key:'conn_type',        label: _('Link'),     num:false, tip: _('Connection interface (WiFi band, LAN port or routed)') },
 		{ key:'_throttle_kbit',   label: _('Limit'),            num:true,  tip: _('Speed limit: shaper (queue) or limiter (drop)') },
 		{ key:'_drop_packets',    label: _('Drop'),           num:true,  tip: _('Packets dropped by rate limiter'), hide:true },
 		{ key:'_backlog',         label: '📦',           num:true,  tip: _('Bytes queued in traffic shaper'), hide:true }
@@ -853,6 +853,8 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 				}
 			}
 			linkBadge = E('span', { 'class': 'tc-c-faint', 'style': 'cursor:help', 'title': tip }, '?');
+		} else if (ct === 'routed') {
+			linkBadge = E('span', { 'class': 'tc-c-muted', 'style': 'cursor:help', 'title': _('Behind a downstream router (routed subnet)') }, '⇄ ' + _('routed'));
 		} else if (isWifi) {
 			var wLabel = ct === 'wifi' ? 'WiFi' : ct;
 			linkBadge = r.wifi_blocked

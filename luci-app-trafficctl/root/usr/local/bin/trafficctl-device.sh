@@ -50,7 +50,10 @@ CONN_LAST=""
 CONN_CACHE="/tmp/trafficctl_conn_cache"
 [ -f "$CONN_CACHE" ] || : > "$CONN_CACHE"
 
-if [ -n "$MAC" ]; then
+if ! tctl_ip_in_lan "$IP"; then
+    # Not on any connected LAN subnet — reached via a downstream router.
+    CONN_TYPE="routed"
+elif [ -n "$MAC" ]; then
     _wifi_stations=$(
         for _wi in $(iw dev 2>/dev/null | awk '/Interface/{print $2}'); do
             _ch=$(iw dev "$_wi" info 2>/dev/null | awk '/channel/{print $2}')

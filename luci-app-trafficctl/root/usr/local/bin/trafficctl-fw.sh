@@ -151,6 +151,81 @@ tctl_get_lan_devices() {
     tctl_lan_subnets | awk '{print $1}' | sort -u
 }
 
+# Convert "a.b.c.d/m" (or a bare host address) to "netbase_int block_size",
+# normalized to the network base. Fails silently on malformed input.
+tctl_cidr_spec() {
+    local cidr="$1" addr mask rest o1 o2 o3 o4 ipint block
+    addr=${cidr%%/*}
+    mask=${cidr#*/}
+    [ "$mask" = "$cidr" ] && mask=32
+    tctl_validate_ip "$addr" || return 1
+    case "$mask" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$mask" -ge 1 ] && [ "$mask" -le 32 ] || return 1
+    o1=${addr%%.*}; rest=${addr#*.}
+    o2=${rest%%.*}; rest=${rest#*.}
+    o3=${rest%%.*}; o4=${rest##*.}
+    ipint=$(( (o1 << 24) + (o2 << 16) + (o3 << 8) + o4 ))
+    block=$(( 1 << (32 - mask) ))
+    echo "$(( ipint - (ipint % block) )) $block"
+}
+
+# Downstream subnets routed via a next-hop on a LAN interface — e.g. clients
+# behind a second router on the LAN whose packets are forwarded (and NATed on
+# WAN) through this router with their original source addresses. Also includes
+# operator-defined extras from trafficctl.main.extra_subnets (space-separated
+# CIDRs) for setups without an explicit kernel route.
+# Output format matches tctl_lan_subnets; router_int is 0 because no local
+# address lives inside a routed subnet (consumers use 0 to tell routed from
+# directly connected).
+tctl_routed_subnets() {
+    local lan_devs dev cidr spec extras
+    lan_devs=$(tctl_get_lan_devices)
+
+    if [ -n "$lan_devs" ]; then
+        ip route show 2>/dev/null | awk '
+        $1 != "default" && / via / {
+            dev = ""
+            for (i = 1; i <= NF; i++) if ($i == "dev") dev = $(i+1)
+            if (dev != "") print $1, dev
+        }' | while read -r cidr dev; do
+            echo "$lan_devs" | grep -qxF "$dev" || continue
+            spec=$(tctl_cidr_spec "$cidr") || continue
+            echo "$dev $spec 0"
+        done
+    fi
+
+    extras=$(uci -q get trafficctl.main.extra_subnets 2>/dev/null)
+    if [ -n "$extras" ]; then
+        dev=$(tctl_get_lan_device)
+        for cidr in $extras; do
+            spec=$(tctl_cidr_spec "$cidr") || continue
+            echo "$dev $spec 0"
+        done
+    fi
+}
+
+# Every subnet worth monitoring: directly connected LANs first, then routed
+# and extra ones. Duplicate prefixes are dropped (first wins, keeping the
+# connected entry with its real router address).
+tctl_monitored_subnets() {
+    { tctl_lan_subnets; tctl_routed_subnets; } | awk '!seen[$2":"$3]++'
+}
+
+# True (0) when the IP belongs to a directly connected LAN subnet; routed and
+# extra subnets do not count. Used to tell on-link devices from downstream
+# ones that only have an L3 presence here.
+tctl_ip_in_lan() {
+    local ip="$1" o1 o2 o3 o4 rest ipint
+    tctl_validate_ip "$ip" || return 1
+    o1=${ip%%.*}; rest=${ip#*.}
+    o2=${rest%%.*}; rest=${rest#*.}
+    o3=${rest%%.*}; o4=${rest##*.}
+    ipint=$(( (o1 << 24) + (o2 << 16) + (o3 << 8) + o4 ))
+    tctl_lan_subnets | awk -v si="$ipint" '
+        si - (si % $3) == $2 { hit = 1; exit }
+        END { exit hit ? 0 : 1 }'
+}
+
 tctl_validate_ip() {
     echo "$1" | grep -qE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$' || return 1
     local IFS='.'

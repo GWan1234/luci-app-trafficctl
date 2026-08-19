@@ -22,8 +22,12 @@ trap "rm -f '$PORT_MAP_FILE'" EXIT INT TERM
 LAN_SUBNETS=$(tctl_lan_subnets)
 [ -z "$LAN_SUBNETS" ] && { echo '[]'; exit 0; }
 LAN_DEVS=$(echo "$LAN_SUBNETS" | awk '{print $1}' | sort -u)
-# Membership spec for awk: "netbase:block:routerint ..." (no awk bit-ops needed)
-MATCH_SPEC=$(echo "$LAN_SUBNETS" | awk '{printf "%s%s:%s:%s",(NR>1?" ":""),$2,$3,$4}')
+# Monitored = connected LANs + subnets routed via LAN next-hops (downstream
+# routers) + trafficctl.main.extra_subnets. Membership spec for awk:
+# "netbase:block:routerint ..." — routerint 0 marks a routed (not directly
+# connected) subnet, no awk bit-ops needed.
+ALL_SUBNETS=$(tctl_monitored_subnets)
+MATCH_SPEC=$(echo "$ALL_SUBNETS" | awk '{printf "%s%s:%s:%s",(NR>1?" ":""),$2,$3,$4}')
 # Device that carries the tc/HTB shaper (shaping is single-bridge by design).
 PRIMARY_LAN_DEV=$(tctl_get_lan_device)
 
@@ -71,11 +75,17 @@ get_bridge_macs() {
     rm -f "$PORT_MAP_FILE"
 }
 
+# All IPv4 addresses owned by the router itself (any interface) — excluded
+# from the NAT-based device detection below so the router never shows up.
+LOCAL_IPS=$(ip -4 addr show 2>/dev/null | awk '/inet /{split($2,a,"/");print a[1]}' | tr '\n' ' ')
+
 # ── Single conntrack pass ──────────────────────────────────────────────────
-# Emit "ip total tcp udp conns" for every active LAN source in one read,
-# replicating the previous per-IP accounting (original-direction bytes of the
-# first tuple that belongs to a LAN device). Replaces N full conntrack reads.
-CT_SUMMARY=$(awk -v spec="$MATCH_SPEC" '
+# Emit "ip total tcp udp conns kind" for every active source in one read.
+# A source qualifies when it belongs to a monitored subnet (kind l=LAN,
+# r=routed), or — regardless of subnet — when the flow was SNAT/masqueraded
+# by this router (reply dst != original src), which catches every forwarded
+# client behind downstream routers without any configuration (kind r).
+CT_SUMMARY=$(awk -v spec="$MATCH_SPEC" -v localips="$LOCAL_IPS" '
 function ip2int(ip,   a) {
     split(ip, a, ".")
     return a[1]*16777216 + a[2]*65536 + a[3]*256 + a[4]
@@ -93,6 +103,8 @@ BEGIN {
         split(parts[k], kv, ":")
         base[k] = kv[1] + 0; blk[k] = kv[2] + 0; rtr[k] = kv[3] + 0
     }
+    nl = split(localips, lp, " ")
+    for (k = 1; k <= nl; k++) if (lp[k] != "") islocal[lp[k]] = 1
 }
 {
     proto=""
@@ -100,7 +112,7 @@ BEGIN {
         if ($i == "tcp") proto="tcp"
         else if ($i == "udp") proto="udp"
     }
-    # first src= field that belongs to one of our LAN subnets
+    # first src= field that belongs to one of our monitored subnets
     srcidx=0; src=""; sk=0
     for (i=1; i<=NF; i++) {
         if (index($i, "src=") == 1) {
@@ -109,10 +121,32 @@ BEGIN {
             if (k > 0) { src=v; srcidx=i; sk=k; break }
         }
     }
-    if (src == "") next
-    si=ip2int(src)
-    # skip the router itself, the network address and the broadcast address
-    if (si == rtr[sk] || si == base[sk] || si == base[sk] + blk[sk] - 1) next
+    if (src != "") {
+        si=ip2int(src)
+        # skip the router itself, the network address and the broadcast address
+        # (routed /31 and /32 entries have no network/broadcast hosts to skip)
+        if (rtr[sk] && si == rtr[sk]) next
+        if (blk[sk] > 2 && (si == base[sk] || si == base[sk] + blk[sk] - 1)) next
+        knd = (rtr[sk] ? "l" : "r")
+    } else {
+        # No subnet matched. NAT fallback: if the reply-direction dst differs
+        # from the original src, this router SNAT/masqueraded the flow, so the
+        # original src is an internal client (e.g. behind a downstream router
+        # on a subnet we have no route entry for).
+        osrc=""; oidx=0; nsrc=0; rdst=""
+        for (i=1; i<=NF; i++) {
+            if (index($i, "src=") == 1) {
+                nsrc++
+                if (nsrc == 1) { osrc=substr($i, 5); oidx=i }
+            } else if (nsrc == 2 && rdst == "" && index($i, "dst=") == 1) {
+                rdst=substr($i, 5)
+            }
+        }
+        if (osrc == "" || rdst == "" || rdst == osrc) next
+        if (osrc !~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) next
+        if (osrc in islocal) next
+        src=osrc; srcidx=oidx; knd="r"
+    }
     seen=0; got_dst=0; found=0; b=0
     for (i=srcidx; i<=NF; i++) {
         if (i == srcidx) { seen=1; continue }
@@ -126,6 +160,7 @@ BEGIN {
     }
     if (got_dst) {
         conns[src]++
+        kind[src] = knd
         if (found) {
             total[src]+=b
             if (proto == "tcp") tcp[src]+=b
@@ -135,7 +170,7 @@ BEGIN {
 }
 END {
     for (ip in conns)
-        printf "%s %d %d %d %d\n", ip, total[ip]+0, tcp[ip]+0, udp[ip]+0, conns[ip]
+        printf "%s %d %d %d %d %s\n", ip, total[ip]+0, tcp[ip]+0, udp[ip]+0, conns[ip], kind[ip]
 }' /proc/net/nf_conntrack 2>/dev/null)
 
 ACTIVE_IPS=$(echo "$CT_SUMMARY" | awk 'NF{print $1}' | sort -t. -k1,1n -k2,2n -k3,3n -k4,4n)
@@ -246,9 +281,9 @@ lookup_wifi_blocked() {
 printf "["
 FIRST=1
 for ip in $ACTIVE_IPS; do
-    # shellcheck disable=SC2046 # deliberate split into 4 positional fields
-    set -- $(echo "$CT_SUMMARY" | awk -v ip="$ip" '$1==ip{print $2,$3,$4,$5; exit}')
-    TOTAL="${1:-0}"; TCP="${2:-0}"; UDP="${3:-0}"; CONNS="${4:-0}"
+    # shellcheck disable=SC2046 # deliberate split into 5 positional fields
+    set -- $(echo "$CT_SUMMARY" | awk -v ip="$ip" '$1==ip{print $2,$3,$4,$5,$6; exit}')
+    TOTAL="${1:-0}"; TCP="${2:-0}"; UDP="${3:-0}"; CONNS="${4:-0}"; KIND="${5:-l}"
 
     NAME=$(lookup_name "$ip")
     MAC=$(lookup_mac "$ip")
@@ -261,37 +296,42 @@ for ip in $ACTIVE_IPS; do
 
     CONN_TYPE=""
     CONN_LAST=""
-    if [ -n "$MAC" ]; then
-        _wl=$(echo "$WIFI_STATIONS" | grep -i "$MAC")
-        if [ -n "$_wl" ]; then
-            _band=$(echo "$_wl" | awk '{print $3}')
-            CONN_TYPE="${_band:-wifi}"
-        else
-            _bl=$(echo "$BRIDGE_MACS" | grep -i "$MAC")
-            if [ -n "$_bl" ]; then
-                _piface=$(echo "$_bl" | awk '{print $2}')
-                case "$_piface" in
-                    phy*|wlan*) CONN_TYPE="wifi" ;;
-                    *) CONN_TYPE="$_piface" ;;
-                esac
+    if [ "$KIND" = "r" ]; then
+        # Behind a downstream router — no local MAC / bridge port / ARP entry.
+        CONN_TYPE="routed"
+    else
+        if [ -n "$MAC" ]; then
+            _wl=$(echo "$WIFI_STATIONS" | grep -i "$MAC")
+            if [ -n "$_wl" ]; then
+                _band=$(echo "$_wl" | awk '{print $3}')
+                CONN_TYPE="${_band:-wifi}"
+            else
+                _bl=$(echo "$BRIDGE_MACS" | grep -i "$MAC")
+                if [ -n "$_bl" ]; then
+                    _piface=$(echo "$_bl" | awk '{print $2}')
+                    case "$_piface" in
+                        phy*|wlan*) CONN_TYPE="wifi" ;;
+                        *) CONN_TYPE="$_piface" ;;
+                    esac
+                fi
             fi
         fi
-    fi
-    if [ -n "$CONN_TYPE" ]; then
-        sed -i "/^$ip /d" "$CONN_CACHE" 2>/dev/null
-        echo "$ip $CONN_TYPE $NOW" >> "$CONN_CACHE"
-    else
-        _arp_state=$(echo "$NEIGH" | awk -v ip="$ip" '$1==ip{print $NF; exit}')
-        case "$_arp_state" in
-            REACHABLE|STALE|DELAY|PROBE) CONN_TYPE="ethernet" ;;
-            *)
-                CONN_TYPE="?"
-                _cached=$(grep "^$ip " "$CONN_CACHE" 2>/dev/null | tail -1)
-                if [ -n "$_cached" ]; then
-                    CONN_LAST=$(echo "$_cached" | awk '{print $2 "@" $3}')
-                fi
-                ;;
-        esac
+        if [ -n "$CONN_TYPE" ]; then
+            sed -i "/^$ip /d" "$CONN_CACHE" 2>/dev/null
+            echo "$ip $CONN_TYPE $NOW" >> "$CONN_CACHE"
+        else
+            _arp_state=$(echo "$NEIGH" | awk -v ip="$ip" '$1==ip{print $NF; exit}')
+            case "$_arp_state" in
+                REACHABLE|STALE|DELAY|PROBE) CONN_TYPE="ethernet" ;;
+                *)
+                    CONN_TYPE="?"
+                    _cached=$(grep "^$ip " "$CONN_CACHE" 2>/dev/null | tail -1)
+                    if [ -n "$_cached" ]; then
+                        CONN_LAST=$(echo "$_cached" | awk '{print $2 "@" $3}')
+                    fi
+                    ;;
+            esac
+        fi
     fi
 
     if [ "$FIRST" = "1" ]; then
