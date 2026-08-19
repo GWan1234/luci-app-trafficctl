@@ -97,7 +97,7 @@ var callMacfilterRemove = rpc.declare({
 var callRatelimit = rpc.declare({
 	object: 'luci.trafficctl',
 	method: 'ratelimit',
-	params: ['ip', 'rate_kbit', 'label']
+	params: ['ip', 'rate_kbit', 'label', 'mode']
 });
 
 var callRatelimitStats = rpc.declare({
@@ -1769,6 +1769,44 @@ return view.extend({
 		modeToggle.appendChild(limiterBtn);
 		updateModeToggle();
 
+		// ── Network-wide / subnet target ──────────────────────────────
+		// With "All active devices" selected there is no single IP to act on,
+		// so the target is typed instead: "all" or a CIDR. Only the limiter
+		// supports blocks — tc classids are derived from a single address, so
+		// the shaper cannot express a subnet.
+		var _scopeSelected = 'each';
+		var scopeInput = E('input', {
+			'type': 'text',
+			'class': 'tc-custom-input',
+			'value': 'all',
+			'placeholder': '10.0.20.0/24',
+			'style': 'width:150px',
+			'data-tip': _('"all" for every device, or a CIDR such as 10.0.20.0/24')
+		});
+
+		var scopeChips = E('div', {'class':'tc-chips-row', 'style':'gap:4px'});
+		function updateScopeChips() {
+			Array.prototype.forEach.call(scopeChips.children, function(c) {
+				c.className = c._v === _scopeSelected ? 'tc-chip tc-chip--active' : 'tc-chip';
+			});
+		}
+		[
+			{ v: 'each',   l: _('per device'), tip: _('Every address gets its own bucket — 5 Mbit each') },
+			{ v: 'shared', l: _('shared'),     tip: _('One bucket for the whole target — 5 Mbit total') }
+		].forEach(function(o) {
+			var c = E('span', {'class':'tc-chip', 'data-tip': o.tip}, o.l);
+			c._v = o.v;
+			c.addEventListener('click', function() { _scopeSelected = o.v; updateScopeChips(); });
+			scopeChips.appendChild(c);
+		});
+		updateScopeChips();
+
+		var scopeRow = E('div', {'class':'tc-custom-row tc-hidden', 'style':'align-items:center;gap:8px'}, [
+			E('span', {'class':'tc-inline-label'}, _('Target:')),
+			scopeInput,
+			scopeChips
+		]);
+
 		var rateLimitRow = E('div', {
 			'class': 'tc-rate-panel tc-hidden'
 		}, [
@@ -1776,6 +1814,7 @@ return view.extend({
 				E('span', {'class':'tc-rate-panel__title'}, _('Speed Limit')),
 				modeToggle
 			]),
+			scopeRow,
 			rateChipsRow,
 			customRow
 		]);
@@ -1800,10 +1839,34 @@ return view.extend({
 		}
 
 		function applyRate() {
-			var ip   = searchSelect.getValue();
+			var all  = isAllMode();
+			// In all-devices mode the target is the typed scope ("all" or a
+			// CIDR); otherwise it's the selected device's address.
+			var ip   = all ? (scopeInput.value || 'all').trim() : searchSelect.getValue();
 			var name = '';
 			var kbit = getRateKbit();
-			var mode = _modeSelected;
+			// A block target has no single tc classid, so the shaper can't
+			// express it — force the limiter rather than silently doing nothing.
+			var mode = all ? 'limiter' : _modeSelected;
+			var scope = all ? _scopeSelected : '';
+
+			if (all && kbit !== '0') {
+				setStatus(statusDiv, 'loading',
+					_('Limiting') + ' ' + ip + ' → ' + fmtRate(parseInt(kbit)) + ' (' + scope + ')…');
+				callRatelimit(ip, parseInt(kbit), name, scope).then(function(res) {
+					setStatus(statusDiv, (res && res.ok) ? 'action' : 'error', (res && res.msg) || '?');
+					runQuery();
+				}).catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); });
+				return;
+			}
+			if (all) {
+				setStatus(statusDiv, 'loading', _('Removing throttle…'));
+				callRatelimit(ip, 0, name, scope).then(function(res) {
+					setStatus(statusDiv, 'ok', (res && res.msg) || _('Throttle removed'));
+					runQuery();
+				}).catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); });
+				return;
+			}
 
 			if (kbit === '0') {
 				setStatus(statusDiv, 'loading', _('Removing throttle…'));
@@ -1844,7 +1907,11 @@ return view.extend({
 		function updateModeUI() {
 			var all = isAllMode();
 			actionRow.classList.toggle('tc-hidden', all);
-			rateLimitRow.classList.toggle('tc-hidden', all);
+			// The throttle panel used to be hidden in all-devices mode, which
+			// left no way to limit a subnet or the whole network at all.
+			rateLimitRow.classList.remove('tc-hidden');
+			scopeRow.classList.toggle('tc-hidden', !all);
+			modeToggle.classList.toggle('tc-hidden', all);
 			rdnsCheck.classList.toggle('tc-hidden', all);
 			extStatsCheck.classList.toggle('tc-hidden', all);
 			extStatsDiv.classList.toggle('tc-hidden', all || !loadOpts().extendedStats);
