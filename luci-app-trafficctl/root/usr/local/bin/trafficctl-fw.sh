@@ -19,10 +19,23 @@ fi
 # upload on the way IN is what makes it work for downstream/routed clients
 # too — their packets still enter over a LAN device with the client's source
 # address, whatever router sits behind it.
+# mode: "each" gives every address inside the target its own bucket (an nft
+# meter keyed by address); "shared" makes the whole target share one bucket.
+# For a single host the two are identical.
 tctl_ratelimit_add() {
-    local ip="$1" rate_kbit="$2" comment="$3"
+    local ip="$1" rate_kbit="$2" comment="$3" mode="${4:-shared}"
     local rate_kbyte=$((rate_kbit / 8))
     [ "$rate_kbyte" -lt 1 ] && rate_kbyte=1
+
+    local slug dl_expr ul_expr
+    slug=$(tctl_target_slug "$ip")
+    if [ "$mode" = "each" ]; then
+        dl_expr="ip daddr $ip meter tctl_d_$slug { ip daddr limit rate over ${rate_kbyte} kbytes/second }"
+        ul_expr="ip saddr $ip meter tctl_u_$slug { ip saddr limit rate over ${rate_kbyte} kbytes/second }"
+    else
+        dl_expr="ip daddr $ip limit rate over ${rate_kbyte} kbytes/second"
+        ul_expr="ip saddr $ip limit rate over ${rate_kbyte} kbytes/second"
+    fi
 
     if [ "$TCTL_FW" = "nft" ]; then
         nft add table netdev tm_ratelimit 2>/dev/null
@@ -32,7 +45,7 @@ tctl_ratelimit_add() {
             nft add chain netdev tm_ratelimit dl \
                 "{ type filter hook ingress device $wan_dev priority -200; policy accept; }" 2>/dev/null
             nft add rule netdev tm_ratelimit dl \
-                "ip daddr $ip limit rate over ${rate_kbyte} kbytes/second counter drop comment \"$comment\"" 2>/dev/null \
+                "$dl_expr counter drop comment \"$comment\"" 2>/dev/null \
                 || rc=1
         else
             rc=1
@@ -50,7 +63,7 @@ tctl_ratelimit_add() {
             nft add chain netdev tm_ratelimit "$chain" \
                 "{ type filter hook ingress device $dev priority -200; policy accept; }" 2>/dev/null
             nft add rule netdev tm_ratelimit "$chain" \
-                "ip saddr $ip limit rate over ${rate_kbyte} kbytes/second counter drop comment \"${comment}_ul\"" 2>/dev/null \
+                "$ul_expr counter drop comment \"${comment}_ul\"" 2>/dev/null \
                 && ul_ok=1
         done
         # shellcheck disable=SC2034
@@ -74,9 +87,9 @@ tctl_ratelimit_remove() {
     if [ "$TCTL_FW" = "nft" ]; then
         # Scan the whole table once: rules for this IP live in dl (daddr) and
         # in one ul_<dev> chain per ingress device (saddr).
-        nft -a list table netdev tm_ratelimit 2>/dev/null | awk -v ip="$ip" '
+        nft -a list table netdev tm_ratelimit 2>/dev/null | awk -v cmt="$comment" '
             /^[ \t]*chain [a-zA-Z0-9_]+ \{/ { chain = $2; next }
-            $0 ~ ("(daddr|saddr) " ip " ") {
+            index($0, "\"" cmt "\"") || index($0, "\"" cmt "_ul\"") {
                 for (i = 1; i < NF; i++)
                     if ($i == "handle") { print chain, $(i+1); break }
             }' | while read -r chain h; do
@@ -311,6 +324,34 @@ tctl_ip_in_lan() {
     tctl_lan_subnets | awk -v si="$ipint" '
         si - (si % $3) == $2 { hit = 1; exit }
         END { exit hit ? 0 : 1 }'
+}
+
+# Accept a single host address or a CIDR block ("all" means every address).
+# Echoes the normalized target, or fails.
+tctl_validate_target() {
+    local t="$1" addr mask
+    case "$t" in
+        all|any) echo "0.0.0.0/0"; return 0 ;;
+    esac
+    case "$t" in
+        */*)
+            addr=${t%%/*}
+            mask=${t#*/}
+            tctl_validate_ip "$addr" || return 1
+            case "$mask" in ''|*[!0-9]*) return 1 ;; esac
+            [ "$mask" -ge 0 ] && [ "$mask" -le 32 ] || return 1
+            echo "$addr/$mask"
+            ;;
+        *)
+            tctl_validate_ip "$t" || return 1
+            echo "$t"
+            ;;
+    esac
+}
+
+# A target usable inside an nft set/meter name or a rule comment.
+tctl_target_slug() {
+    printf '%s' "$1" | tr './' '__'
 }
 
 tctl_validate_ip() {

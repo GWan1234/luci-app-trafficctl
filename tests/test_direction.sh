@@ -225,5 +225,48 @@ assert_contains "shaper: removes IFB class" "class del dev tctl-ifb0 classid 1:1
 assert_contains "shaper: removes upload filter" \
     "filter del dev tctl-ifb0 parent 1:0 prio 10 protocol ip u32 match ip src 192.168.1.50/32" "$TC"
 
+# ── subnet / whole-network targets ───────────────────────────────────────────
+
+RL="$TMPDIR/ratelimit.sh"
+sed -e "s|/usr/local/bin/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" \
+    "$BIN/trafficctl-ratelimit.sh" > "$RL"
+
+: > "$NFT_LOG"
+OUT=$(PATH="$MOCKBIN:$PATH" sh "$RL" 10.0.20.0/24 5000 2>&1)
+NFT=$(cat "$NFT_LOG")
+assert_contains "subnet: accepted" '"ok":true' "$OUT"
+assert_contains "subnet: defaults to per-device buckets" 'each' "$OUT"
+# A meter keyed by address gives each host its own bucket; a bare limit would
+# make one device able to starve the rest of the subnet.
+assert_contains "subnet: download meter keyed by daddr" \
+    "ip daddr 10.0.20.0/24 meter tctl_d_10_0_20_0_24 { ip daddr limit rate over 625 kbytes/second }" "$NFT"
+assert_contains "subnet: upload meter keyed by saddr" \
+    "ip saddr 10.0.20.0/24 meter tctl_u_10_0_20_0_24 { ip saddr limit rate over 625 kbytes/second }" "$NFT"
+
+: > "$NFT_LOG"
+OUT=$(PATH="$MOCKBIN:$PATH" sh "$RL" 10.0.20.0/24 5000 "" shared 2>&1)
+NFT=$(cat "$NFT_LOG")
+assert_contains "subnet: shared mode is an aggregate bucket" \
+    "ip daddr 10.0.20.0/24 limit rate over 625 kbytes/second" "$NFT"
+
+: > "$NFT_LOG"
+OUT=$(PATH="$MOCKBIN:$PATH" sh "$RL" all 2000 2>&1)
+NFT=$(cat "$NFT_LOG")
+assert_contains "all: whole network accepted" '"ok":true' "$OUT"
+assert_contains "all: expands to 0.0.0.0/0 with per-device buckets" \
+    "ip saddr 0.0.0.0/0 meter tctl_u_0_0_0_0_0" "$NFT"
+
+# A single host stays a plain per-host bucket.
+: > "$NFT_LOG"
+PATH="$MOCKBIN:$PATH" sh "$RL" 10.0.20.122 1000 >/dev/null 2>&1
+NFT=$(cat "$NFT_LOG")
+assert_contains "host: no meter for a single address" \
+    "ip saddr 10.0.20.122 limit rate over 125 kbytes/second" "$NFT"
+
+OUT=$(PATH="$MOCKBIN:$PATH" sh "$RL" '10.0.20.0/99' 1000 2>&1)
+assert_contains "invalid prefix rejected" '"ok":false' "$OUT"
+OUT=$(PATH="$MOCKBIN:$PATH" sh "$RL" 'bad;target' 1000 2>&1)
+assert_contains "invalid target rejected" '"ok":false' "$OUT"
+
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

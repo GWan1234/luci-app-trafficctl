@@ -34,7 +34,7 @@ list)
 	printf '"unblock":{"ip":"str","label":"str"},'
 	printf '"macfilter_add":{"ip":"str"},'
 	printf '"macfilter_remove":{"ip":"str"},'
-	printf '"ratelimit":{"ip":"str","rate_kbit":"int","label":"str"},'
+	printf '"ratelimit":{"ip":"str","rate_kbit":"int","label":"str","mode":"str"},'
 	printf '"ratelimit_stats":{},'
 	printf '"shape_add":{"ip":"str","rate_kbit":"int","label":"str"},'
 	printf '"shape_remove":{"ip":"str","label":"str"},'
@@ -128,10 +128,12 @@ call)
 		ip=$(echo "$input" | jsonfilter -e '@.ip' 2>/dev/null)
 		rate=$(echo "$input" | jsonfilter -e '@.rate_kbit' 2>/dev/null)
 		label=$(sanitize_label "$(echo "$input" | jsonfilter -e '@.label' 2>/dev/null)")
+		mode=$(echo "$input" | jsonfilter -e '@.mode' 2>/dev/null)
+		case "$mode" in each|shared) ;; *) mode="" ;; esac
 		if [ -z "$ip" ]; then
 			echo '{"ok":false,"msg":"ip required"}'
 		else
-			"$SCRIPTS/trafficctl-ratelimit.sh" "$ip" "${rate:-0}" "$label"
+			"$SCRIPTS/trafficctl-ratelimit.sh" "$ip" "${rate:-0}" "$label" "$mode"
 		fi
 		;;
 	ratelimit_stats)
