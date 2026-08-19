@@ -27,23 +27,34 @@ tctl_ratelimit_add() {
     if [ "$TCTL_FW" = "nft" ]; then
         nft add table netdev tm_ratelimit 2>/dev/null
 
-        local wan_dev
-        wan_dev=$(tctl_get_wan_device)
-        nft add chain netdev tm_ratelimit dl \
-            "{ type filter hook ingress device $wan_dev priority -200; policy accept; }" 2>/dev/null
-        nft add rule netdev tm_ratelimit dl \
-            "ip daddr $ip limit rate over ${rate_kbyte} kbytes/second counter drop comment \"$comment\""
+        local wan_dev rc=0
+        if wan_dev=$(tctl_get_wan_device); then
+            nft add chain netdev tm_ratelimit dl \
+                "{ type filter hook ingress device $wan_dev priority -200; policy accept; }" 2>/dev/null
+            nft add rule netdev tm_ratelimit dl \
+                "ip daddr $ip limit rate over ${rate_kbyte} kbytes/second counter drop comment \"$comment\"" 2>/dev/null \
+                || rc=1
+        else
+            rc=1
+        fi
+        # Set for the caller to inspect (see trafficctl-ratelimit.sh).
+        # shellcheck disable=SC2034
+        [ "$rc" = "0" ] || TCTL_RL_DOWNLOAD_FAILED=1
 
         # One chain per ingress device: a device that refuses the hook then
         # only loses its own chain instead of taking the whole set with it.
         local dev chain
+        local ul_ok=0
         for dev in $(tctl_ingress_devices); do
             chain=$(tctl_ingress_chain "$dev")
             nft add chain netdev tm_ratelimit "$chain" \
                 "{ type filter hook ingress device $dev priority -200; policy accept; }" 2>/dev/null
             nft add rule netdev tm_ratelimit "$chain" \
-                "ip saddr $ip limit rate over ${rate_kbyte} kbytes/second counter drop comment \"${comment}_ul\"" 2>/dev/null
+                "ip saddr $ip limit rate over ${rate_kbyte} kbytes/second counter drop comment \"${comment}_ul\"" 2>/dev/null \
+                && ul_ok=1
         done
+        # shellcheck disable=SC2034
+        [ "$ul_ok" = "1" ] || TCTL_RL_UPLOAD_FAILED=1
     else
         iptables -t mangle -A FORWARD -d "$ip" -m hashlimit \
             --hashlimit-above "${rate_kbit}kbit/sec" --hashlimit-burst "${rate_kbit}kbit" \
@@ -121,13 +132,30 @@ tctl_is_blocked() {
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
+# Resolve the WAN device to a name that actually exists as a netdev.
+#
+# The old fallback returned the literal string "wan", which is an interface
+# NAME, not a device — nft then rejected the chain ("device wan" doesn't
+# exist), the failure was swallowed, and download limiting silently did
+# nothing while still reporting success. Every candidate is now verified
+# against sysfs, with the default route as a last resort.
 tctl_get_wan_device() {
-    # Detect WAN interface device name
-    local dev
-    dev=$(uci -q get network.wan.device 2>/dev/null)
-    [ -z "$dev" ] && dev=$(uci -q get network.wan.ifname 2>/dev/null)
-    [ -z "$dev" ] && dev="wan"
-    echo "$dev"
+    local sysfs="${TCTL_SYSFS_NET:-/sys/class/net}"
+    local dev candidates
+
+    candidates="$(ubus call network.interface.wan status 2>/dev/null | jsonfilter -e '@.l3_device' 2>/dev/null)
+$(uci -q get network.wan.device 2>/dev/null)
+$(uci -q get network.wan.ifname 2>/dev/null)
+$(ip route show default 2>/dev/null | awk '/^default/{for (i = 1; i <= NF; i++) if ($i == "dev") { print $(i+1); exit }}')"
+
+    for dev in $candidates; do
+        [ -n "$dev" ] || continue
+        # A bridge/device name from uci can still be a config-only alias.
+        [ -e "$sysfs/$dev" ] || continue
+        echo "$dev"
+        return 0
+    done
+    return 1
 }
 
 tctl_get_lan_device() {

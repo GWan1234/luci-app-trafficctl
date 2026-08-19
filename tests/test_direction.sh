@@ -44,16 +44,20 @@ MOCK
 
 cat > "$MOCKBIN/ubus" <<'MOCK'
 #!/bin/sh
-echo '{"l3_device":"br-lan","ipv4-address":[{"address":"192.168.1.1","mask":24}]}'
+case "$2" in
+    network.interface.wan) echo '{"l3_device":"eth1"}' ;;
+    *) echo '{"l3_device":"br-lan","ipv4-address":[{"address":"192.168.1.1","mask":24}]}' ;;
+esac
 MOCK
 
+# Parses its stdin rather than hardcoding, so the wan/lan distinction survives.
 cat > "$MOCKBIN/jsonfilter" <<'MOCK'
 #!/bin/sh
 input=$(cat)
 case "$2" in
-    '@.l3_device') echo "br-lan" ;;
-    '@["ipv4-address"][0].address') echo "192.168.1.1" ;;
-    '@["ipv4-address"][0].mask') echo "24" ;;
+    '@.l3_device') echo "$input" | sed -n 's/.*"l3_device":"\([^"]*\)".*/\1/p' ;;
+    '@["ipv4-address"][0].address') echo "$input" | sed -n 's/.*"address":"\([^"]*\)".*/\1/p' ;;
+    '@["ipv4-address"][0].mask') echo "$input" | sed -n 's/.*"mask":\([0-9]*\).*/\1/p' ;;
 esac
 MOCK
 
@@ -97,6 +101,46 @@ mkdir -p "$TMPDIR/sys/class/net/eth1"
 mkdir -p "$TMPDIR/sys/class/net/br-lan/brif/lan1" \
          "$TMPDIR/sys/class/net/br-lan/brif/lan2"
 export TCTL_SYSFS_NET="$TMPDIR/sys/class/net"
+
+# ── WAN device resolution ────────────────────────────────────────────────────
+# The old code fell back to the literal string "wan", which is an interface
+# name rather than a device: nft rejected the chain and download limiting
+# silently did nothing.
+WANDEV=$(PATH="$MOCKBIN:$PATH" sh -c ". $BIN/trafficctl-fw.sh; tctl_get_wan_device")
+assert_contains "wan: resolves to a real device" "eth1" "$WANDEV"
+
+# With no resolvable candidate, it must fail rather than emit a bogus name.
+cat > "$MOCKBIN/ubus" <<'MOCK'
+#!/bin/sh
+echo '{}'
+MOCK
+cat > "$MOCKBIN/uci_nowan" <<'MOCK'
+#!/bin/sh
+exit 1
+MOCK
+chmod +x "$MOCKBIN/ubus" "$MOCKBIN/uci_nowan"
+OUT=$(PATH="$MOCKBIN:$PATH" sh -c "cp $MOCKBIN/uci_nowan $MOCKBIN/uci; . $BIN/trafficctl-fw.sh; tctl_get_wan_device || echo NO_WAN" 2>/dev/null)
+assert_contains "wan: reports failure instead of the literal 'wan'" "NO_WAN" "$OUT"
+
+# restore working mocks
+cat > "$MOCKBIN/uci" <<'MOCK'
+#!/bin/sh
+case "$3" in
+    network.wan.device) echo "eth1" ;;
+    network.lan.device) echo "br-lan" ;;
+    "firewall.@zone[0].name") echo "lan" ;;
+    "firewall.@zone[0].network") echo "lan" ;;
+    *) exit 1 ;;
+esac
+MOCK
+cat > "$MOCKBIN/ubus" <<'MOCK'
+#!/bin/sh
+case "$2" in
+    network.interface.wan) echo '{"l3_device":"eth1"}' ;;
+    *) echo '{"l3_device":"br-lan","ipv4-address":[{"address":"192.168.1.1","mask":24}]}' ;;
+esac
+MOCK
+chmod +x "$MOCKBIN/uci" "$MOCKBIN/ubus"
 
 # ── limiter: both directions ─────────────────────────────────────────────────
 : > "$NFT_LOG"

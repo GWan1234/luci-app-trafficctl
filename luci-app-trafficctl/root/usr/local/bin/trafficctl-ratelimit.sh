@@ -33,12 +33,23 @@ if [ "$RATE" = "0" ]; then
     fi
 else
     tctl_ratelimit_remove "$IP" "$COMMENT" 2>/dev/null
-    if tctl_ratelimit_add "$IP" "$RATE" "$COMMENT"; then
-        tctl_persist_enabled && tctl_persist_save "ratelimit" "$IP" "$RATE"
-        tctl_log "ratelimit_set" "$IP" "${RATE}kbit" "${TCTL_VIA:-cli}" "${TCTL_SRC:-local}"
-        echo "{\"ok\":true,\"msg\":\"rate limit set to ${RATE} kbit/s for $IP\"}"
-    else
-        echo "{\"ok\":false,\"msg\":\"failed to set rate limit for $IP\"}"
+    TCTL_RL_DOWNLOAD_FAILED=0
+    TCTL_RL_UPLOAD_FAILED=0
+    tctl_ratelimit_add "$IP" "$RATE" "$COMMENT"
+
+    # A half-applied limit is a silent trap: report exactly which direction
+    # is live rather than claiming success for both.
+    if [ "$TCTL_RL_DOWNLOAD_FAILED" = "1" ] && [ "$TCTL_RL_UPLOAD_FAILED" = "1" ]; then
+        echo "{\"ok\":false,\"msg\":\"failed to set rate limit for $IP (no usable WAN or LAN ingress device)\"}"
         exit 1
+    fi
+    tctl_persist_enabled && tctl_persist_save "ratelimit" "$IP" "$RATE"
+    tctl_log "ratelimit_set" "$IP" "${RATE}kbit" "${TCTL_VIA:-cli}" "${TCTL_SRC:-local}"
+    if [ "$TCTL_RL_DOWNLOAD_FAILED" = "1" ]; then
+        echo "{\"ok\":true,\"msg\":\"rate limit ${RATE} kbit/s applied to $IP UPLOAD ONLY — WAN device not resolvable\"}"
+    elif [ "$TCTL_RL_UPLOAD_FAILED" = "1" ]; then
+        echo "{\"ok\":true,\"msg\":\"rate limit ${RATE} kbit/s applied to $IP DOWNLOAD ONLY — no LAN ingress device\"}"
+    else
+        echo "{\"ok\":true,\"msg\":\"rate limit set to ${RATE} kbit/s for $IP (both directions)\"}"
     fi
 fi
