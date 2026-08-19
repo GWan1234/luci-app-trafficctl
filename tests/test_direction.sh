@@ -1,0 +1,142 @@
+#!/bin/bash
+# Regression tests: rate limiting and shaping must apply to BOTH directions.
+#
+# The original implementations only ever touched download (nft matched
+# "ip daddr" at WAN ingress; tc built an HTB tree on the LAN device only), so a
+# limited device still uploaded at full line rate. These assert the upload half
+# exists and is removed again.
+
+PASS=0
+FAIL=0
+
+BIN="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/local/bin"
+
+TMPDIR=$(mktemp -d)
+trap 'rm -rf "$TMPDIR"' EXIT
+MOCKBIN="$TMPDIR/bin"
+mkdir -p "$MOCKBIN"
+NFT_LOG="$TMPDIR/nft.log"
+TC_LOG="$TMPDIR/tc.log"
+
+assert_contains() {
+    local desc="$1" needle="$2" haystack="$3"
+    if printf '%s' "$haystack" | grep -qF -- "$needle"; then
+        PASS=$((PASS + 1))
+    else
+        FAIL=$((FAIL + 1))
+        printf "FAIL: %s\n  expected to find: '%s'\n  in:\n%s\n" "$desc" "$needle" "$haystack"
+    fi
+}
+
+# ── mocks ────────────────────────────────────────────────────────────────────
+cat > "$MOCKBIN/uci" <<'MOCK'
+#!/bin/sh
+case "$3" in
+    network.wan.device) echo "eth1" ;;
+    network.lan.device) echo "br-lan" ;;
+    # Patterns quoted: [0] is a glob character class otherwise, so these
+    # would never match the literal uci key.
+    "firewall.@zone[0].name") echo "lan" ;;
+    "firewall.@zone[0].network") echo "lan" ;;
+    *) exit 1 ;;
+esac
+MOCK
+
+cat > "$MOCKBIN/ubus" <<'MOCK'
+#!/bin/sh
+echo '{"l3_device":"br-lan","ipv4-address":[{"address":"192.168.1.1","mask":24}]}'
+MOCK
+
+cat > "$MOCKBIN/jsonfilter" <<'MOCK'
+#!/bin/sh
+input=$(cat)
+case "$2" in
+    '@.l3_device') echo "br-lan" ;;
+    '@["ipv4-address"][0].address') echo "192.168.1.1" ;;
+    '@["ipv4-address"][0].mask') echo "24" ;;
+esac
+MOCK
+
+cat > "$MOCKBIN/nft" <<MOCK
+#!/bin/sh
+echo "\$*" >> "$NFT_LOG"
+case "\$*" in
+    "list tables") echo "table inet fw4" ;;
+esac
+exit 0
+MOCK
+
+cat > "$MOCKBIN/tc" <<MOCK
+#!/bin/sh
+echo "\$*" >> "$TC_LOG"
+case "\$*" in
+    *"class show"*) exit 0 ;;
+esac
+exit 0
+MOCK
+
+chmod +x "$MOCKBIN"/*
+
+# tc needs the WAN device to look present
+mkdir -p "$TMPDIR/sys/class/net/eth1"
+
+# ── limiter: both directions ─────────────────────────────────────────────────
+: > "$NFT_LOG"
+PATH="$MOCKBIN:$PATH" sh -c ". $BIN/trafficctl-fw.sh; tctl_ratelimit_add 192.168.1.50 5000 rl_test" >/dev/null 2>&1
+NFT=$(cat "$NFT_LOG")
+
+assert_contains "limiter: download chain hooked on WAN ingress" \
+    "add chain netdev tm_ratelimit dl { type filter hook ingress device eth1" "$NFT"
+assert_contains "limiter: download rule matches daddr" \
+    "add rule netdev tm_ratelimit dl ip daddr 192.168.1.50 limit rate over 625 kbytes/second" "$NFT"
+
+assert_contains "limiter: upload chain hooked on LAN ingress" \
+    "add chain netdev tm_ratelimit ul { type filter hook ingress devices = { br-lan }" "$NFT"
+assert_contains "limiter: upload rule matches saddr" \
+    "add rule netdev tm_ratelimit ul ip saddr 192.168.1.50 limit rate over 625 kbytes/second" "$NFT"
+
+# ── limiter: removal clears both ─────────────────────────────────────────────
+: > "$NFT_LOG"
+PATH="$MOCKBIN:$PATH" sh -c ". $BIN/trafficctl-fw.sh; tctl_ratelimit_remove 192.168.1.50 rl_test" >/dev/null 2>&1
+NFT=$(cat "$NFT_LOG")
+assert_contains "limiter: removal inspects dl chain" "list chain netdev tm_ratelimit dl" "$NFT"
+assert_contains "limiter: removal inspects ul chain" "list chain netdev tm_ratelimit ul" "$NFT"
+
+# ── shaper: both directions ──────────────────────────────────────────────────
+: > "$TC_LOG"
+SHAPE="$TMPDIR/shape.sh"
+sed -e "s|/usr/local/bin/trafficctl-fw.sh|$BIN/trafficctl-fw.sh|" \
+    -e "s|SHAPES_FILE=\"/etc/trafficctl/shapes.json\"|SHAPES_FILE=\"$TMPDIR/shapes.json\"|" \
+    -e "s|/sys/class/net/|$TMPDIR/sys/class/net/|g" \
+    "$BIN/trafficctl-shape.sh" > "$SHAPE"
+OUT=$(PATH="$MOCKBIN:$PATH" sh "$SHAPE" add 192.168.1.50 5000 2>&1)
+TC=$(cat "$TC_LOG")
+
+assert_contains "shaper: add reports success" '"ok":true' "$OUT"
+assert_contains "shaper: says both directions" 'both directions' "$OUT"
+
+# 192.168.1.50 -> o3=1, o4=50 -> 1*256+50 = 306 -> 0x132
+assert_contains "shaper: download class on LAN device" \
+    "class add dev br-lan parent 1:1 classid 1:132 htb rate 5000kbit" "$TC"
+assert_contains "shaper: download filter matches dst" \
+    "filter add dev br-lan parent 1:0 prio 10 protocol ip u32 match ip dst 192.168.1.50/32" "$TC"
+
+assert_contains "shaper: upload class on WAN device" \
+    "class add dev eth1 parent 1:1 classid 1:132 htb rate 5000kbit" "$TC"
+assert_contains "shaper: upload filter matches src" \
+    "filter add dev eth1 parent 1:0 prio 10 protocol ip u32 match ip src 192.168.1.50/32" "$TC"
+
+assert_contains "shaper: root qdisc built on WAN device too" \
+    "qdisc add dev eth1 root handle 1: htb" "$TC"
+
+# ── shaper: removal clears both ──────────────────────────────────────────────
+: > "$TC_LOG"
+PATH="$MOCKBIN:$PATH" sh "$SHAPE" remove 192.168.1.50 >/dev/null 2>&1
+TC=$(cat "$TC_LOG")
+assert_contains "shaper: removes LAN class" "class del dev br-lan classid 1:132" "$TC"
+assert_contains "shaper: removes WAN class" "class del dev eth1 classid 1:132" "$TC"
+assert_contains "shaper: removes upload filter" \
+    "filter del dev eth1 parent 1:0 prio 10 protocol ip u32 match ip src 192.168.1.50/32" "$TC"
+
+printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
+[ "$FAIL" -eq 0 ] || exit 1

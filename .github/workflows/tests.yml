@@ -26,6 +26,8 @@ jobs:
         run: bash tests/test_names.sh
       - name: Netify (DPI) integration tests
         run: bash tests/test_netify.sh
+      - name: Bidirectional limit/shape tests
+        run: bash tests/test_direction.sh
       - name: Telegram unit tests
         run: bash tests/test_telegram.sh
       - name: Telegram mock tests

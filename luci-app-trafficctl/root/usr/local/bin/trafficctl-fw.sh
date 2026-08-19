@@ -12,6 +12,13 @@ fi
 
 # ── Rate Limiting (policer) ────────────────────────────────────────────────
 
+# Rate limits are symmetric: the same ceiling is policed in both directions.
+#
+# Download is caught at WAN ingress (packets arriving for the client) and
+# upload at LAN ingress (packets the client sends into the router). Policing
+# upload on the way IN is what makes it work for downstream/routed clients
+# too — their packets still enter over a LAN device with the client's source
+# address, whatever router sits behind it.
 tctl_ratelimit_add() {
     local ip="$1" rate_kbit="$2" comment="$3"
     local rate_kbyte=$((rate_kbit / 8))
@@ -19,30 +26,49 @@ tctl_ratelimit_add() {
 
     if [ "$TCTL_FW" = "nft" ]; then
         nft add table netdev tm_ratelimit 2>/dev/null
+
         local wan_dev
         wan_dev=$(tctl_get_wan_device)
         nft add chain netdev tm_ratelimit dl \
             "{ type filter hook ingress device $wan_dev priority -200; policy accept; }" 2>/dev/null
         nft add rule netdev tm_ratelimit dl \
             "ip daddr $ip limit rate over ${rate_kbyte} kbytes/second counter drop comment \"$comment\""
+
+        local lan_devs
+        lan_devs=$(tctl_lan_devices_csv)
+        if [ -n "$lan_devs" ]; then
+            nft add chain netdev tm_ratelimit ul \
+                "{ type filter hook ingress devices = { $lan_devs }; policy accept; }" 2>/dev/null
+            nft add rule netdev tm_ratelimit ul \
+                "ip saddr $ip limit rate over ${rate_kbyte} kbytes/second counter drop comment \"${comment}_ul\""
+        fi
     else
         iptables -t mangle -A FORWARD -d "$ip" -m hashlimit \
             --hashlimit-above "${rate_kbit}kbit/sec" --hashlimit-burst "${rate_kbit}kbit" \
             --hashlimit-mode dstip --hashlimit-name "rl_${comment}" \
             -j DROP -m comment --comment "$comment" 2>/dev/null
+        iptables -t mangle -A FORWARD -s "$ip" -m hashlimit \
+            --hashlimit-above "${rate_kbit}kbit/sec" --hashlimit-burst "${rate_kbit}kbit" \
+            --hashlimit-mode srcip --hashlimit-name "rl_${comment}_ul" \
+            -j DROP -m comment --comment "${comment}_ul" 2>/dev/null
     fi
 }
 
 tctl_ratelimit_remove() {
     local ip="$1" comment="$2"
+    local chain h
 
     if [ "$TCTL_FW" = "nft" ]; then
-        for h in $(nft -a list chain netdev tm_ratelimit dl 2>/dev/null \
-                   | grep "daddr $ip " | grep -o 'handle [0-9]*' | awk '{print $2}'); do
-            nft delete rule netdev tm_ratelimit dl handle "$h"
+        # Both directions: daddr in dl, saddr in ul.
+        for chain in dl ul; do
+            for h in $(nft -a list chain netdev tm_ratelimit "$chain" 2>/dev/null \
+                       | grep -E "(daddr|saddr) $ip " | grep -o 'handle [0-9]*' | awk '{print $2}'); do
+                nft delete rule netdev tm_ratelimit "$chain" handle "$h"
+            done
         done
     else
         while iptables -t mangle -D FORWARD -d "$ip" -m comment --comment "$comment" 2>/dev/null; do :; done
+        while iptables -t mangle -D FORWARD -s "$ip" -m comment --comment "${comment}_ul" 2>/dev/null; do :; done
     fi
 }
 
@@ -144,6 +170,11 @@ tctl_lan_subnets() {
             echo "$l3 $netbase $block $ipint"
         done
     done
+}
+
+# LAN L3 devices as an nft device-list body, e.g. "br-lan, eth0.20".
+tctl_lan_devices_csv() {
+    tctl_get_lan_devices | tr '\n' ',' | sed -e 's/,$//' -e 's/,/, /g'
 }
 
 # LAN L3 device names only (deduplicated), e.g. "br-lan br-guest eth0.20".

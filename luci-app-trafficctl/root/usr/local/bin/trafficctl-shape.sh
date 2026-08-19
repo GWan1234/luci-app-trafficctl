@@ -7,6 +7,10 @@
 
 SHAPES_FILE="/etc/trafficctl/shapes.json"
 LAN_DEV=$(tctl_get_lan_device)
+# Upload is shaped on the WAN device's egress — the only place LAN->WAN
+# traffic can be queued. Shaping the LAN device alone (as this did originally)
+# only ever touches the download direction.
+WAN_DEV=$(tctl_get_wan_device)
 
 ACTION="$1"
 IP="$2"
@@ -26,13 +30,39 @@ ip_to_classid() {
 }
 
 ensure_root_qdisc() {
+    local dev="${1:-$LAN_DEV}"
     # Set up root HTB hierarchy if not present
-    tc class show dev "$LAN_DEV" 2>/dev/null | grep -q "class htb 1:1 " && return 0
-    tc qdisc del dev "$LAN_DEV" root 2>/dev/null
-    tc qdisc add dev "$LAN_DEV" root handle 1: htb default fffe r2q 10
-    tc class add dev "$LAN_DEV" parent 1: classid 1:1 htb rate 1000mbit ceil 1000mbit burst 125000b cburst 125000b
-    tc class add dev "$LAN_DEV" parent 1:1 classid 1:fffe htb rate 1000mbit ceil 1000mbit burst 125000b cburst 125000b prio 0
-    tc qdisc add dev "$LAN_DEV" parent 1:fffe fq_codel 2>/dev/null
+    tc class show dev "$dev" 2>/dev/null | grep -q "class htb 1:1 " && return 0
+    tc qdisc del dev "$dev" root 2>/dev/null
+    tc qdisc add dev "$dev" root handle 1: htb default fffe r2q 10
+    tc class add dev "$dev" parent 1: classid 1:1 htb rate 1000mbit ceil 1000mbit burst 125000b cburst 125000b
+    tc class add dev "$dev" parent 1:1 classid 1:fffe htb rate 1000mbit ceil 1000mbit burst 125000b cburst 125000b prio 0
+    tc qdisc add dev "$dev" parent 1:fffe fq_codel 2>/dev/null
+}
+
+# Attach one shaping class on a device, matching the given IP in the given
+# direction ("dst" on the LAN side for download, "src" on the WAN side for
+# upload).
+shape_attach() {
+    local dev="$1" match="$2" ip="$3" classid="$4" rate="$5" burst="$6"
+
+    tc filter del dev "$dev" parent 1:0 prio 10 protocol ip u32 match ip "$match" "$ip"/32 2>/dev/null
+    tc qdisc del dev "$dev" parent "$classid" 2>/dev/null
+    tc class del dev "$dev" classid "$classid" 2>/dev/null
+
+    ensure_root_qdisc "$dev" || return 1
+    tc class add dev "$dev" parent 1:1 classid "$classid" htb \
+        rate "${rate}kbit" ceil "${rate}kbit" burst "${burst}b" cburst "${burst}b" 2>&1 || return 1
+    tc qdisc add dev "$dev" parent "$classid" fq_codel 2>/dev/null
+    tc filter add dev "$dev" parent 1:0 prio 10 protocol ip u32 \
+        match ip "$match" "$ip"/32 flowid "$classid" 2>&1 || return 1
+}
+
+shape_detach() {
+    local dev="$1" match="$2" ip="$3" classid="$4"
+    tc filter del dev "$dev" parent 1:0 prio 10 protocol ip u32 match ip "$match" "$ip"/32 2>/dev/null
+    tc qdisc del dev "$dev" parent "$classid" 2>/dev/null
+    tc class del dev "$dev" classid "$classid" 2>/dev/null
 }
 
 save_shape() {
@@ -82,41 +112,40 @@ do_add() {
     local classid
     classid=$(ip_to_classid "$IP")
 
-    ensure_root_qdisc
-
-    # Remove existing class for this IP if present
-    tc filter del dev "$LAN_DEV" parent 1:0 prio 10 protocol ip u32 match ip dst "$IP"/32 2>/dev/null
-    tc qdisc del dev "$LAN_DEV" parent "$classid" 2>/dev/null
-    tc class del dev "$LAN_DEV" classid "$classid" 2>/dev/null
-
     # Calculate burst: 10ms of data, minimum 1600 bytes
     local burst_bytes
     burst_bytes=$(( RATE * 125 / 100 ))
     [ "$burst_bytes" -lt 1600 ] && burst_bytes=1600
 
-    # Add class and filter
-    if ! tc class add dev "$LAN_DEV" parent 1:1 classid "$classid" htb \
-        rate "${RATE}kbit" ceil "${RATE}kbit" burst "${burst_bytes}b" cburst "${burst_bytes}b" 2>&1; then
-        echo "{\"ok\":false,\"msg\":\"tc class add failed for $IP\"}"
-        return 1
-    fi
-    tc qdisc add dev "$LAN_DEV" parent "$classid" fq_codel 2>/dev/null
-    if ! tc filter add dev "$LAN_DEV" parent 1:0 prio 10 protocol ip u32 match ip dst "$IP"/32 flowid "$classid" 2>&1; then
-        echo "{\"ok\":false,\"msg\":\"tc filter add failed for $IP\"}"
+    # Download: queue on the LAN device, matching traffic destined to the client.
+    if ! shape_attach "$LAN_DEV" dst "$IP" "$classid" "$RATE" "$burst_bytes"; then
+        echo "{\"ok\":false,\"msg\":\"tc setup failed for $IP on $LAN_DEV\"}"
         return 1
     fi
 
+    # Upload: queue on the WAN device, matching traffic sourced from the client.
+    # Reported separately so a WAN-side failure doesn't look like a total failure.
+    local ul_ok=1
+    if [ -n "$WAN_DEV" ] && [ -d "/sys/class/net/$WAN_DEV" ]; then
+        shape_attach "$WAN_DEV" src "$IP" "$classid" "$RATE" "$burst_bytes" || ul_ok=0
+    else
+        ul_ok=0
+    fi
+
     save_shape "$IP" "$RATE"
-    echo "{\"ok\":true,\"msg\":\"shape ${RATE} kbit/s applied to $IP (class $classid)\"}"
+    if [ "$ul_ok" = "1" ]; then
+        echo "{\"ok\":true,\"msg\":\"shape ${RATE} kbit/s applied to $IP both directions (class $classid)\"}"
+    else
+        echo "{\"ok\":true,\"msg\":\"shape ${RATE} kbit/s applied to $IP (download only — WAN device $WAN_DEV unavailable)\"}"
+    fi
 }
 
 do_remove() {
     local classid
     classid=$(ip_to_classid "$IP")
 
-    tc filter del dev "$LAN_DEV" parent 1:0 prio 10 protocol ip u32 match ip dst "$IP"/32 2>/dev/null
-    tc qdisc del dev "$LAN_DEV" parent "$classid" 2>/dev/null
-    tc class del dev "$LAN_DEV" classid "$classid" 2>/dev/null
+    shape_detach "$LAN_DEV" dst "$IP" "$classid"
+    [ -n "$WAN_DEV" ] && shape_detach "$WAN_DEV" src "$IP" "$classid"
 
     remove_shape "$IP"
     echo "{\"ok\":true,\"msg\":\"shape removed for $IP\"}"
