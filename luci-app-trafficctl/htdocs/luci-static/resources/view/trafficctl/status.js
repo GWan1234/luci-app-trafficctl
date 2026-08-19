@@ -14,7 +14,7 @@
 	}
 })();
 
-var TRAFFICCTL_BUILD = '20260820a';
+var TRAFFICCTL_BUILD = '20260820b';
 console.log('[trafficctl] build:' + TRAFFICCTL_BUILD);
 
 // Per-device DPI app breakdown from netifyd, keyed by IP. Stays empty when the
@@ -1678,6 +1678,11 @@ return view.extend({
 
 		// ── Speed Limit: modern chip UI ──────────────────────────────
 		var _rateSelected = '0';
+		// Set while the user has the custom field open. The per-device poll
+		// re-syncs this panel from the device's current rate, and without this
+		// it would close the field (and overwrite what is being typed) a few
+		// seconds after it was opened.
+		var _customPinned = false;
 		var _modeSelected = 'shaper';
 
 		var rateChipsRow = E('div', {'class':'tc-chips-row'});
@@ -1688,6 +1693,7 @@ return view.extend({
 			chip.addEventListener('click', function() {
 				_rateSelected = preset.v;
 				updateRateChips();
+				_customPinned = false;
 				customRow.classList.add('tc-hidden');
 				applyRate();
 			});
@@ -1732,12 +1738,15 @@ return view.extend({
 		customApplyBtn.addEventListener('click', function() {
 			_rateSelected = 'custom';
 			updateRateChips();
+			_customPinned = false;
 			applyRate();
 		});
 
 		var customToggleBtn = E('span', {'class': 'tc-chip', 'data-tip': _('Enter a custom speed value')}, '✎ ' + _('Custom'));
 		customToggleBtn.addEventListener('click', function() {
 			customRow.classList.toggle('tc-hidden');
+			_customPinned = !customRow.classList.contains('tc-hidden');
+			if (_customPinned) customInput.focus();
 		});
 		rateChipsRow.appendChild(customToggleBtn);
 
@@ -2171,7 +2180,11 @@ return view.extend({
 
 				var curRateStr = String(curRate);
 				var matched = RATE_PRESETS.some(function(p) { return p.v === curRateStr; });
-				if (matched) {
+				// Leave the panel alone entirely while the custom field is
+				// open — this runs on every poll.
+				if (_customPinned) {
+					/* user is editing */
+				} else if (matched) {
 					ratePick.setValue(curRateStr);
 					customRow.classList.add('tc-hidden');
 				} else if (curRate > 0) {
