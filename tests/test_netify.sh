@@ -95,6 +95,34 @@ assert_not_contains "sanitize: no shell metacharacters" 'rm -rf /' "$CACHED"
 OUT=$(run_netify list)
 assert_contains "list: returns cached data" '"top":"netflix"' "$OUT"
 
+# ── Agent v5 aggregator payload ──────────────────────────────────────────────
+# Real shape from netify-sink-socket: one object holding a "stats" array, with
+# "<id>.netify.<app>" names and separate download/upload counters.
+FEED5="$TMPDIR/feed_v5.json"
+cat > "$FEED5" <<'EOF'
+{"log_time_end":1787138795,"log_time_start":1787138780,"stats":[{"application_id":"10472.netify.amazon-alexa","download":4230,"local_ip":"10.0.20.142","local_mac":"74:4d:28:c3:29:6c","packets":11,"protocol_id":196,"upload":1477},{"application_id":"11800.netify.claude","download":1357,"local_ip":"10.0.20.190","packets":4,"protocol_id":188,"upload":146},{"application_id":"10002.netify.github","download":196,"local_ip":"10.0.20.190","packets":2,"protocol_id":196,"upload":52},{"application_id":"10307.netify.qnap","download":83,"local_ip":"192.168.2.153","packets":3,"protocol_id":196,"upload":143}]}
+EOF
+
+rm -f "$CACHE"
+OUT=$(TCTL_NETIFY_FEED="$FEED5" run_netify collect 2)
+assert_contains "v5: collected" '"ok":true' "$OUT"
+assert_contains "v5: every device in the stats array" '"devices":3' "$OUT"
+
+CACHED=$(cat "$CACHE")
+assert_contains "v5: valid JSON" "VALID" \
+    "$(python3 -c "import json,sys; json.load(sys.stdin); print('VALID')" < "$CACHE" 2>/dev/null)"
+
+# "<numeric id>.netify.<name>" must reduce to the bare app name.
+assert_contains "v5: numeric id prefix stripped" '"name":"amazon-alexa"' "$CACHED"
+assert_not_contains "v5: no raw application_id leaks" '10472' "$CACHED"
+
+# bytes = download + upload (1357 + 146 = 1503, 196 + 52 = 248)
+assert_contains "v5: download+upload summed" '"bytes":1503' "$CACHED"
+assert_contains "v5: top app is the biggest by bytes" '"ip":"10.0.20.190","top":"claude"' "$CACHED"
+
+# Routed devices must be represented, not just LAN ones.
+assert_contains "v5: routed device present" '"ip":"10.0.20.142"' "$CACHED"
+
 # ── graceful degradation ─────────────────────────────────────────────────────
 
 OUT=$(run_netify status)

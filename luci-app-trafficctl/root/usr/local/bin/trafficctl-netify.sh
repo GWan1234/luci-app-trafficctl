@@ -12,9 +12,15 @@
 #   trafficctl-netify.sh list            — cached per-device app breakdown
 #   trafficctl-netify.sh raw [secs]      — raw socket lines (debugging)
 #
-# Reading the socket needs socat or a nc with -U; the agent's framing is not
-# documented, so lines are parsed by field extraction rather than strict JSON,
-# which tolerates both newline-delimited and length-prefixed output.
+# Telemetry comes from the agent's socket SINK, not from netifyd.sock: in
+# Agent v5 that unix socket is a request/response API which never pushes flow
+# data, so connecting to it returns nothing at all. The sink's bind address is
+# read from netify-sink-socket.json (typically tcp://127.0.0.1:1780).
+#
+# Two payload shapes are handled: the aggregator's {"stats":[...]} records
+# (application_id/local_ip/download/upload) and raw per-flow records
+# (detected_application_name/local_ip/total_bytes). Records are parsed by field
+# extraction rather than strict JSON, which tolerates either framing.
 
 . /usr/local/bin/trafficctl-fw.sh
 
@@ -29,6 +35,18 @@ netify_socket() {
     echo "$DEFAULT_SOCKET"
 }
 
+# Where flow telemetry is actually published: an explicit override, else the
+# first enabled socket-sink channel, else the legacy unix socket (Agent v4).
+netify_endpoint() {
+    local ep
+    ep=$(uci -q get trafficctl.main.netify_endpoint 2>/dev/null)
+    [ -n "$ep" ] && { echo "$ep"; return; }
+    ep=$(sed -n 's/.*"bind_address\"[ \t]*:[ \t]*"\(tcp:\/\/[^"]*\)".*/\1/p' \
+        /etc/netifyd/netify-sink-socket.json 2>/dev/null | head -1)
+    [ -n "$ep" ] && { echo "$ep"; return; }
+    echo "unix://$(netify_socket)"
+}
+
 netify_enabled() {
     [ "$(uci -q get trafficctl.main.netify_enabled 2>/dev/null)" != "0" ]
 }
@@ -37,20 +55,34 @@ netify_enabled() {
 socket_reader() {
     if command -v socat >/dev/null 2>&1; then
         echo "socat"
-    elif nc --help 2>&1 | grep -q '\-U'; then
+    elif command -v nc >/dev/null 2>&1; then
         echo "nc"
     fi
 }
 
 read_socket() {
-    local secs="$1" sock reader
-    sock=$(netify_socket)
+    local secs="$1" ep reader hostport path
+    ep=$(netify_endpoint)
     reader=$(socket_reader)
-    [ -S "$sock" ] || return 1
-    case "$reader" in
-        socat) timeout "$secs" socat -u "UNIX-CONNECT:$sock" - 2>/dev/null ;;
-        nc)    timeout "$secs" nc -U "$sock" 2>/dev/null ;;
-        *)     return 1 ;;
+    [ -n "$reader" ] || return 1
+
+    case "$ep" in
+        tcp://*)
+            hostport=${ep#tcp://}
+            case "$reader" in
+                socat) timeout "$secs" socat -u "TCP-CONNECT:$hostport" - 2>/dev/null ;;
+                nc)    timeout "$secs" nc "${hostport%%:*}" "${hostport##*:}" 2>/dev/null ;;
+            esac
+            ;;
+        unix://*|/*)
+            path=${ep#unix://}
+            [ -S "$path" ] || return 1
+            case "$reader" in
+                socat) timeout "$secs" socat -u "UNIX-CONNECT:$path" - 2>/dev/null ;;
+                nc)    timeout "$secs" nc -U "$path" 2>/dev/null ;;
+            esac
+            ;;
+        *) return 1 ;;
     esac
     return 0
 }
@@ -76,9 +108,9 @@ do_status() {
         mtime=$(date -r "$CACHE" +%s 2>/dev/null || echo 0)
         age=$(( now - mtime ))
     fi
-    printf '{"enabled":%s,"installed":%s,"running":%s,"socket":"%s","reader":"%s","readable":%s,"cache_age":%d}\n' \
+    printf '{"enabled":%s,"installed":%s,"running":%s,"socket":"%s","endpoint":"%s","reader":"%s","readable":%s,"cache_age":%d}\n' \
         "$(netify_enabled && echo true || echo false)" \
-        "$installed" "$running" "$sock" "${reader:-none}" "$readable" "$age"
+        "$installed" "$running" "$sock" "$(netify_endpoint)" "${reader:-none}" "$readable" "$age"
 }
 
 # Aggregate flow records into "per local IP → per application" totals.
@@ -87,7 +119,9 @@ do_status() {
 # flow_dpi_complete), so totals are tracked per flow digest and only summed at
 # the end — adding every sighting would multiply-count the same traffic.
 parse_flows() {
-    awk '
+    # One JSON object per line so the field extractor sees one record at a
+    # time — the aggregator packs every device into a single "stats" array.
+    sed 's/},[ ]*{/}\n{/g' | awk '
     function field(line, key,   re, seg, v) {
         re = "\"" key "\"[ \t]*:[ \t]*"
         if (!match(line, re)) return ""
@@ -105,7 +139,10 @@ parse_flows() {
         ip = field($0, "local_ip")
         if (ip !~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) next
 
-        app = field($0, "detected_application_name")
+        # Aggregator records name the app as "<id>.netify.<name>".
+        app = field($0, "application_id")
+        sub(/^[0-9]+\./, "", app)
+        if (app == "") app = field($0, "detected_application_name")
         # Agent prefixes catalogued apps with "netify."; the bare name reads
         # better in a table.
         sub(/^netify\./, "", app)
@@ -118,8 +155,10 @@ parse_flows() {
         if (app == "") app = "unclassified"
 
         digest = field($0, "digest")
-        bytes = field($0, "total_bytes")
-        if (bytes == "") bytes = field($0, "local_bytes") + field($0, "other_bytes")
+        # Aggregator: per-interval byte deltas, already summed per device+app.
+        bytes = field($0, "download") + field($0, "upload")
+        if (bytes == 0) bytes = field($0, "total_bytes")
+        if (bytes == "" || bytes == 0) bytes = field($0, "local_bytes") + field($0, "other_bytes")
         if (digest == "") digest = ip "|" app "|" NR
 
         key = ip SUBSEP app
