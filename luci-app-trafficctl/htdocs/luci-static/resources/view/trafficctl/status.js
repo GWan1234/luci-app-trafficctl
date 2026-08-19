@@ -14,7 +14,7 @@
 	}
 })();
 
-var TRAFFICCTL_BUILD = '20260526i';
+var TRAFFICCTL_BUILD = '20260820a';
 console.log('[trafficctl] build:' + TRAFFICCTL_BUILD);
 
 // Per-device DPI app breakdown from netifyd, keyed by IP. Stays empty when the
