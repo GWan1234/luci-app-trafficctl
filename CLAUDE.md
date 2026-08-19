@@ -111,6 +111,7 @@ ssh root@192.168.0.1 sh -c '"cat > /www/luci-static/resources/view/trafficctl/st
 ## Key Technical Details
 
 - Traffic data comes from `/proc/net/nf_conntrack` (conntrack parsing)
+- Monitored sources = connected LAN subnets + subnets routed via a LAN next-hop (downstream routers) + `trafficctl.main.extra_subnets` (optional CIDRs); independently, any flow SNAT/masqueraded by this router (reply dst ≠ original src) is picked up as a forwarded client with zero config. Such devices get `conn_type: "routed"`.
 - WiFi detection: `iw dev <iface> station dump` → list of connected MACs
 - WiFi MAC filter: `hostapd_cli deny_acl ADD_MAC` + `deauthenticate` (no wifi reload)
 - tc/HTB shaping: classid derived from IP octets (`1:<hex(o3*256+o4)>`)
