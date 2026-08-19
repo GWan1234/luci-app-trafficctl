@@ -136,4 +136,12 @@ PKGINFO
     cat "$WORKDIR/control.tar.gz" "$WORKDIR/data.tar.gz" > "$APK_FILE"
 fi
 
+if ! command -v apk >/dev/null 2>&1; then
+    # The fallback path emits the older concatenated-tarball layout. apk-tools 3
+    # (OpenWrt 25.12+) rejects it with "file format is invalid or inconsistent";
+    # only the SDK build in auto-release.yml produces an installable APK.
+    echo "WARNING: built without 'apk mkpkg' — this file is NOT installable by apk-tools 3." >&2
+    echo "         For a dev install, extract the payload tarball directly instead." >&2
+fi
+
 echo "$APK_FILE"
