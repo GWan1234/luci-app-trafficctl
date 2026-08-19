@@ -194,6 +194,23 @@ RDNS_TTL=$(uci -q get trafficctl.main.rdns_ttl 2>/dev/null)
 # detached refresher at the end so this poll never blocks on DNS.
 RDNS_PENDING=""
 
+# Optional netifyd (DPI) application labels. Absent unless the agent is
+# installed and running — the column simply stays empty otherwise.
+NETIFY_CACHE_FILE="/tmp/trafficctl_netify.json"
+NETIFY_APPS=""
+if [ "$(uci -q get trafficctl.main.netify_enabled 2>/dev/null)" != "0" ] && [ -S "$(uci -q get trafficctl.main.netify_socket 2>/dev/null || echo /var/run/netifyd/netifyd.sock)" ]; then
+    # Flatten "ip top-app" pairs once so the per-device lookup stays a
+    # string match instead of a JSON parse per row.
+    NETIFY_APPS=$(sed 's/},{/}\n{/g' "$NETIFY_CACHE_FILE" 2>/dev/null | \
+        sed -n 's/.*"ip":"\([^"]*\)","top":"\([^"]*\)".*/\1 \2/p')
+    NETIFY_AGE=$(( NOW - $(date -r "$NETIFY_CACHE_FILE" +%s 2>/dev/null || echo 0) ))
+    NETIFY_INTERVAL=$(uci -q get trafficctl.main.netify_interval 2>/dev/null)
+    [ "$NETIFY_INTERVAL" -gt 0 ] 2>/dev/null || NETIFY_INTERVAL=30
+    if [ "$NETIFY_AGE" -ge "$NETIFY_INTERVAL" ]; then
+        /usr/local/bin/trafficctl-netify.sh collect >/dev/null 2>&1 &
+    fi
+fi
+
 # Firewall dumps (IP-independent — fetched once, grepped per device below)
 if [ "$TCTL_FW" = "nft" ]; then
     FWD_DUMP=$(nft list chain inet fw4 forward 2>/dev/null)
@@ -241,6 +258,11 @@ lookup_name() {
     [ -n "$name" ] && { echo "$name"; return; }
     [ "$RDNS_ENABLED" = "0" ] && return
     echo "$RDNS_CACHE" | awk -v ip="$ip" '$1 == ip && $2 != "-" {print $2; exit}'
+}
+
+lookup_app() {
+    [ -z "$NETIFY_APPS" ] && return
+    echo "$NETIFY_APPS" | awk -v ip="$1" '$1 == ip {print $2; exit}'
 }
 
 # True when the cache holds no fresh entry for this IP (hit or negative), so
@@ -322,6 +344,7 @@ for ip in $ACTIVE_IPS; do
     WIFI_BLK=$(lookup_wifi_blocked "$MAC")
     RATE_LIM=$(lookup_rate_limit "$ip")
     SHAPE=$(lookup_shape_kbit "$ip")
+    APP=$(lookup_app "$ip")
     if [ -z "$NAME" ]; then
         NAME="*"
         rdns_stale "$ip" && RDNS_PENDING="$RDNS_PENDING $ip"
@@ -372,8 +395,8 @@ for ip in $ACTIVE_IPS; do
     else
         printf ","
     fi
-    printf '{"ip":"%s","name":"%s","mac":"%s","conn_type":"%s","conn_last":"%s","conns":%d,"total":%d,"tcp":%d,"udp":%d,"blocked":%s,"block_bytes":%d,"wifi_blocked":%s,"rate_limit_kbit":%d,"shape_kbit":%d}' \
-        "$ip" "$NAME" "$MAC" "$CONN_TYPE" "$CONN_LAST" "$CONNS" "$TOTAL" "$TCP" "$UDP" \
+    printf '{"ip":"%s","name":"%s","mac":"%s","conn_type":"%s","conn_last":"%s","app":"%s","conns":%d,"total":%d,"tcp":%d,"udp":%d,"blocked":%s,"block_bytes":%d,"wifi_blocked":%s,"rate_limit_kbit":%d,"shape_kbit":%d}' \
+        "$ip" "$NAME" "$MAC" "$CONN_TYPE" "$CONN_LAST" "$APP" "$CONNS" "$TOTAL" "$TCP" "$UDP" \
         "$([ "$BLOCKED" = "1" ] && echo true || echo false)" \
         "$BLOCK_BYTES" \
         "$([ "$WIFI_BLK" = "1" ] && echo true || echo false)" \

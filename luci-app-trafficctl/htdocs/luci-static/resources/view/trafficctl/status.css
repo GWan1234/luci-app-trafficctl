@@ -624,3 +624,15 @@
 }
 .table.tc-table .tr:hover .tc-rename { opacity: .6; }
 .tc-rename:hover { opacity: 1 !important; color: var(--tc-speed); }
+
+/* DPI application label (netifyd). Muted pill so it reads as metadata rather
+   than a control. */
+.tc-app-badge {
+	font-size: 11px;
+	padding: 1px 6px;
+	border-radius: 8px;
+	background: var(--tc-chip-bg, rgba(127,127,127,.12));
+	color: var(--tc-muted);
+	cursor: help;
+	white-space: nowrap;
+}

@@ -41,6 +41,9 @@ list)
 	printf '"shape_status":{"ip":"str"},'
 	printf '"shape_stats":{},'
 	printf '"rdns":{"ip":"str"},'
+	printf '"netify_status":{},'
+	printf '"netify_list":{},'
+	printf '"netify_collect":{"secs":"int"},'
 	printf '"names_list":{},'
 	printf '"name_set":{"ip":"str","name":"str"},'
 	printf '"name_clear":{"ip":"str"},'
@@ -179,6 +182,19 @@ call)
 		else
 			"$SCRIPTS/trafficctl-rdns.sh" "$ip"
 		fi
+		;;
+	netify_status)
+		"$SCRIPTS/trafficctl-netify.sh" status
+		;;
+	netify_list)
+		printf '{"result":'
+		"$SCRIPTS/trafficctl-netify.sh" list
+		printf '}'
+		;;
+	netify_collect)
+		read -r input
+		secs=$(echo "$input" | jsonfilter -e '@.secs' 2>/dev/null)
+		"$SCRIPTS/trafficctl-netify.sh" collect "${secs:-3}"
 		;;
 	names_list)
 		printf '{"result":'

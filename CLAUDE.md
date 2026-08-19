@@ -34,6 +34,7 @@ luci-app-trafficctl/
     trafficctl-macfilter-remove.sh          — WiFi MAC allow
     trafficctl-names.sh                     — Manual device aliases (/etc/trafficctl/names)
     trafficctl-rdns-refresh.sh              — Background PTR resolver → /tmp/trafficctl_rdns_cache
+    trafficctl-netify.sh                    — Optional netifyd DPI app labels (status/collect/list/raw)
     trafficctl-portfw.sh                    — Port-forward/open-port list + inbound pause/limit
     trafficctl-ratelimit.sh                 — nft policing (drop-based)
     trafficctl-ratelimit-stats.sh           — Limiter counters
@@ -126,6 +127,7 @@ ssh root@192.168.0.1 sh -c '"cat > /www/luci-static/resources/view/trafficctl/st
 - Note: Only `/etc/config/trafficctl` is tracked as a conffile for package upgrades; runtime JSON files are non-essential and can be regenerated
 - Port-forward control: own nft table `inet tctl_pfw`, chains at forward/input priority -190 (post-DNAT, before the flowtable offload rule); pause = drop rule + conntrack flush, limit = `limit rate over` drop. Rule comments `tctl_pfw_<pause|limit>_<proto>_<ip|local>_<port>` are the source of truth for state
 - Device names: manual alias (`/etc/trafficctl/names`) > DHCP lease > cached reverse DNS. Routed devices have no lease here, so PTR (or an alias) is their only name source; `trafficctl.main.rdns_server` is a space-separated resolver list tried before the system resolver — point it at the downstream router. Lookups never block a poll: the summary reads the cache and spawns `trafficctl-rdns-refresh.sh` detached (max 8 IPs/poll, TTL `rdns_ttl`, `-` = negative cache)
+- Netifyd (DPI) integration is optional and inert unless the agent is installed and its socket exists: `trafficctl-netify.sh collect` samples the socket (socat, or nc -U) into `/tmp/trafficctl_netify.json`, which the summary reads for the per-device `app` field and refreshes detached when older than `netify_interval`. Agent framing is undocumented, so flow records are parsed by field extraction (tolerant of newline-delimited and length-prefixed output) and totals are tracked per flow `digest` — the agent re-emits growing counters, so summing every sighting would multiply-count. Set `TCTL_NETIFY_FEED` to a recorded file to test without a socket
 - Speed measurement: conntrack bytes (BEFORE tc shaper), so reported speed may exceed shaped limit
 - Spike filter: cap speed at 125 MB/s (1 Gbit/s), discard anomalous samples
 - Y-axis scaling: 98th percentile, nice ticks (multiples of 100/500 Kbit/s, min 5 gridlines)

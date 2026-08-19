@@ -13,6 +13,11 @@ config trafficctl 'main'
 	option resolve_names '1'
 	option rdns_server ''
 	option rdns_ttl '300'
+	# Optional netifyd (DPI) integration — adds application labels per device.
+	# Inactive unless the agent is installed and its socket exists.
+	option netify_enabled '1'
+	option netify_socket '/var/run/netifyd/netifyd.sock'
+	option netify_interval '30'
 
 config logging 'logging'
 	option enabled '1'

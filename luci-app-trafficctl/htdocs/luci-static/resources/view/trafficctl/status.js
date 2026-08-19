@@ -17,6 +17,10 @@
 var TRAFFICCTL_BUILD = '20260526i';
 console.log('[trafficctl] build:' + TRAFFICCTL_BUILD);
 
+// Per-device DPI app breakdown from netifyd, keyed by IP. Stays empty when the
+// agent isn't running, which is what makes the App column degrade quietly.
+var netifyMap = {};
+
 var STORAGE_KEY = 'trafficctl_opts';
 var RECENT_KEY = 'trafficctl_recent';
 var MAX_RECENT = 6;
@@ -120,6 +124,12 @@ var callShapeStats = rpc.declare({
 	expect: { result: [] }
 });
 
+
+var callNetifyList = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'netify_list',
+	expect: { result: [] }
+});
 
 var callNameSet = rpc.declare({
 	object: 'luci.trafficctl',
@@ -791,6 +801,7 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		{ key:'udp',              label:'UDP',          num:true,  tip: _('UDP bytes transferred'), hide:true },
 		{ key:'blocked',          label: _('Inet'),     num:false, tip: _('Internet access status (paused = traffic blocked)') },
 		{ key:'conn_type',        label: _('Link'),     num:false, tip: _('Connection interface (WiFi band, LAN port or routed)') },
+		{ key:'app',              label: _('App'),      num:false, tip: _('Top application by traffic (needs the netifyd DPI agent)') },
 		{ key:'_throttle_kbit',   label: _('Limit'),            num:true,  tip: _('Speed limit: shaper (queue) or limiter (drop)') },
 		{ key:'_drop_packets',    label: _('Drop'),           num:true,  tip: _('Packets dropped by rate limiter'), hide:true },
 		{ key:'_backlog',         label: '📦',           num:true,  tip: _('Bytes queued in traffic shaper'), hide:true }
@@ -929,6 +940,21 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 			linkBadge = E('span', { 'class': 'tc-c-muted' }, [mkEthIcon(14), document.createTextNode(ethLabel)]);
 		}
 		cellMap.conn_type = E('div', { 'class': 'td tc-center' }, linkBadge);
+
+		var appBadge;
+		if (r.app) {
+			var appDetail = netifyMap[r.ip];
+			var appTip = _('Top application by traffic');
+			if (appDetail && appDetail.apps && appDetail.apps.length) {
+				appTip = appDetail.apps.slice(0, 5).map(function(a) {
+					return a.name + ' — ' + fmtBytes(a.bytes);
+				}).join('\n');
+			}
+			appBadge = E('span', { 'class': 'tc-app-badge', 'title': appTip }, escHtml(r.app));
+		} else {
+			appBadge = E('span', { 'class': 'tc-c-faint' }, '—');
+		}
+		cellMap.app = E('div', { 'class': 'td tc-center' }, appBadge);
 
 		var throttleBadge;
 		if (r._throttle_mode === 'shaper') { throttleBadge = E('span', { 'class': 'tc-c-speed tc-fw-bold', 'title': _('Shaper (tc/HTB queue)') }, '≈ ' + fmtRate(r._throttle_kbit)); }
@@ -2268,6 +2294,17 @@ return view.extend({
 				if (!Array.isArray(rows)) rows = [];
 				searchSelect.updateDevices(rows);
 				renderSummary(rows);
+
+				// Breakdown for the App column tooltips; fire-and-forget so a
+				// missing or slow netifyd never delays the table.
+				if (rows.some(function(r) { return r.app; })) {
+					callNetifyList().then(function(list) {
+						if (!Array.isArray(list)) return;
+						var m = {};
+						list.forEach(function(d) { m[d.ip] = d; });
+						netifyMap = m;
+					}).catch(function() {});
+				}
 				setStatus(statusDiv, 'ok', '✓ ' + _('Done'));
 				self._startBytesPoll();
 			})
