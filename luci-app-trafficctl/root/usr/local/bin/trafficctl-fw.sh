@@ -34,14 +34,16 @@ tctl_ratelimit_add() {
         nft add rule netdev tm_ratelimit dl \
             "ip daddr $ip limit rate over ${rate_kbyte} kbytes/second counter drop comment \"$comment\""
 
-        local lan_devs
-        lan_devs=$(tctl_lan_devices_csv)
-        if [ -n "$lan_devs" ]; then
-            nft add chain netdev tm_ratelimit ul \
-                "{ type filter hook ingress devices = { $lan_devs }; policy accept; }" 2>/dev/null
-            nft add rule netdev tm_ratelimit ul \
-                "ip saddr $ip limit rate over ${rate_kbyte} kbytes/second counter drop comment \"${comment}_ul\""
-        fi
+        # One chain per ingress device: a device that refuses the hook then
+        # only loses its own chain instead of taking the whole set with it.
+        local dev chain
+        for dev in $(tctl_ingress_devices); do
+            chain=$(tctl_ingress_chain "$dev")
+            nft add chain netdev tm_ratelimit "$chain" \
+                "{ type filter hook ingress device $dev priority -200; policy accept; }" 2>/dev/null
+            nft add rule netdev tm_ratelimit "$chain" \
+                "ip saddr $ip limit rate over ${rate_kbyte} kbytes/second counter drop comment \"${comment}_ul\"" 2>/dev/null
+        done
     else
         iptables -t mangle -A FORWARD -d "$ip" -m hashlimit \
             --hashlimit-above "${rate_kbit}kbit/sec" --hashlimit-burst "${rate_kbit}kbit" \
@@ -59,12 +61,15 @@ tctl_ratelimit_remove() {
     local chain h
 
     if [ "$TCTL_FW" = "nft" ]; then
-        # Both directions: daddr in dl, saddr in ul.
-        for chain in dl ul; do
-            for h in $(nft -a list chain netdev tm_ratelimit "$chain" 2>/dev/null \
-                       | grep -E "(daddr|saddr) $ip " | grep -o 'handle [0-9]*' | awk '{print $2}'); do
-                nft delete rule netdev tm_ratelimit "$chain" handle "$h"
-            done
+        # Scan the whole table once: rules for this IP live in dl (daddr) and
+        # in one ul_<dev> chain per ingress device (saddr).
+        nft -a list table netdev tm_ratelimit 2>/dev/null | awk -v ip="$ip" '
+            /^[ \t]*chain [a-zA-Z0-9_]+ \{/ { chain = $2; next }
+            $0 ~ ("(daddr|saddr) " ip " ") {
+                for (i = 1; i < NF; i++)
+                    if ($i == "handle") { print chain, $(i+1); break }
+            }' | while read -r chain h; do
+            [ -n "$chain" ] && [ -n "$h" ] && nft delete rule netdev tm_ratelimit "$chain" handle "$h" 2>/dev/null
         done
     else
         while iptables -t mangle -D FORWARD -d "$ip" -m comment --comment "$comment" 2>/dev/null; do :; done
@@ -172,9 +177,32 @@ tctl_lan_subnets() {
     done
 }
 
-# LAN L3 devices as an nft device-list body, e.g. "br-lan, eth0.20".
-tctl_lan_devices_csv() {
-    tctl_get_lan_devices | tr '\n' ',' | sed -e 's/,$//' -e 's/,/, /g'
+# Concrete devices to attach netdev ingress hooks to.
+#
+# A netdev ingress hook bound to a BRIDGE never sees bridged traffic: packets
+# are received on the bridge's physical ports, so the hook must live there.
+# Binding to br-lan silently matches nothing, which is exactly how upload
+# limiting appeared to be applied while having no effect. Non-bridge L3
+# devices (plain ports, VLAN interfaces) are hooked directly.
+tctl_ingress_devices() {
+    local sysfs="${TCTL_SYSFS_NET:-/sys/class/net}"
+    local dev port
+    for dev in $(tctl_get_lan_devices); do
+        if [ -d "$sysfs/$dev/brif" ]; then
+            for port in "$sysfs/$dev/brif/"*; do
+                [ -e "$port" ] || continue
+                basename "$port"
+            done
+        else
+            echo "$dev"
+        fi
+    done | sort -u
+}
+
+# nft chain name for a device's ingress hook (chain names can't contain
+# dots or dashes, which interface names routinely do).
+tctl_ingress_chain() {
+    printf 'ul_%s' "$(printf '%s' "$1" | tr -c 'a-zA-Z0-9' '_')"
 }
 
 # LAN L3 device names only (deduplicated), e.g. "br-lan br-guest eth0.20".

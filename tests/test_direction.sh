@@ -80,6 +80,13 @@ chmod +x "$MOCKBIN"/*
 # tc needs the WAN device to look present
 mkdir -p "$TMPDIR/sys/class/net/eth1"
 
+# br-lan is a bridge with two physical ports. Ingress hooks must land on the
+# PORTS: a netdev ingress hook bound to the bridge itself never sees bridged
+# traffic, which is how upload limiting silently did nothing.
+mkdir -p "$TMPDIR/sys/class/net/br-lan/brif/lan1" \
+         "$TMPDIR/sys/class/net/br-lan/brif/lan2"
+export TCTL_SYSFS_NET="$TMPDIR/sys/class/net"
+
 # ── limiter: both directions ─────────────────────────────────────────────────
 : > "$NFT_LOG"
 PATH="$MOCKBIN:$PATH" sh -c ". $BIN/trafficctl-fw.sh; tctl_ratelimit_add 192.168.1.50 5000 rl_test" >/dev/null 2>&1
@@ -90,17 +97,26 @@ assert_contains "limiter: download chain hooked on WAN ingress" \
 assert_contains "limiter: download rule matches daddr" \
     "add rule netdev tm_ratelimit dl ip daddr 192.168.1.50 limit rate over 625 kbytes/second" "$NFT"
 
-assert_contains "limiter: upload chain hooked on LAN ingress" \
-    "add chain netdev tm_ratelimit ul { type filter hook ingress devices = { br-lan }" "$NFT"
-assert_contains "limiter: upload rule matches saddr" \
-    "add rule netdev tm_ratelimit ul ip saddr 192.168.1.50 limit rate over 625 kbytes/second" "$NFT"
+assert_contains "limiter: upload chain on first bridge port" \
+    "add chain netdev tm_ratelimit ul_lan1 { type filter hook ingress device lan1 priority -200" "$NFT"
+assert_contains "limiter: upload chain on second bridge port" \
+    "add chain netdev tm_ratelimit ul_lan2 { type filter hook ingress device lan2 priority -200" "$NFT"
+assert_contains "limiter: upload rule matches saddr on port chain" \
+    "add rule netdev tm_ratelimit ul_lan1 ip saddr 192.168.1.50 limit rate over 625 kbytes/second" "$NFT"
+
+# The regression itself: hooking the bridge matches nothing.
+if printf '%s' "$NFT" | grep -q "hook ingress device br-lan"; then
+    FAIL=$((FAIL + 1))
+    printf "FAIL: limiter: ingress hook bound to the bridge instead of its ports\n"
+else
+    PASS=$((PASS + 1))
+fi
 
 # ── limiter: removal clears both ─────────────────────────────────────────────
 : > "$NFT_LOG"
 PATH="$MOCKBIN:$PATH" sh -c ". $BIN/trafficctl-fw.sh; tctl_ratelimit_remove 192.168.1.50 rl_test" >/dev/null 2>&1
 NFT=$(cat "$NFT_LOG")
-assert_contains "limiter: removal inspects dl chain" "list chain netdev tm_ratelimit dl" "$NFT"
-assert_contains "limiter: removal inspects ul chain" "list chain netdev tm_ratelimit ul" "$NFT"
+assert_contains "limiter: removal scans the whole table" "list table netdev tm_ratelimit" "$NFT"
 
 # ── shaper: both directions ──────────────────────────────────────────────────
 : > "$TC_LOG"
