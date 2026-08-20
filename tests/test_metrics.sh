@@ -65,12 +65,12 @@ MOCK
 
 cat > "$MOCKBIN/summary" <<'MOCK'
 #!/bin/sh
-printf '[{"ip":"10.0.20.11","name":"Denis-NAS","mac":"aa:bb:cc:dd:ee:ff","conn_type":"routed","app":"google","conns":7,"total":100,"blocked":true,"rate_limit_kbit":1000,"shape_kbit":0}]\n'
+printf '[{"ip":"10.0.20.11","name":"Denis-NAS","mac":"aa:bb:cc:dd:ee:ff","conn_type":"routed","app":"google","conns":7,"total":9000,"tcp":7000,"udp":2000,"blocked":true,"block_bytes":4242,"wifi_blocked":false,"rate_limit_kbit":1000,"shape_kbit":0}]\n'
 MOCK
 
 cat > "$MOCKBIN/portfw" <<'MOCK'
 #!/bin/sh
-printf '[{"id":"r0","kind":"forward","name":"Web","proto":"tcp","ext_port":"8080","conns":3,"clients":2,"paused":true}]\n'
+printf '[{"id":"r0","kind":"forward","name":"Web","proto":"tcp","ext_port":"8080","enabled":true,"paused":true,"limit_kbit":5000,"conns":3,"clients":2,"bytes_in":12345,"bytes_out":678}]\n'
 MOCK
 
 cat > "$MOCKBIN/netify" <<'MOCK'
@@ -79,6 +79,11 @@ printf '[{"ip":"10.0.20.11","top":"google","apps":[{"name":"google","bytes":5000
 MOCK
 
 chmod +x "$MOCKBIN"/*
+
+# Reverse-DNS cache, as the background resolver leaves it ("-" = cached miss).
+RDNS="$TMPDIR/rdns_cache"
+printf '10.0.20.11 nas.lan 1787166682\n10.0.20.99 - 1787166682\n' > "$RDNS"
+sed -i.bak "s|rdnsfile=/tmp/trafficctl_rdns_cache|rdnsfile=$RDNS|" "$TMPDIR/metrics.sh"
 
 run_metrics() { PATH="$MOCKBIN:$PATH" sh "$TMPDIR/metrics.sh" 2>/dev/null; }
 
@@ -117,14 +122,25 @@ assert_contains "connections gauge" 'trafficctl_device_connections{ip="10.0.20.1
 assert_contains "blocked gauge" 'trafficctl_device_blocked{ip="10.0.20.11"} 1' "$OUT"
 assert_contains "limiter gauge" 'trafficctl_device_limit_kbit{ip="10.0.20.11",mode="limiter"} 1000' "$OUT"
 assert_contains "shaper gauge" 'trafficctl_device_limit_kbit{ip="10.0.20.11",mode="shaper"} 0' "$OUT"
-assert_contains "info metric carries device metadata" \
-    'trafficctl_device_info{ip="10.0.20.11",name="Denis-NAS",mac="aa:bb:cc:dd:ee:ff",link="routed",app="google"} 1' "$OUT"
+assert_contains "info metric carries device metadata incl. reverse DNS" \
+    'trafficctl_device_info{ip="10.0.20.11",name="Denis-NAS",mac="aa:bb:cc:dd:ee:ff",link="routed",app="google",rdns="nas.lan"} 1' "$OUT"
+
+# Everything the app records should be exportable, not just bytes.
+assert_contains "conntrack total gauge" 'trafficctl_device_conntrack_bytes{ip="10.0.20.11",proto="all"} 9000' "$OUT"
+assert_contains "tcp/udp split exported" 'trafficctl_device_conntrack_bytes{ip="10.0.20.11",proto="tcp"} 7000' "$OUT"
+assert_contains "udp split exported" 'trafficctl_device_conntrack_bytes{ip="10.0.20.11",proto="udp"} 2000' "$OUT"
+assert_contains "bytes dropped by the block rule" 'trafficctl_device_blocked_bytes{ip="10.0.20.11"} 4242' "$OUT"
+assert_contains "wifi block state" 'trafficctl_device_wifi_blocked{ip="10.0.20.11"} 0' "$OUT"
 
 assert_contains "portfw connections" 'trafficctl_portfw_connections{name="Web",proto="tcp",port="8080"} 3' "$OUT"
 assert_contains "portfw paused" 'trafficctl_portfw_paused{name="Web",proto="tcp",port="8080"} 1' "$OUT"
+assert_contains "portfw rule enabled state" 'trafficctl_portfw_enabled{name="Web",proto="tcp",port="8080"} 1' "$OUT"
+assert_contains "portfw inbound limit" 'trafficctl_portfw_limit_kbit{name="Web",proto="tcp",port="8080"} 5000' "$OUT"
+assert_contains "portfw byte counters" 'trafficctl_portfw_bytes{name="Web",proto="tcp",port="8080",direction="rx"} 12345' "$OUT"
 
 assert_contains "app metric emitted when enabled" 'trafficctl_app_bytes{ip="10.0.20.11",app="google"} 5000' "$OUT"
 assert_contains "second app on the same device" 'trafficctl_app_bytes{ip="10.0.20.11",app="ntp"} 300' "$OUT"
+assert_contains "per-app flow counts too" 'trafficctl_app_flows{ip="10.0.20.11",app="google"} 2' "$OUT"
 
 assert_contains "up metric" 'trafficctl_up 1' "$OUT"
 assert_contains "counter is typed for prometheus" '# TYPE trafficctl_device_bytes_total counter' "$OUT"

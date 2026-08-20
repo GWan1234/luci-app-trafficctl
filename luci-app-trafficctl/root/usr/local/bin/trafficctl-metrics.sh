@@ -114,7 +114,7 @@ END {
 if opt_on state; then
     /usr/local/bin/trafficctl-summary.sh 2>/dev/null \
         | sed 's/},{/}\n{/g' \
-        | awk '
+        | awk -v rdnsfile=/tmp/trafficctl_rdns_cache '
 function num(line, key,   re, seg) {
     re = "\"" key "\"[ \t]*:[ \t]*"
     if (!match(line, re)) return 0
@@ -131,12 +131,24 @@ function str(line, key,   re, seg) {
 }
 function esc(v) { gsub(/\\/, "\\\\", v); gsub(/"/, "\\\"", v); return v }
 BEGIN {
+    # Reverse-DNS names resolved in the background; "-" is a cached miss.
+    while ((getline l < rdnsfile) > 0) {
+        n = split(l, f, " ")
+        if (n >= 2 && f[2] != "-") rdns[f[1]] = f[2]
+    }
+    close(rdnsfile)
     print "# HELP trafficctl_device_connections Active tracked connections per device."
     print "# TYPE trafficctl_device_connections gauge"
     print "# HELP trafficctl_device_blocked Whether the device is blocked from the internet."
     print "# TYPE trafficctl_device_blocked gauge"
     print "# HELP trafficctl_device_limit_kbit Applied throttle in kbit/s (0 = none)."
     print "# TYPE trafficctl_device_limit_kbit gauge"
+    print "# HELP trafficctl_device_wifi_blocked Whether the device is denied on WiFi."
+    print "# TYPE trafficctl_device_wifi_blocked gauge"
+    print "# HELP trafficctl_device_conntrack_bytes Bytes currently accounted in conntrack (falls as flows expire)."
+    print "# TYPE trafficctl_device_conntrack_bytes gauge"
+    print "# HELP trafficctl_device_blocked_bytes Bytes dropped by the block rule."
+    print "# TYPE trafficctl_device_blocked_bytes gauge"
     print "# HELP trafficctl_device_info Device metadata; the value is always 1."
     print "# TYPE trafficctl_device_info gauge"
 }
@@ -145,12 +157,23 @@ BEGIN {
     if (ip == "") next
     printf "trafficctl_device_connections{ip=\"%s\"} %d\n", ip, num($0, "conns")
     printf "trafficctl_device_blocked{ip=\"%s\"} %d\n", ip, (index($0, "\"blocked\":true") ? 1 : 0)
+    printf "trafficctl_device_wifi_blocked{ip=\"%s\"} %d\n", ip, (index($0, "\"wifi_blocked\":true") ? 1 : 0)
     printf "trafficctl_device_limit_kbit{ip=\"%s\",mode=\"limiter\"} %d\n", ip, num($0, "rate_limit_kbit")
     printf "trafficctl_device_limit_kbit{ip=\"%s\",mode=\"shaper\"} %d\n", ip, num($0, "shape_kbit")
+    # Conntrack view: current in-flight totals and the protocol split.
+    printf "trafficctl_device_conntrack_bytes{ip=\"%s\",proto=\"all\"} %d\n", ip, num($0, "total")
+    printf "trafficctl_device_conntrack_bytes{ip=\"%s\",proto=\"tcp\"} %d\n", ip, num($0, "tcp")
+    printf "trafficctl_device_conntrack_bytes{ip=\"%s\",proto=\"udp\"} %d\n", ip, num($0, "udp")
+    printf "trafficctl_device_blocked_bytes{ip=\"%s\"} %d\n", ip, num($0, "block_bytes")
     # Names/MACs live on an info metric rather than on the counters: churn in a
     # label would otherwise start a brand new time series for the same device.
-    printf "trafficctl_device_info{ip=\"%s\",name=\"%s\",mac=\"%s\",link=\"%s\",app=\"%s\"} 1\n", \
-        ip, esc(str($0, "name")), esc(str($0, "mac")), esc(str($0, "conn_type")), esc(str($0, "app"))
+    # Hoisted rather than inlined as esc(ip in rdns ? ...): BusyBox awk parses
+    # an "in" test inside a call argument differently and silently drops the
+    # whole statement.
+    rd = ""
+    if (ip in rdns) rd = rdns[ip]
+    printf "trafficctl_device_info{ip=\"%s\",name=\"%s\",mac=\"%s\",link=\"%s\",app=\"%s\",rdns=\"%s\"} 1\n", \
+        ip, esc(str($0, "name")), esc(str($0, "mac")), esc(str($0, "conn_type")), esc(str($0, "app")), esc(rd)
 }'
 fi
 
@@ -181,6 +204,12 @@ BEGIN {
     print "# TYPE trafficctl_portfw_clients gauge"
     print "# HELP trafficctl_portfw_paused Whether inbound traffic is paused."
     print "# TYPE trafficctl_portfw_paused gauge"
+    print "# HELP trafficctl_portfw_enabled Whether the firewall rule itself is enabled."
+    print "# TYPE trafficctl_portfw_enabled gauge"
+    print "# HELP trafficctl_portfw_limit_kbit Inbound rate limit in kbit/s (0 = none)."
+    print "# TYPE trafficctl_portfw_limit_kbit gauge"
+    print "# HELP trafficctl_portfw_bytes Bytes currently accounted per port forward."
+    print "# TYPE trafficctl_portfw_bytes gauge"
 }
 {
     id = str($0, "id")
@@ -190,6 +219,10 @@ BEGIN {
     printf "trafficctl_portfw_connections{%s} %d\n", lbl, num($0, "conns")
     printf "trafficctl_portfw_clients{%s} %d\n", lbl, num($0, "clients")
     printf "trafficctl_portfw_paused{%s} %d\n", lbl, (index($0, "\"paused\":true") ? 1 : 0)
+    printf "trafficctl_portfw_enabled{%s} %d\n", lbl, (index($0, "\"enabled\":true") ? 1 : 0)
+    printf "trafficctl_portfw_limit_kbit{%s} %d\n", lbl, num($0, "limit_kbit")
+    printf "trafficctl_portfw_bytes{%s,direction=\"rx\"} %d\n", lbl, num($0, "bytes_in")
+    printf "trafficctl_portfw_bytes{%s,direction=\"tx\"} %d\n", lbl, num($0, "bytes_out")
 }'
 fi
 
@@ -207,7 +240,8 @@ BEGIN {
     if (!match($0, /"ip":"[^"]*"/)) next
     ip = substr($0, RSTART + 6, RLENGTH - 7)
     rest = $0
-    while (match(rest, /\{"name":"[^"]*","bytes":[0-9]+/)) {
+    # Match the whole app object, not just up to "bytes" — "flows" follows it.
+    while (match(rest, /\{"name":"[^"]*","bytes":[0-9]+[^}]*\}/)) {
         rec = substr(rest, RSTART, RLENGTH)
         rest = substr(rest, RSTART + RLENGTH)
         if (!match(rec, /"name":"[^"]*"/)) continue
@@ -215,6 +249,9 @@ BEGIN {
         if (!match(rec, /"bytes":[0-9]+/)) continue
         b = substr(rec, RSTART + 8, RLENGTH - 8) + 0
         printf "trafficctl_app_bytes{ip=\"%s\",app=\"%s\"} %d\n", ip, app, b
+        if (match(rec, /"flows":[0-9]+/))
+            printf "trafficctl_app_flows{ip=\"%s\",app=\"%s\"} %d\n", ip, app, \
+                substr(rec, RSTART + 8, RLENGTH - 8) + 0
     }
 }'
 fi
