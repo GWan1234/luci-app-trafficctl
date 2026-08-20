@@ -50,3 +50,18 @@ config telegram 'telegram'
 	option btn_block_wifi '1'
 	option btn_limiter '1'
 	option btn_shaper '1'
+
+config metrics 'metrics'
+	# Prometheus/OpenMetrics exporter. Off by default: it exposes device
+	# names, addresses and traffic volumes without a LuCI session.
+	option enabled '0'
+	# Shared token for the CGI endpoint (empty = no token check).
+	option token ''
+	# Per-device gauges (connections, blocked, limits, name/mac). Costs a
+	# full summary run per scrape — set 0 for byte counters only.
+	option state '1'
+	# Port-forward metrics.
+	option portfw '1'
+	# DPI application metrics. Off by default: device x application is a
+	# cardinality trap on a busy network.
+	option apps '0'

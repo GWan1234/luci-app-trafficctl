@@ -349,6 +349,10 @@ for ip in $ACTIVE_IPS; do
         NAME="*"
         rdns_stale "$ip" && RDNS_PENDING="$RDNS_PENDING $ip"
     fi
+    # A DHCP hostname is client-controlled: a quote or backslash in it would
+    # break this JSON document for every consumer (the LuCI table, the bot,
+    # the exporter). Keep only characters that are safe unquoted.
+    NAME=$(printf '%s' "$NAME" | tr -d '"\\' | tr -d '\n\r\t')
 
     CONN_TYPE=""
     CONN_LAST=""
