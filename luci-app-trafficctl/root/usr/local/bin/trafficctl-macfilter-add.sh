@@ -44,24 +44,42 @@ if [ -z "$IFACES" ]; then
 fi
 
 CHANGED=0
+MODE="deny"
 for iface in $IFACES; do
-    current_filter=$(uci -q get "wireless.${iface}.macfilter")
-    if [ "$current_filter" != "deny" ]; then
-        uci set "wireless.${iface}.macfilter=deny"
-        CHANGED=1
-    fi
+    # Respect the ACL policy the administrator configured. Forcing macfilter to
+    # "deny" here used to invert an existing whitelist: the curated allow-list
+    # would start being read as a block-list, letting in every device it was
+    # meant to keep out and banning every device it listed.
+    iface_mode=$(tctl_get_wifi_filter_mode "$iface")
+    [ "$iface_mode" = "allow" ] && MODE="allow"
 
     existing=$(uci -q get "wireless.${iface}.maclist")
-    echo "$existing" | grep -qi "$MAC" && continue
+    listed=0
+    echo "$existing" | grep -qi "$MAC" && listed=1
 
-    uci add_list "wireless.${iface}.maclist=$MAC"
-    CHANGED=1
+    if [ "$iface_mode" = "allow" ]; then
+        # Whitelist: blocking means dropping the MAC from the allow-list.
+        if [ "$listed" = "1" ]; then
+            uci del_list "wireless.${iface}.maclist=$MAC"
+            CHANGED=1
+        fi
+    else
+        # Blacklist: blocking means adding the MAC, creating the list if needed.
+        if [ -z "$(uci -q get "wireless.${iface}.macfilter")" ]; then
+            uci set "wireless.${iface}.macfilter=deny"
+            CHANGED=1
+        fi
+        if [ "$listed" = "0" ]; then
+            uci add_list "wireless.${iface}.maclist=$MAC"
+            CHANGED=1
+        fi
+    fi
 done
 
 if [ "$CHANGED" = "1" ]; then
     uci commit wireless
-    # Apply at runtime: add to deny ACL + deauth this client only
-    tctl_hostapd_deny_mac "$MAC"
+    # Apply at runtime and deauth just this client — no wifi reload.
+    tctl_hostapd_block_mac "$MAC" "$MODE"
 fi
 
 tctl_log "wifi_block" "$IP" "MAC=$MAC" "${TCTL_VIA:-cli}" "${TCTL_SRC:-local}"

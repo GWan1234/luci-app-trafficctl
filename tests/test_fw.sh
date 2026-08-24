@@ -85,6 +85,25 @@ assert_eq "offload_mode: hardware (no counter flag in flowtable)" \
 assert_eq "offload_mode: hardware-counter (counter flag present)" \
     "hardware-counter" "$(_offload_mode 0 1 "flowtable ft { flags { offload, counter }; devices = { eth0 }; }")"
 
+# --- tctl_get_wifi_filter_mode ---
+# Only an explicit "allow" is a whitelist; everything else (including unset, and
+# any unexpected value) must report "deny", because that is the policy the
+# package creates on demand. Getting this backwards would invert an
+# administrator's ACL — see the wifi allow-mode fix.
+
+_filter_mode() {
+    # $1 = value uci returns for wireless.<iface>.macfilter. Held in a variable
+    # because the stub's own $1 is the "-q" flag, not the configured value.
+    _MACFILTER="$1"
+    uci() { echo "$_MACFILTER"; }
+    tctl_get_wifi_filter_mode wifiX
+}
+
+assert_eq "wifi filter mode: allow" "allow" "$(_filter_mode allow)"
+assert_eq "wifi filter mode: deny" "deny" "$(_filter_mode deny)"
+assert_eq "wifi filter mode: unset defaults to deny" "deny" "$(_filter_mode '')"
+assert_eq "wifi filter mode: unknown value defaults to deny" "deny" "$(_filter_mode bogus)"
+
 # --- Results ---
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"

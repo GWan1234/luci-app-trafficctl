@@ -133,9 +133,14 @@ if [ -n "$MAC" ]; then
     IFACES=$(tctl_get_wifi_interfaces)
     for iface in $IFACES; do
         maclist=$(uci -q get "wireless.${iface}.maclist")
-        if echo "$maclist" | grep -qi "$MAC"; then
-            WIFI_BLOCKED=true
-            break
+        listed=0
+        echo "$maclist" | grep -qi "$MAC" && listed=1
+        # Being listed means the opposite thing per policy: on a deny radio a
+        # listed MAC is blocked, on an allow (whitelist) radio an UNlisted one is.
+        if [ "$(tctl_get_wifi_filter_mode "$iface")" = "allow" ]; then
+            [ "$listed" = "0" ] && { WIFI_BLOCKED=true; break; }
+        else
+            [ "$listed" = "1" ] && { WIFI_BLOCKED=true; break; }
         fi
     done
 fi
