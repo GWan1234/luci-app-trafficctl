@@ -2,6 +2,7 @@
 'require view';
 'require rpc';
 'require fs';
+'require ui';
 
 (function() {
 	if (!document.querySelector('link[href*="trafficctl/status.css"]')) {
@@ -13,8 +14,12 @@
 	}
 })();
 
-var TRAFFICCTL_BUILD = '20260526i';
+var TRAFFICCTL_BUILD = '20260820c';
 console.log('[trafficctl] build:' + TRAFFICCTL_BUILD);
+
+// Per-device DPI app breakdown from netifyd, keyed by IP. Stays empty when the
+// agent isn't running, which is what makes the App column degrade quietly.
+var netifyMap = {};
 
 var STORAGE_KEY = 'trafficctl_opts';
 var RECENT_KEY = 'trafficctl_recent';
@@ -92,7 +97,7 @@ var callMacfilterRemove = rpc.declare({
 var callRatelimit = rpc.declare({
 	object: 'luci.trafficctl',
 	method: 'ratelimit',
-	params: ['ip', 'rate_kbit', 'label']
+	params: ['ip', 'rate_kbit', 'label', 'mode']
 });
 
 var callRatelimitStats = rpc.declare({
@@ -119,6 +124,18 @@ var callShapeStats = rpc.declare({
 	expect: { result: [] }
 });
 
+
+var callNetifyList = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'netify_list',
+	expect: { result: [] }
+});
+
+var callNameSet = rpc.declare({
+	object: 'luci.trafficctl',
+	method: 'name_set',
+	params: ['ip', 'name']
+});
 
 var callTelegramGet = rpc.declare({
 	object: 'luci.trafficctl',
@@ -227,8 +244,69 @@ function fmtRate(kbit) {
 	if (mbit >= 1) return (mbit % 1 === 0 ? mbit.toFixed(0) : mbit.toFixed(1)) + ' Mbit/s';
 	return kbit + ' kbit/s';
 }
+
+// Render a "↓ down / ↑ up" speed cell. Both halves come from the same
+// bytes_in/bytes_out sample, so they are always consistent with each other.
+function renderSpeedCell(cell, sd) {
+	while (cell.firstChild) cell.removeChild(cell.firstChild);
+	if (!sd) {
+		cell.className = 'td tc-right tc-mono tc-speed-idle';
+		cell.appendChild(document.createTextNode('—'));
+		return;
+	}
+	var active = (sd.current > 1024) || (sd.up > 1024);
+	cell.className = 'td tc-right tc-mono ' + (active ? 'tc-speed-active' : 'tc-speed-idle');
+	cell.appendChild(E('div', { 'class': 'tc-spd-dn' }, '↓ ' + fmtSpeed(sd.current)));
+	cell.appendChild(E('div', { 'class': 'tc-spd-up' }, '↑ ' + fmtSpeed(sd.up || 0)));
+}
+
 function escHtml(s) {
 	return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Manual device naming. Routed devices (behind a downstream router) have no
+// DHCP lease on this router, so an alias — or a PTR record the backend
+// resolves — is the only way they get a name instead of "*".
+function promptRename(ip, current, onDone) {
+	var input = E('input', {
+		'type': 'text',
+		'class': 'cbi-input-text',
+		'value': current === '*' ? '' : current,
+		'placeholder': _('Device name'),
+		'style': 'width:100%'
+	});
+
+	var doSave = function() {
+		var v = (input.value || '').replace(/[^a-zA-Z0-9 _.()-]/g, '').substring(0, 32);
+		callNameSet(ip, v).then(function(res) {
+			ui.hideModal();
+			if (res && res.ok === false) {
+				ui.addNotification(null, E('p', res.msg || _('Rename failed')), 'error');
+				return;
+			}
+			if (onDone) onDone(v);
+		}).catch(function(e) {
+			ui.hideModal();
+			ui.addNotification(null, E('p', e.message), 'error');
+		});
+	};
+
+	input.addEventListener('keydown', function(ev) {
+		if (ev.key === 'Enter') { ev.preventDefault(); doSave(); }
+	});
+
+	var cancelBtn = E('button', { 'class': 'btn' }, _('Cancel'));
+	cancelBtn.addEventListener('click', function() { ui.hideModal(); });
+	var saveBtn = E('button', { 'class': 'btn cbi-button-positive' }, _('Save'));
+	saveBtn.addEventListener('click', doSave);
+
+	ui.showModal(_('Rename device') + ' — ' + ip, [
+		E('p', { 'class': 'tc-c-muted', 'style': 'font-size:12px' },
+			_('Overrides the DHCP lease or DNS name. Leave empty to clear the custom name.')),
+		E('div', { 'style': 'margin:10px 0' }, input),
+		E('div', { 'class': 'right' }, [cancelBtn, ' ', saveBtn])
+	]);
+	setTimeout(function() { input.focus(); input.select(); }, 50);
 }
 
 function mkEthIcon(size) {
@@ -741,7 +819,8 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		{ key:'tcp',              label:'TCP',          num:true,  tip: _('TCP bytes transferred'), hide:true },
 		{ key:'udp',              label:'UDP',          num:true,  tip: _('UDP bytes transferred'), hide:true },
 		{ key:'blocked',          label: _('Inet'),     num:false, tip: _('Internet access status (paused = traffic blocked)') },
-		{ key:'conn_type',        label: _('Link'),     num:false, tip: _('Connection interface (WiFi band or LAN port)') },
+		{ key:'conn_type',        label: _('Link'),     num:false, tip: _('Connection interface (WiFi band, LAN port or routed)') },
+		{ key:'app',              label: _('App'),      num:false, tip: _('Top application by traffic (needs the netifyd DPI agent)') },
 		{ key:'_throttle_kbit',   label: _('Limit'),            num:true,  tip: _('Speed limit: shaper (queue) or limiter (drop)') },
 		{ key:'_drop_packets',    label: _('Drop'),           num:true,  tip: _('Packets dropped by rate limiter'), hide:true },
 		{ key:'_backlog',         label: '📦',           num:true,  tip: _('Bytes queued in traffic shaper'), hide:true }
@@ -817,14 +896,31 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		var sd = speedMap[r.ip];
 		var cellMap = {};
 
-		cellMap.name = E('div', { 'class': 'td tc-fw-bold tc-c-speed' }, escHtml(r.name));
+		var nameText = E('span', {}, escHtml(r.name));
+		var renameBtn = E('span', {
+			'class': 'tc-rename',
+			'title': _('Rename device')
+		}, '✎');
+		renameBtn.addEventListener('click', function(ev) {
+			ev.stopPropagation();
+			promptRename(r.ip, r.name, function(newName) {
+				r.name = newName || '*';
+				nameText.textContent = r.name;
+			});
+		});
+		cellMap.name = E('div', { 'class': 'td tc-fw-bold tc-c-speed tc-name-cell' }, [nameText, renameBtn]);
 		cellMap.ip   = E('div', { 'class': 'td tc-mono' }, escHtml(r.ip));
 		var macEl = r.mac ? E('a', { 'href':'/cgi-bin/luci/admin/network/dhcp','target':'_blank','rel':'noopener','class':'tc-link','title':_('Open DHCP/DNS bindings'),'onclick':'event.stopPropagation()' }, r.mac) : '';
 		cellMap.mac  = E('div', { 'class': 'td tc-mono tc-sm tc-c-muted' }, macEl || '');
 
-		cellMap._speed = E('div', { 'class': 'td tc-right tc-mono', 'data-speed-ip': r.ip, 'title': sd ? (_('Avg')+': '+fmtSpeed(sd.avg)+' / '+_('Max')+': '+fmtSpeed(sd.max)) : _('Calculating…') });
-		if (sd && sd.current > 1024) { cellMap._speed.className = 'td tc-right tc-mono tc-speed-active'; cellMap._speed.textContent = fmtSpeed(sd.current); }
-		else { cellMap._speed.className = 'td tc-right tc-mono tc-speed-idle'; cellMap._speed.textContent = sd ? fmtSpeed(sd.current) : '—'; }
+		// Down and up are measured separately (bytes_in / bytes_out); showing
+		// only the download half hid the entire upload side of every device.
+		cellMap._speed = E('div', {
+			'class': 'td tc-right tc-mono',
+			'data-speed-ip': r.ip,
+			'title': sd ? (_('Avg')+': '+fmtSpeed(sd.avg)+' / '+_('Max')+': '+fmtSpeed(sd.max)) : _('Calculating…')
+		});
+		renderSpeedCell(cellMap._speed, sd);
 
 		cellMap._speed_up = E('div', { 'class': 'td tc-right tc-mono', 'data-speed-up-ip': r.ip, 'title': sd ? (_('Avg')+': '+fmtSpeed(sd.avg_up||0)+' / '+_('Max')+': '+fmtSpeed(sd.max_up||0)) : _('Calculating…') });
 		if (sd && (sd.current_up||0) > 1024) { cellMap._speed_up.className = 'td tc-right tc-mono tc-speed-active'; cellMap._speed_up.textContent = fmtSpeed(sd.current_up); }
@@ -861,6 +957,8 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 				}
 			}
 			linkBadge = E('span', { 'class': 'tc-c-faint', 'style': 'cursor:help', 'title': tip }, '?');
+		} else if (ct === 'routed') {
+			linkBadge = E('span', { 'class': 'tc-c-muted', 'style': 'cursor:help', 'title': _('Behind a downstream router (routed subnet)') }, '⇄ ' + _('routed'));
 		} else if (isWifi) {
 			var wLabel = ct === 'wifi' ? 'WiFi' : ct;
 			linkBadge = r.wifi_blocked
@@ -871,6 +969,21 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 			linkBadge = E('span', { 'class': 'tc-c-muted' }, [mkEthIcon(14), document.createTextNode(ethLabel)]);
 		}
 		cellMap.conn_type = E('div', { 'class': 'td tc-center' }, linkBadge);
+
+		var appBadge;
+		if (r.app) {
+			var appDetail = netifyMap[r.ip];
+			var appTip = _('Top application by traffic');
+			if (appDetail && appDetail.apps && appDetail.apps.length) {
+				appTip = appDetail.apps.slice(0, 5).map(function(a) {
+					return a.name + ' — ' + fmtBytes(a.bytes);
+				}).join('\n');
+			}
+			appBadge = E('span', { 'class': 'tc-app-badge', 'title': appTip }, escHtml(r.app));
+		} else {
+			appBadge = E('span', { 'class': 'tc-c-faint' }, '—');
+		}
+		cellMap.app = E('div', { 'class': 'td tc-center' }, appBadge);
 
 		var throttleBadge;
 		if (r._throttle_mode === 'shaper') { throttleBadge = E('span', { 'class': 'tc-c-speed tc-fw-bold', 'title': _('Shaper (tc/HTB queue)') }, '≈ ' + fmtRate(r._throttle_kbit)); }
@@ -1618,6 +1731,11 @@ return view.extend({
 
 		// ── Speed Limit: modern chip UI ──────────────────────────────
 		var _rateSelected = '0';
+		// Set while the user has the custom field open. The per-device poll
+		// re-syncs this panel from the device's current rate, and without this
+		// it would close the field (and overwrite what is being typed) a few
+		// seconds after it was opened.
+		var _customPinned = false;
 		var _modeSelected = 'shaper';
 
 		var rateChipsRow = E('div', {'class':'tc-chips-row'});
@@ -1628,6 +1746,7 @@ return view.extend({
 			chip.addEventListener('click', function() {
 				_rateSelected = preset.v;
 				updateRateChips();
+				_customPinned = false;
 				customRow.classList.add('tc-hidden');
 				applyRate();
 			});
@@ -1672,12 +1791,15 @@ return view.extend({
 		customApplyBtn.addEventListener('click', function() {
 			_rateSelected = 'custom';
 			updateRateChips();
+			_customPinned = false;
 			applyRate();
 		});
 
 		var customToggleBtn = E('span', {'class': 'tc-chip', 'data-tip': _('Enter a custom speed value')}, '✎ ' + _('Custom'));
 		customToggleBtn.addEventListener('click', function() {
 			customRow.classList.toggle('tc-hidden');
+			_customPinned = !customRow.classList.contains('tc-hidden');
+			if (_customPinned) customInput.focus();
 		});
 		rateChipsRow.appendChild(customToggleBtn);
 
@@ -1709,6 +1831,44 @@ return view.extend({
 		modeToggle.appendChild(limiterBtn);
 		updateModeToggle();
 
+		// ── Network-wide / subnet target ──────────────────────────────
+		// With "All active devices" selected there is no single IP to act on,
+		// so the target is typed instead: "all" or a CIDR. Only the limiter
+		// supports blocks — tc classids are derived from a single address, so
+		// the shaper cannot express a subnet.
+		var _scopeSelected = 'each';
+		var scopeInput = E('input', {
+			'type': 'text',
+			'class': 'tc-custom-input',
+			'value': 'all',
+			'placeholder': '10.0.20.0/24',
+			'style': 'width:150px',
+			'data-tip': _('"all" for every device, or a CIDR such as 10.0.20.0/24')
+		});
+
+		var scopeChips = E('div', {'class':'tc-chips-row', 'style':'gap:4px'});
+		function updateScopeChips() {
+			Array.prototype.forEach.call(scopeChips.children, function(c) {
+				c.className = c._v === _scopeSelected ? 'tc-chip tc-chip--active' : 'tc-chip';
+			});
+		}
+		[
+			{ v: 'each',   l: _('per device'), tip: _('Every address gets its own bucket — 5 Mbit each') },
+			{ v: 'shared', l: _('shared'),     tip: _('One bucket for the whole target — 5 Mbit total') }
+		].forEach(function(o) {
+			var c = E('span', {'class':'tc-chip', 'data-tip': o.tip}, o.l);
+			c._v = o.v;
+			c.addEventListener('click', function() { _scopeSelected = o.v; updateScopeChips(); });
+			scopeChips.appendChild(c);
+		});
+		updateScopeChips();
+
+		var scopeRow = E('div', {'class':'tc-custom-row tc-hidden', 'style':'align-items:center;gap:8px'}, [
+			E('span', {'class':'tc-inline-label'}, _('Target:')),
+			scopeInput,
+			scopeChips
+		]);
+
 		var rateLimitRow = E('div', {
 			'class': 'tc-rate-panel tc-hidden'
 		}, [
@@ -1716,6 +1876,7 @@ return view.extend({
 				E('span', {'class':'tc-rate-panel__title'}, _('Speed Limit')),
 				modeToggle
 			]),
+			scopeRow,
 			rateChipsRow,
 			customRow
 		]);
@@ -1740,10 +1901,34 @@ return view.extend({
 		}
 
 		function applyRate() {
-			var ip   = searchSelect.getValue();
+			var all  = isAllMode();
+			// In all-devices mode the target is the typed scope ("all" or a
+			// CIDR); otherwise it's the selected device's address.
+			var ip   = all ? (scopeInput.value || 'all').trim() : searchSelect.getValue();
 			var name = '';
 			var kbit = getRateKbit();
-			var mode = _modeSelected;
+			// A block target has no single tc classid, so the shaper can't
+			// express it — force the limiter rather than silently doing nothing.
+			var mode = all ? 'limiter' : _modeSelected;
+			var scope = all ? _scopeSelected : '';
+
+			if (all && kbit !== '0') {
+				setStatus(statusDiv, 'loading',
+					_('Limiting') + ' ' + ip + ' → ' + fmtRate(parseInt(kbit)) + ' (' + scope + ')…');
+				callRatelimit(ip, parseInt(kbit), name, scope).then(function(res) {
+					setStatus(statusDiv, (res && res.ok) ? 'action' : 'error', (res && res.msg) || '?');
+					runQuery();
+				}).catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); });
+				return;
+			}
+			if (all) {
+				setStatus(statusDiv, 'loading', _('Removing throttle…'));
+				callRatelimit(ip, 0, name, scope).then(function(res) {
+					setStatus(statusDiv, 'ok', (res && res.msg) || _('Throttle removed'));
+					runQuery();
+				}).catch(function(e) { setStatus(statusDiv, 'error', '✗ '+e.message); });
+				return;
+			}
 
 			if (kbit === '0') {
 				setStatus(statusDiv, 'loading', _('Removing throttle…'));
@@ -1784,7 +1969,11 @@ return view.extend({
 		function updateModeUI() {
 			var all = isAllMode();
 			actionRow.classList.toggle('tc-hidden', all);
-			rateLimitRow.classList.toggle('tc-hidden', all);
+			// The throttle panel used to be hidden in all-devices mode, which
+			// left no way to limit a subnet or the whole network at all.
+			rateLimitRow.classList.remove('tc-hidden');
+			scopeRow.classList.toggle('tc-hidden', !all);
+			modeToggle.classList.toggle('tc-hidden', all);
 			rdnsCheck.classList.toggle('tc-hidden', all);
 			extStatsCheck.classList.toggle('tc-hidden', all);
 			extStatsDiv.classList.toggle('tc-hidden', all || !loadOpts().extendedStats);
@@ -1802,11 +1991,10 @@ return view.extend({
 				var s = self._speedMap[ip];
 				var cell = connsDiv.querySelector('[data-speed-ip="'+ip+'"]');
 				if (!cell) return;
-				// Keep the layout classes — assigning className outright would drop
-				// 'td tc-right tc-mono' and break the cell's alignment.
-				cell.className = 'td tc-right tc-mono ' +
-					(s.current > 1024 ? 'tc-speed-active' : 'tc-speed-idle');
-				cell.textContent = fmtSpeed(s.current);
+				// renderSpeedCell keeps the layout classes ('td tc-right tc-mono')
+				// rather than assigning className outright, which is what used to
+				// break this cell's alignment.
+				renderSpeedCell(cell, s);
 				cell.title = _('Avg')+': '+fmtSpeed(s.avg)+' / '+_('Max')+': '+fmtSpeed(s.max);
 
 				var upCell = connsDiv.querySelector('[data-speed-up-ip="'+ip+'"]');
@@ -1954,6 +2142,7 @@ return view.extend({
 							});
 							self._speedMap[d.ip] = {
 								current: speed,
+								up: speedUp,
 								avg: ewma,
 								max: max,
 								current_up: speedUp,
@@ -1972,6 +2161,7 @@ return view.extend({
 							});
 							self._speedMap[d.ip] = {
 								current: speed,
+								up: speedUp,
 								avg: sum / hist.length,
 								max: sMax,
 								current_up: speedUp,
@@ -2072,7 +2262,11 @@ return view.extend({
 
 				var curRateStr = String(curRate);
 				var matched = RATE_PRESETS.some(function(p) { return p.v === curRateStr; });
-				if (matched) {
+				// Leave the panel alone entirely while the custom field is
+				// open — this runs on every poll.
+				if (_customPinned) {
+					/* user is editing */
+				} else if (matched) {
 					ratePick.setValue(curRateStr);
 					customRow.classList.add('tc-hidden');
 				} else if (curRate > 0) {
@@ -2264,6 +2458,17 @@ return view.extend({
 				if (!Array.isArray(rows)) rows = [];
 				searchSelect.updateDevices(rows);
 				renderSummary(rows);
+
+				// Breakdown for the App column tooltips; fire-and-forget so a
+				// missing or slow netifyd never delays the table.
+				if (rows.some(function(r) { return r.app; })) {
+					callNetifyList().then(function(list) {
+						if (!Array.isArray(list)) return;
+						var m = {};
+						list.forEach(function(d) { m[d.ip] = d; });
+						netifyMap = m;
+					}).catch(function() {});
+				}
 				setStatus(statusDiv, 'ok', '✓ ' + _('Done'));
 				self._startBytesPoll();
 			})
