@@ -4,6 +4,29 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.13.1] - 2026-08-24
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.13.0...v1.13.1
+
+---
+
+### Download
+
+| File | OpenWrt version | Install command |
+|------|----------------|-----------------|
+| `luci-app-trafficctl.ipk` | 21.02 — 24.10 | `opkg install <file>` |
+| `luci-app-trafficctl.apk` | 25.12+ | `apk add --allow-untrusted <file>` |
+
+Stable URL (always points to the latest release):
+```
+wget https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk
+wget https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.apk
+```
+
+Other filenames (`_all.ipk`, `_noarch.apk`, versioned) are the same file.
+
+---
+
 ## [Unreleased]
 
 ### Features
