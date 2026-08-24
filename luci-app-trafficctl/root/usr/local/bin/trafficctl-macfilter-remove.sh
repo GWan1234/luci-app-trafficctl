@@ -44,18 +44,34 @@ if [ -z "$IFACES" ]; then
 fi
 
 CHANGED=0
+MODE="deny"
 for iface in $IFACES; do
+    iface_mode=$(tctl_get_wifi_filter_mode "$iface")
+    [ "$iface_mode" = "allow" ] && MODE="allow"
+
     existing=$(uci -q get "wireless.${iface}.maclist")
-    if echo "$existing" | grep -qi "$MAC"; then
-        uci del_list "wireless.${iface}.maclist=$MAC"
-        CHANGED=1
+    listed=0
+    echo "$existing" | grep -qi "$MAC" && listed=1
+
+    if [ "$iface_mode" = "allow" ]; then
+        # Whitelist: unblocking means putting the MAC back on the allow-list.
+        if [ "$listed" = "0" ]; then
+            uci add_list "wireless.${iface}.maclist=$MAC"
+            CHANGED=1
+        fi
+    else
+        # Blacklist: unblocking means removing the MAC from the block-list.
+        if [ "$listed" = "1" ]; then
+            uci del_list "wireless.${iface}.maclist=$MAC"
+            CHANGED=1
+        fi
     fi
 done
 
 if [ "$CHANGED" = "1" ]; then
     uci commit wireless
-    # Remove from runtime deny ACL — client can reassociate immediately
-    tctl_hostapd_allow_mac "$MAC"
+    # Update the runtime ACL — the client can reassociate immediately.
+    tctl_hostapd_unblock_mac "$MAC" "$MODE"
 fi
 
 tctl_log "wifi_unblock" "$IP" "MAC=$MAC" "${TCTL_VIA:-cli}" "${TCTL_SRC:-local}"

@@ -177,8 +177,24 @@ if command -v tc >/dev/null 2>&1; then
     }')
 fi
 
-# All wifi maclists concatenated (a device is wifi-blocked if its MAC is in any)
-WIFI_MACLISTS=$(uci -q show wireless 2>/dev/null | grep '\.maclist=')
+# Wifi ACL state, split by policy, because "listed" means opposite things in the
+# two modes: on a deny (blacklist) radio a listed MAC is blocked, on an allow
+# (whitelist) radio a listed MAC is the only kind permitted. Collected once here
+# and matched fork-free per device below.
+WIFI_DENY_MACS=""
+WIFI_ALLOW_MACS=""
+WIFI_HAS_ALLOW=0
+for _wif in $(tctl_get_wifi_interfaces); do
+    _wlist=$(uci -q get "wireless.${_wif}.maclist" 2>/dev/null)
+    if [ "$(tctl_get_wifi_filter_mode "$_wif")" = "allow" ]; then
+        WIFI_HAS_ALLOW=1
+        WIFI_ALLOW_MACS="$WIFI_ALLOW_MACS $_wlist"
+    else
+        WIFI_DENY_MACS="$WIFI_DENY_MACS $_wlist"
+    fi
+done
+WIFI_DENY_MACS=" $(echo "$WIFI_DENY_MACS" | tr 'A-F' 'a-f') "
+WIFI_ALLOW_MACS=" $(echo "$WIFI_ALLOW_MACS" | tr 'A-F' 'a-f') "
 
 WIFI_STATIONS=$(get_wifi_stations)
 BRIDGE_MACS=$(get_bridge_macs)
@@ -239,7 +255,16 @@ lookup_shape_kbit() {
 lookup_wifi_blocked() {
     local mac="$1"
     [ -z "$mac" ] && { echo 0; return; }
-    echo "$WIFI_MACLISTS" | grep -qi "$mac" && echo 1 || echo 0
+    # Listed on a deny radio -> blocked there.
+    case "$WIFI_DENY_MACS" in *" $mac "*) echo 1; return ;; esac
+    # Absent from a whitelist radio -> cannot associate there, so also blocked.
+    if [ "$WIFI_HAS_ALLOW" = "1" ]; then
+        case "$WIFI_ALLOW_MACS" in
+            *" $mac "*) ;;
+            *) echo 1; return ;;
+        esac
+    fi
+    echo 0
 }
 
 # ── Emit JSON ──────────────────────────────────────────────────────────────
