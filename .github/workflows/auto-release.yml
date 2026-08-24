@@ -5,6 +5,14 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Two merges landing seconds apart each start a release job; they then race
+# on `git push origin main <tag>`, and the loser dies with "failed to push
+# some refs" after having already tagged. Serialise them, and never cancel
+# a run mid-release — a half-finished release leaves a tag with no artifacts.
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
@@ -259,6 +267,8 @@ jobs:
           git add luci-app-trafficctl/Makefile CHANGELOG.md
           git commit -m "chore: bump version to ${{ steps.bump.outputs.new_version }}"
           git tag "${{ steps.bump.outputs.new_tag }}"
+          # main may have advanced while CI ran; rebase rather than fail.
+          git pull --rebase origin main
           git push origin main "${{ steps.bump.outputs.new_tag }}"
 
       - name: Build .ipk (standalone)
