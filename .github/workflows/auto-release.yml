@@ -5,6 +5,14 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Two merges landing seconds apart each start a release job; they then race
+# on `git push origin main <tag>`, and the loser dies with "failed to push
+# some refs" after having already tagged. Serialise them, and never cancel
+# a run mid-release — a half-finished release leaves a tag with no artifacts.
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
@@ -187,6 +195,31 @@ jobs:
             echo "\`\`\`"
             echo ""
             echo "Other filenames (\`_all.ipk\`, \`_noarch.apk\`, versioned) are the same file."
+            echo ""
+            echo "### Upgrading an existing install"
+            echo ""
+            echo "Install over the current version — both package managers upgrade in"
+            echo "place, so there is no need to remove the old one first."
+            echo ""
+            echo "\`\`\`sh"
+            echo "cd /tmp"
+            echo "# OpenWrt 21.02 - 24.10"
+            echo "wget https://github.com/${{ github.repository }}/releases/latest/download/luci-app-trafficctl.ipk"
+            echo "opkg install /tmp/luci-app-trafficctl.ipk"
+            echo ""
+            echo "# OpenWrt 25.12+ / snapshot"
+            echo "wget https://github.com/${{ github.repository }}/releases/latest/download/luci-app-trafficctl.apk"
+            echo "apk add --allow-untrusted /tmp/luci-app-trafficctl.apk"
+            echo ""
+            echo "# required either way - rpcd caches the backend"
+            echo "/etc/init.d/rpcd restart"
+            echo "# only if the Telegram bot is enabled"
+            echo "/etc/init.d/trafficctl-telegram restart"
+            echo "\`\`\`"
+            echo ""
+            echo "Your settings are kept: \`/etc/config/trafficctl\` is a conffile, so the"
+            echo "package manager preserves it and writes the new defaults alongside as"
+            echo "\`/etc/config/trafficctl-opkg\`, which you can delete."
             echo 'CHANGELOG_EOF'
           } >> "$GITHUB_OUTPUT"
 
@@ -220,6 +253,11 @@ jobs:
               raise SystemExit(0)
           # Drop the generated heading; the version heading replaces it.
           body = re.sub(r"^## What's Changed\s*", '', body).strip()
+          # The release body also carries a download table and install commands.
+          # Useful on the Releases page, pure noise repeated in every changelog
+          # entry — drop that section but keep everything above it.
+          trimmed = re.split(r'\n-{3,}\s*\n+### Download', body)[0].strip()
+          body = trimmed or body
           entry = '## [%s] - %s\n\n%s\n\n---\n\n' % (ver, today, body)
           i = text.find('\n## [')
           text = (text[:i + 1] + entry + text[i + 1:]) if i != -1 else (text.rstrip() + '\n\n' + entry)
@@ -229,6 +267,8 @@ jobs:
           git add luci-app-trafficctl/Makefile CHANGELOG.md
           git commit -m "chore: bump version to ${{ steps.bump.outputs.new_version }}"
           git tag "${{ steps.bump.outputs.new_tag }}"
+          # main may have advanced while CI ran; rebase rather than fail.
+          git pull --rebase origin main
           git push origin main "${{ steps.bump.outputs.new_tag }}"
 
       - name: Build .ipk (standalone)
