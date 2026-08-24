@@ -4,6 +4,132 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [Unreleased]
+
+### Features
+
+- **Bidirectional rate limiting and shaping** — limits and shapers previously only affected download. Upload is now shaped via an IFB device fed from LAN-side ingress (a `match ip src` filter on the WAN side can't work post-NAT), and partial application is reported honestly instead of silently half-working. ([#27](https://github.com/YusDyr/luci-app-trafficctl/pull/27))
+- **Port Forwards tab** — view and manage DNAT rules from the app. ([#27](https://github.com/YusDyr/luci-app-trafficctl/pull/27))
+- **Routed-subnet monitoring** and improved device naming. ([#27](https://github.com/YusDyr/luci-app-trafficctl/pull/27))
+- **Optional netifyd DPI labels** — per-device application names when the Netify agent is installed. Entirely optional: not a package dependency, and inert when the agent or its socket is absent. ([#27](https://github.com/YusDyr/luci-app-trafficctl/pull/27))
+- **Prometheus metrics endpoint** — `/cgi-bin/trafficctl-metrics`, disabled by default, with an optional shared token. ([#27](https://github.com/YusDyr/luci-app-trafficctl/pull/27))
+
+Thanks to [@adeelahmad](https://github.com/adeelahmad) for this contribution.
+
+---
+
+## [1.12.1] — 2026-08-24
+
+### Bug Fixes
+
+- **UI controls readable on non-Bootstrap themes** — around 14 declarations bypassed the theme palette with literal colours. Tooltips were painted dark-on-white unconditionally (unreadable once the page went dark), text on accent-filled chips and buttons was hardcoded white (invisible on themes with a pale accent), the toggle knob was always white, and every shadow used a fixed black tuned for light backgrounds. All colour literals now live in the `:root`/dark blocks. ([#30](https://github.com/YusDyr/luci-app-trafficctl/issues/30))
+
+### Internal
+
+- Config is read via `config_load` / `config_get` with defaults instead of repeated `uci -q get` calls — the Telegram bot's `load_config()` alone dropped from 12 forks to 1, and it runs every 60s. Suggested by [@stangri](https://github.com/stangri). ([#29](https://github.com/YusDyr/luci-app-trafficctl/issues/29))
+
+---
+
+## [1.12.0] — 2026-08-24
+
+### Features
+
+- **Back/forward navigates between devices** — selecting a device now pushes a history entry, so mobile back gestures and mouse back buttons work. Option tweaks (columns, filters, intervals) still replace the entry, so the history stack doesn't fill with chip clicks. ([#26](https://github.com/YusDyr/luci-app-trafficctl/issues/26))
+
+---
+
+## [1.11.0] — 2026-08-24
+
+### Features
+
+- **WiFi allow-mode (whitelist) ACLs are supported** — the package now adapts to whichever `macfilter` policy each radio uses, instead of assuming a blacklist. ([#31](https://github.com/YusDyr/luci-app-trafficctl/issues/31))
+
+### Security
+
+- **Blocking a device no longer inverts a whitelist.** Blocking used to force `macfilter=deny` on every wifi-iface. On a router configured with `macfilter=allow`, that silently reinterpreted the administrator's curated allow-list as a block-list — letting in every device the whitelist existed to exclude, and banning every device it listed. The configured policy is now respected and never overwritten: on a deny radio blocking adds the MAC, on an allow radio it removes it.
+
+---
+
+## [1.10.1] — 2026-08-24
+
+### Bug Fixes
+
+- **The device view no longer freezes when a device is selected** — selecting a device stopped all polling, so speed, drop and backlog figures and the connection table stayed frozen until a manual refresh. This also made the per-device speed graph dead code, since the only thing driving it was skipped in that mode. ([#26](https://github.com/YusDyr/luci-app-trafficctl/issues/26))
+
+---
+
+## [1.10.0] — 2026-08-24
+
+### Features
+
+- **Per-device upload speed column** — upload was already being computed from `bytes_out` but never surfaced. ([#32](https://github.com/YusDyr/luci-app-trafficctl/issues/32))
+
+### Bug Fixes
+
+- **Live table updates work again** — six selectors still queried `td[data-…]` even though the tables became `<div class="td">` in the 1.6 LuCI-native conversion, so they matched nothing. Between full table rebuilds the speed, sparkline, drop-counter and backlog cells never refreshed, and clicking a sparkline never opened the speed-graph popup. ([#26](https://github.com/YusDyr/luci-app-trafficctl/issues/26))
+
+---
+
+## [1.9.0] — 2026-08-15
+
+### Features
+
+- **Egress interface per connection** — the connections table can show which WAN a connection actually uses, resolved from the conntrack fwmark via `ip route get <dst> mark <mark>`, so it honours mwan3's policy routing. Only populated where the router restores the connmark; left blank otherwise rather than showing a misleading main-table answer. Optional column, hidden by default. Thanks to [@the-e3n](https://github.com/the-e3n) for the diagnostics. ([#10](https://github.com/YusDyr/luci-app-trafficctl/issues/10))
+
+---
+
+## [1.8.1] — 2026-08-15
+
+### Bug Fixes
+
+- **Telegram bot responds to commands again on OpenWrt 25.12 / APK and snapshot** — newer `jsonfilter` returns an empty string for `jsonfilter -l '@.result'`, which left the update counter empty and made BusyBox ash spam `sh: out of range` while never processing `/start`, `/help`, `/devices` or any inline button. Reported and root-caused by [@lavatti](https://github.com/lavatti). ([#22](https://github.com/YusDyr/luci-app-trafficctl/issues/22))
+
+### CI
+
+- The install and upgrade tests now exercise a real `opkg install` instead of masking its failure with a manual tar extract — they had been validating tar extraction, not opkg.
+- The compat matrix is trimmed to x86-64. The other architectures were never actually running: OpenWrt publishes its rootfs container images for `linux/amd64` only, so those jobs failed `docker pull` and green-skipped. Since the package is `Architecture: all`, version coverage is what matters.
+- ESLint and ShellCheck now fail on warnings, and ShellCheck actually scans every script (its file list had been silently matching nothing for the init.d, rpcd and hotplug scripts).
+- `feature-build.yml` had a YAML error that made it fail on every run; fixed.
+- `docker pull` is retried, so a transient ghcr.io blip no longer reds the build.
+
+---
+
+## [1.8.0] — 2026-06-21
+
+### Features
+
+- **Devices on secondary bridges and VLANs are discovered** — device discovery enumerates every interface in the non-WAN firewall zones instead of assuming a single LAN. VPN/tunnel zones are excluded, so WireGuard/AmneziaWG peers aren't mistaken for LAN clients. ([#13](https://github.com/YusDyr/luci-app-trafficctl/issues/13))
+
+---
+
+## [1.7.1] — 2026-06-21
+
+### Performance
+
+- **The dashboard no longer re-scans firewall and conntrack state per device** — the summary rebuilt everything inside the per-device loop, re-reading all of `/proc/net/nf_conntrack` and re-dumping nft chains and tc classes for every client. With many devices that was dozens of heavy forks every few seconds, reported as the UI heavily loading the router. All shared state is now fetched once.
+- The Telegram bot scans for new devices periodically rather than on every poll iteration.
+
+### Bug Fixes
+
+- Temp files are removed via EXIT traps, so a script killed mid-run (which is exactly what rpcd does on a loaded router) no longer leaves scratch files filling tmpfs.
+
+---
+
+## [1.7.0] — 2026-06-04
+
+### Features
+
+- **Flow-offload awareness** — the settings panel shows the current offload mode with SW/HW toggles and explains the trade-offs. With hardware offload active the kernel stops syncing byte counts back to conntrack, so speed monitoring reads near zero; the UI now warns about this instead of showing frozen values.
+- **Batch reverse DNS** — all uncached addresses are resolved in one `network.rrdns.lookup` round-trip, removing the stuck "resolving…" state.
+- **Per-device speed graph** below the extended stats panel.
+
+### Bug Fixes
+
+- Dropped the `bind-dig` dependency: reverse DNS uses the built-in `rpcd-mod-rrdns` with a BusyBox `nslookup` fallback.
+- `build-ipk.sh` uses `--format ustar`, preventing macOS PaxHeader entries from corrupting installs on BusyBox tar.
+
+---
+
 ## [1.6.6] — 2026-05-29
 
 ### Bug Fixes
