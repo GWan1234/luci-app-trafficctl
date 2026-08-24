@@ -4,6 +4,8 @@
 # Runs under procd. Uses curl + jsonfilter to talk to Telegram Bot API.
 # Only responds to the authorized chat_id configured in UCI.
 
+. /lib/functions.sh
+
 SCRIPTS="/usr/local/bin"
 KNOWN_FILE="/etc/trafficctl/telegram_known.json"
 OFFSET_FILE="/tmp/trafficctl_tg_offset"
@@ -31,18 +33,19 @@ TG_BTN_SHAPE=1
 # ── config ──────────────────────────────────────────────────────────────────
 
 load_config() {
-	TG_ENABLED=$(uci -q get trafficctl.telegram.enabled || echo 0)
-	TG_TOKEN=$(uci -q get trafficctl.telegram.bot_token)
-	TG_CHAT_ID=$(uci -q get trafficctl.telegram.chat_id)
-	TG_POLL=$(uci -q get trafficctl.telegram.poll_interval || echo 3)
-	TG_NOTIFY_NEW=$(uci -q get trafficctl.telegram.notify_new_device || echo 1)
-	TG_NOTIFY_KNOWN=$(uci -q get trafficctl.telegram.notify_known_device || echo 0)
-	TG_CONTROL=$(uci -q get trafficctl.telegram.control_enabled || echo 1)
-	TG_NOTIFY_TEMPLATE=$(uci -q get trafficctl.telegram.notify_template)
-	TG_BTN_INET=$(uci -q get trafficctl.telegram.btn_block_inet || echo 1)
-	TG_BTN_WIFI=$(uci -q get trafficctl.telegram.btn_block_wifi || echo 1)
-	TG_BTN_LIMIT=$(uci -q get trafficctl.telegram.btn_limiter || echo 1)
-	TG_BTN_SHAPE=$(uci -q get trafficctl.telegram.btn_shaper || echo 1)
+	config_load trafficctl
+	config_get TG_ENABLED telegram enabled 0
+	config_get TG_TOKEN telegram bot_token ""
+	config_get TG_CHAT_ID telegram chat_id ""
+	config_get TG_POLL telegram poll_interval 3
+	config_get TG_NOTIFY_NEW telegram notify_new_device 1
+	config_get TG_NOTIFY_KNOWN telegram notify_known_device 0
+	config_get TG_CONTROL telegram control_enabled 1
+	config_get TG_NOTIFY_TEMPLATE telegram notify_template ""
+	config_get TG_BTN_INET telegram btn_block_inet 1
+	config_get TG_BTN_WIFI telegram btn_block_wifi 1
+	config_get TG_BTN_LIMIT telegram btn_limiter 1
+	config_get TG_BTN_SHAPE telegram btn_shaper 1
 	[ "$TG_POLL" -ge 2 ] 2>/dev/null || TG_POLL=3
 }
 

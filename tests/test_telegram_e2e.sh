@@ -71,6 +71,28 @@ setup_env() {
 network_get_ipaddr() { eval "$1='198.51.100.42'"; }
 MOCK
 
+    # functions.sh stub — minimal config_load/config_get(_bool) that reads
+    # through the mocked `uci get` below (real /lib/functions.sh calls
+    # `uci export`, which this test's uci mock doesn't implement; this
+    # shim keeps the same external interface load_config() relies on).
+    cat > "$MOCKDIR/lib/functions.sh" <<'MOCK'
+__CONFIG_PACKAGE=""
+config_load() { __CONFIG_PACKAGE="$1"; }
+config_get() {
+    local __var="$1" __section="$2" __option="$3" __default="$4" __val
+    __val=$(uci -q get "${__CONFIG_PACKAGE}.${__section}.${__option}" 2>/dev/null)
+    eval "$__var=\"\${__val:-\$__default}\""
+}
+config_get_bool() {
+    local __var="$1" __section="$2" __option="$3" __default="$4" __val
+    __val=$(uci -q get "${__CONFIG_PACKAGE}.${__section}.${__option}" 2>/dev/null)
+    case "${__val:-$__default}" in
+        1|on|true|yes|enabled) eval "$__var=1" ;;
+        *) eval "$__var=0" ;;
+    esac
+}
+MOCK
+
     # uci mock — realistic chat_id and token format (test values, not real)
     cat > "$MOCKBIN/uci" <<'MOCK'
 #!/bin/sh
@@ -333,6 +355,7 @@ run_bot_once() {
         -e 's|/proc/loadavg|'"$MOCKDIR"'/proc/loadavg|g' \
         -e 's|/proc/net/nf_conntrack|'"$MOCKDIR"'/proc/nf_conntrack|g' \
         -e 's|\. /lib/functions/network.sh|. '"$MOCKDIR"'/lib/functions/network.sh|' \
+        -e 's|\. /lib/functions.sh|. '"$MOCKDIR"'/lib/functions.sh|' \
         -e 's|/tmp/trafficctl_tg_seen.tmp|'"$MOCKDIR"'/tmp/seen.tmp|' \
         -e 's|/tmp/trafficctl_tg_cur.tmp|'"$MOCKDIR"'/tmp/cur.tmp|' \
         -e 's|/tmp/.trafficctl_known.lock|'"$MOCKDIR"'/tmp/.lock|g' \
