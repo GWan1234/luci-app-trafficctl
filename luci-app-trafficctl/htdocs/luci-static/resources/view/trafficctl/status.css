@@ -12,6 +12,17 @@
     --tc-bg:      var(--background-color-high,#ffffff);
     --tc-bg-alt:  var(--background-color-low, #f7fafc);
     --tc-hover:   var(--background-color-low, #ebf8ff);
+    /* Text drawn ON TOP of an accent fill (chips, primary buttons). Themes
+       whose accent is pale need dark text here, so it must be a variable
+       rather than a hardcoded white. */
+    --tc-on-accent: #ffffff;
+    /* Tooltips need a surface that CONTRASTS with the page, not one that
+       matches it — so these flip in the dark blocks below. */
+    --tc-tip-bg:  #2d3748;
+    --tc-tip-fg:  #ffffff;
+    --tc-shadow:  rgba(0,0,0,.15);
+    /* Telegram brand colour, kept deliberately brand-accurate. */
+    --tg-primary: #0088cc;
 }
 
 /* Bootstrap explicit dark mode */
@@ -26,6 +37,11 @@
     --tc-bg:      #1e1e1e;
     --tc-bg-alt:  #262626;
     --tc-hover:   #2d3748;
+    --tc-on-accent: #1a202c;
+    --tc-tip-bg:  #e2e8f0;
+    --tc-tip-fg:  #1a202c;
+    --tc-shadow:  rgba(0,0,0,.5);
+    --tg-primary: #3390ec;
 }
 
 /* OS dark preference (Argon auto mode, other themes) */
@@ -41,6 +57,11 @@
         --tc-bg:      #1e1e1e;
         --tc-bg-alt:  #262626;
         --tc-hover:   #2d3748;
+        --tc-on-accent: #1a202c;
+        --tc-tip-bg:  #e2e8f0;
+        --tc-tip-fg:  #1a202c;
+        --tc-shadow:  rgba(0,0,0,.5);
+        --tg-primary: #3390ec;
     }
 }
 
@@ -196,7 +217,7 @@
 .tc-chip--active {
     border-color: var(--tc-speed);
     background: var(--tc-speed);
-    color: #fff;
+    color: var(--tc-on-accent);
     font-weight: 600;
 }
 .tc-chips-row {
@@ -218,7 +239,7 @@
     transition: all .15s;
     font-weight: 500;
 }
-.tc-col-chip--on  { background: var(--tc-speed); color: #fff; border: 1px solid var(--tc-speed); }
+.tc-col-chip--on  { background: var(--tc-speed); color: var(--tc-on-accent); border: 1px solid var(--tc-speed); }
 .tc-col-chip--off { background: var(--tc-bg); color: var(--tc-muted); border: 1px solid var(--tc-border); }
 
 /* ── Settings panel (collapsible) ────────────────────────────────── */
@@ -334,7 +355,7 @@
     border: 1px solid var(--tc-border);
     border-top: none;
     border-radius: 0 0 4px 4px;
-    box-shadow: 0 4px 8px rgba(0,0,0,.15);
+    box-shadow: 0 4px 8px var(--tc-shadow);
     z-index: 100;
 }
 .tc-dropdown-item {
@@ -370,7 +391,7 @@
     border-radius: 6px;
     background: var(--tc-bg);
     border: 1px solid var(--tc-border);
-    box-shadow: 0 4px 16px rgba(0,0,0,.2);
+    box-shadow: 0 4px 16px var(--tc-shadow);
 }
 .tc-graph-popup__note {
     font-size: 10px;
@@ -482,8 +503,8 @@
     content: ""; position: absolute;
     top: 2px; left: 2px;
     width: 14px; height: 14px;
-    background: #fff; border-radius: 50%;
-    transition: transform .2s; box-shadow: 0 1px 2px rgba(0,0,0,.2);
+    background: var(--tc-bg); border-radius: 50%;
+    transition: transform .2s; box-shadow: 0 1px 2px var(--tc-shadow);
 }
 .tc-toggle-input:checked + .tc-toggle { background: var(--tc-speed); }
 .tc-toggle-input:checked + .tc-toggle::after { transform: translateX(16px); }
@@ -496,7 +517,7 @@
     transform: translateX(-50%);
     padding: 4px 8px; border-radius: 4px;
     font-size: 11px; font-weight: 400; white-space: nowrap;
-    background: #2d3748; color: #fff;
+    background: var(--tc-tip-bg); color: var(--tc-tip-fg);
     pointer-events: none; opacity: 0; transition: opacity .1s; z-index: 999;
 }
 [data-tip]:hover::after { opacity: 1; }
@@ -531,12 +552,12 @@
     background: var(--tc-bg);
     border: 1px solid var(--tc-border);
     border-radius: 4px;
-    box-shadow: 0 4px 12px rgba(0,0,0,.15);
+    box-shadow: 0 4px 12px var(--tc-shadow);
     z-index: 200; padding: 4px 0; white-space: nowrap;
 }
 
 /* ── Telegram settings section ───────────────────────────────────── */
-.tg-section  { border-left: 3px solid #0088cc; padding-left: 12px; margin-top: 4px; }
+.tg-section  { border-left: 3px solid var(--tg-primary); padding-left: 12px; margin-top: 4px; }
 .tg-row      { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .tg-row + .tg-row { margin-top: 8px; }
 .tg-input {
@@ -545,7 +566,7 @@
     border: 1px solid var(--tc-border); border-radius: 4px;
     outline: none; transition: border-color .2s;
 }
-.tg-input:focus { border-color: #0088cc; }
+.tg-input:focus { border-color: var(--tg-primary); }
 .tg-input--token    { width: 240px; }
 .tg-input--chat     { width: 120px; }
 .tg-input--template { width: 100%; min-height: 60px; resize: vertical; font-family: monospace; font-size: 11px; }
@@ -556,7 +577,7 @@
     cursor: pointer; transition: background .15s;
 }
 .tg-btn:hover { background: var(--tc-hover); }
-.tg-btn--primary { background: #0088cc; color: #fff; border-color: #0088cc; }
+.tg-btn--primary { background: var(--tg-primary); color: var(--tc-on-accent); border-color: var(--tg-primary); }
 .tg-btn--primary:hover { background: #006fa3; }
 .tg-label      { font-size: 11px; color: var(--tc-muted); font-weight: 500; }
 .tg-status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-left: 6px; vertical-align: middle; }
@@ -572,12 +593,12 @@
     font-family: inherit; font-size: inherit; line-height: inherit; outline: none;
 }
 .tg-segmented__item:last-child { border-right: none; }
-.tg-segmented__item--active { background: #0088cc; color: #fff; }
+.tg-segmented__item--active { background: var(--tg-primary); color: var(--tc-on-accent); }
 .tg-divider { font-size: 11px; font-weight: 600; color: var(--tc-muted); margin-top: 12px; margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid var(--tc-border); }
-.tg-bubble { background: var(--tc-bg-alt); border: 1px solid var(--tc-border); border-radius: 12px 12px 12px 4px; padding: 10px 14px; max-width: 280px; font-size: 12px; line-height: 1.5; box-shadow: 0 1px 2px rgba(0,0,0,0.06); }
+.tg-bubble { background: var(--tc-bg-alt); border: 1px solid var(--tc-border); border-radius: 12px 12px 12px 4px; padding: 10px 14px; max-width: 280px; font-size: 12px; line-height: 1.5; box-shadow: 0 1px 2px var(--tc-shadow); }
 .tg-bubble--kbd { text-align: center; border-radius: 12px; }
 .tg-kbd-row { display: flex; gap: 2px; justify-content: center; margin-top: 4px; }
-.tg-kbd-btn { background: #3390ec; color: #fff; border-radius: 6px; padding: 5px 10px; font-size: 11px; flex: 1; text-align: center; min-width: 0; }
+.tg-kbd-btn { background: var(--tg-primary); color: var(--tc-on-accent); border-radius: 6px; padding: 5px 10px; font-size: 11px; flex: 1; text-align: center; min-width: 0; }
 .tg-commands { background: var(--tc-bg-alt); border: 1px solid var(--tc-border); border-radius: 4px; padding: 8px 12px; font-family: monospace; font-size: 11px; line-height: 1.8; }
 .tg-eye { cursor: pointer; font-size: 14px; user-select: none; line-height: 1; }
 .tg-template-hint { font-size: 10px; color: var(--tc-faint); margin-top: 2px; }
