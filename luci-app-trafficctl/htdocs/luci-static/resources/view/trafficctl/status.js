@@ -254,10 +254,10 @@ function renderSpeedCell(cell, sd) {
 		cell.appendChild(document.createTextNode('—'));
 		return;
 	}
-	var active = (sd.current > 1024) || (sd.up > 1024);
-	cell.className = 'td tc-right tc-mono ' + (active ? 'tc-speed-active' : 'tc-speed-idle');
-	cell.appendChild(E('div', { 'class': 'tc-spd-dn' }, '↓ ' + fmtSpeed(sd.current)));
-	cell.appendChild(E('div', { 'class': 'tc-spd-up' }, '↑ ' + fmtSpeed(sd.up || 0)));
+	// Download only — upload has its own sortable "UL Speed" column, so showing
+	// it here too would duplicate it and make neither column sortable on its own.
+	cell.className = 'td tc-right tc-mono ' + (sd.current > 1024 ? 'tc-speed-active' : 'tc-speed-idle');
+	cell.appendChild(document.createTextNode(fmtSpeed(sd.current)));
 }
 
 function escHtml(s) {
