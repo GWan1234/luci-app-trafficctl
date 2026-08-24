@@ -169,6 +169,45 @@ tctl_get_hostapd_ifaces() {
 }
 
 # Add MAC to hostapd deny ACL at runtime + deauth the client (no wifi reload)
+# Which ACL policy a wifi-iface uses: "allow" (whitelist — only listed MACs may
+# associate) or "deny" (blacklist — listed MACs are rejected). Anything else,
+# including unset, means no filtering is configured yet, reported as "deny"
+# because that is the mode we create on demand.
+tctl_get_wifi_filter_mode() {
+    local iface="$1" mode
+    mode=$(uci -q get "wireless.${iface}.macfilter" 2>/dev/null)
+    [ "$mode" = "allow" ] && echo "allow" || echo "deny"
+}
+
+# Block a MAC at runtime. In deny mode that means adding it to the deny ACL; in
+# allow (whitelist) mode it means dropping it from the accept ACL. Either way
+# the client is deauthenticated so the change takes effect immediately.
+tctl_hostapd_block_mac() {
+    local mac="$1" mode="$2"
+    local iface
+    for iface in $(tctl_get_hostapd_ifaces); do
+        if [ "$mode" = "allow" ]; then
+            hostapd_cli -i "$iface" accept_acl DEL_MAC "$mac" 2>/dev/null
+        else
+            hostapd_cli -i "$iface" deny_acl ADD_MAC "$mac" 2>/dev/null
+        fi
+        hostapd_cli -i "$iface" deauthenticate "$mac" 2>/dev/null
+    done
+}
+
+# Unblock a MAC at runtime — the inverse of tctl_hostapd_block_mac.
+tctl_hostapd_unblock_mac() {
+    local mac="$1" mode="$2"
+    local iface
+    for iface in $(tctl_get_hostapd_ifaces); do
+        if [ "$mode" = "allow" ]; then
+            hostapd_cli -i "$iface" accept_acl ADD_MAC "$mac" 2>/dev/null
+        else
+            hostapd_cli -i "$iface" deny_acl DEL_MAC "$mac" 2>/dev/null
+        fi
+    done
+}
+
 tctl_hostapd_deny_mac() {
     local mac="$1"
     local iface
