@@ -911,7 +911,15 @@ function updateUrlParams(opts) {
 	if (opts.extendedStats) params.set('extended', '1');
 	if (opts.rdns) params.set('rdns', '1');
 	var newUrl = window.location.pathname + (params.toString() ? '?' + params.toString() : '');
-	history.replaceState(null, '', newUrl);
+	// Selecting a different device is a real navigation step, so push it and let
+	// back/forward (including mobile back gestures and mouse back buttons) move
+	// between devices. Option tweaks — columns, filters, intervals — only rewrite
+	// the current entry, so they don't flood the history stack.
+	var curIp = new URLSearchParams(window.location.search).get('ip') || '__all__';
+	var newIp = opts.lastIp || '__all__';
+	var state = { ip: newIp };
+	if (curIp !== newIp) history.pushState(state, '', newUrl);
+	else history.replaceState(state, '', newUrl);
 }
 
 function applyUrlParams(opts) {
@@ -1266,6 +1274,7 @@ return view.extend({
 	_speedEwmaUp:  {},
 	_deviceTimer:  null,
 	_pollMode:     null,
+	_onPopState:   null,
 	_rdnsCache:    {},
 	_sortCol:    'bytes',
 	_sortDir:    'desc',
@@ -1310,6 +1319,20 @@ return view.extend({
 			var matchDev = devices.filter(function(d) { return d.ip === savedIp; })[0];
 			searchSelect.setValue(savedIp, matchDev ? matchDev.name + '  —  ' + matchDev.ip : savedIp);
 		}
+
+		// Back/forward between devices. updateUrlParams() only pushes when the
+		// device changes, and by the time runQuery() re-runs the URL already
+		// matches, so this cannot push another entry and loop.
+		self._onPopState = function() {
+			var urlIp = new URLSearchParams(window.location.search).get('ip') || '__all__';
+			if (searchSelect.getValue() === urlIp) return;
+			var o = loadOpts(); o.lastIp = urlIp; saveOpts(o);
+			var dev = (self._lastRows || []).filter(function(d) { return d.ip === urlIp; })[0];
+			searchSelect.setValue(urlIp, urlIp === '__all__' ? '' : (dev ? dev.name + '  —  ' + dev.ip : urlIp));
+			updateModeUI();
+			runQuery();
+		};
+		window.addEventListener('popstate', self._onPopState);
 
 		// Recent devices — functions defined at top level
 
@@ -3134,5 +3157,6 @@ return view.extend({
 	handleTeardown: function() {
 		if (this._timer) { clearInterval(this._timer); this._timer = null; }
 		this._stopBytesPoll && this._stopBytesPoll();
+		if (this._onPopState) { window.removeEventListener('popstate', this._onPopState); this._onPopState = null; }
 	}
 });
