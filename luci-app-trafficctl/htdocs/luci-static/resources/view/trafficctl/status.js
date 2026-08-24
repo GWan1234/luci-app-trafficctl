@@ -734,6 +734,7 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		{ key:'ip',               label:'IP',           num:false, tip: _('Local IP address') },
 		{ key:'mac',              label:'MAC',          num:false, tip: _('Hardware MAC address'), hide:true },
 		{ key:'_speed',           label: _('DL Speed'), num:true,  tip: _('Current download speed (bytes/sec from router to device)') },
+		{ key:'_speed_up',        label: _('UL Speed'), num:true,  tip: _('Current upload speed (bytes/sec from device to router)') },
 		{ key:'_spark',           label: '',            num:false, tip: _('Speed graph. Window = avg time. Orange dashed line = speed limit') },
 		{ key:'conns',            label: _('Conns'),    num:true,  tip: _('Active connections in conntrack') },
 		{ key:'total',            label: _('Bytes'),    num:true,  tip: _('Total bytes transferred (conntrack)'), hide:true },
@@ -771,6 +772,7 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 	rows.forEach(function(r) {
 		var s = speedMap[r.ip];
 		r._speed = s ? s.current : 0;
+		r._speed_up = s ? (s.current_up || 0) : 0;
 		var d = dropMap[r.ip];
 		r._drop_packets = d ? d.packets : 0;
 		r._drop_bytes   = d ? d.bytes   : 0;
@@ -823,6 +825,10 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		cellMap._speed = E('div', { 'class': 'td tc-right tc-mono', 'data-speed-ip': r.ip, 'title': sd ? (_('Avg')+': '+fmtSpeed(sd.avg)+' / '+_('Max')+': '+fmtSpeed(sd.max)) : _('Calculating…') });
 		if (sd && sd.current > 1024) { cellMap._speed.className = 'td tc-right tc-mono tc-speed-active'; cellMap._speed.textContent = fmtSpeed(sd.current); }
 		else { cellMap._speed.className = 'td tc-right tc-mono tc-speed-idle'; cellMap._speed.textContent = sd ? fmtSpeed(sd.current) : '—'; }
+
+		cellMap._speed_up = E('div', { 'class': 'td tc-right tc-mono', 'data-speed-up-ip': r.ip, 'title': sd ? (_('Avg')+': '+fmtSpeed(sd.avg_up||0)+' / '+_('Max')+': '+fmtSpeed(sd.max_up||0)) : _('Calculating…') });
+		if (sd && (sd.current_up||0) > 1024) { cellMap._speed_up.className = 'td tc-right tc-mono tc-speed-active'; cellMap._speed_up.textContent = fmtSpeed(sd.current_up); }
+		else { cellMap._speed_up.className = 'td tc-right tc-mono tc-speed-idle'; cellMap._speed_up.textContent = sd ? fmtSpeed(sd.current_up||0) : '—'; }
 
 		var sparkTip = r._throttle_kbit > 0 ? (_('Limit') + ': ' + fmtRate(r._throttle_kbit)) : '';
 		cellMap._spark = E('div', { 'class': 'td tc-center', 'style': 'padding:2px 4px', 'data-spark-ip': r.ip, 'data-tip': sparkTip || undefined });
@@ -1257,6 +1263,7 @@ return view.extend({
 	_dropMap:      {},
 	_shapeMap:     {},
 	_speedEwma:    {},
+	_speedEwmaUp:  {},
 	_rdnsCache:    {},
 	_sortCol:    'bytes',
 	_sortDir:    'desc',
@@ -1542,11 +1549,11 @@ return view.extend({
 		graphPopup.addEventListener('mouseleave', hideGraphPopup);
 
 		connsDiv.addEventListener('mouseenter', function(ev) {
-			var cell = ev.target.closest ? ev.target.closest('td[data-spark-ip]') : null;
+			var cell = ev.target.closest ? ev.target.closest('[data-spark-ip]') : null;
 			if (cell) showGraphPopup(cell);
 		}, true);
 		connsDiv.addEventListener('mouseleave', function(ev) {
-			var cell = ev.target.closest ? ev.target.closest('td[data-spark-ip]') : null;
+			var cell = ev.target.closest ? ev.target.closest('[data-spark-ip]') : null;
 			if (!cell) return;
 			var related = ev.relatedTarget;
 			if (related && (graphPopup === related || graphPopup.contains(related))) return;
@@ -1768,17 +1775,25 @@ return view.extend({
 
 			Object.keys(self._speedMap).forEach(function(ip) {
 				var s = self._speedMap[ip];
-				var cell = connsDiv.querySelector('td[data-speed-ip="'+ip+'"]');
+				var cell = connsDiv.querySelector('[data-speed-ip="'+ip+'"]');
 				if (!cell) return;
-				if (s.current > 1024) {
-					cell.className = 'tc-speed-active';
-				} else {
-					cell.className = 'tc-speed-idle';
-				}
+				// Keep the layout classes — assigning className outright would drop
+				// 'td tc-right tc-mono' and break the cell's alignment.
+				cell.className = 'td tc-right tc-mono ' +
+					(s.current > 1024 ? 'tc-speed-active' : 'tc-speed-idle');
 				cell.textContent = fmtSpeed(s.current);
 				cell.title = _('Avg')+': '+fmtSpeed(s.avg)+' / '+_('Max')+': '+fmtSpeed(s.max);
 
-				var sparkCell = connsDiv.querySelector('td[data-spark-ip="'+ip+'"]');
+				var upCell = connsDiv.querySelector('[data-speed-up-ip="'+ip+'"]');
+				if (upCell) {
+					var up = s.current_up || 0;
+					upCell.className = 'td tc-right tc-mono ' +
+						(up > 1024 ? 'tc-speed-active' : 'tc-speed-idle');
+					upCell.textContent = fmtSpeed(up);
+					upCell.title = _('Avg')+': '+fmtSpeed(s.avg_up||0)+' / '+_('Max')+': '+fmtSpeed(s.max_up||0);
+				}
+
+				var sparkCell = connsDiv.querySelector('[data-spark-ip="'+ip+'"]');
 				if (sparkCell) {
 					while (sparkCell.firstChild) sparkCell.removeChild(sparkCell.firstChild);
 					var sm = self._shapeMap[ip], dm = self._dropMap[ip];
@@ -1801,7 +1816,7 @@ return view.extend({
 					Object.keys(self._dropMap).forEach(function(ip) {
 						var dp = self._dropMap[ip].packets || 0;
 						var db = self._dropMap[ip].bytes   || 0;
-						var cell = connsDiv.querySelector('td[data-drop-ip="'+ip+'"]');
+						var cell = connsDiv.querySelector('[data-drop-ip="'+ip+'"]');
 						if (!cell) return;
 						while (cell.firstChild) cell.removeChild(cell.firstChild);
 						if (dp > 0) {
@@ -1834,7 +1849,7 @@ return view.extend({
 				if (isAllMode()) {
 					Object.keys(self._shapeMap).forEach(function(ip) {
 						var bl = self._shapeMap[ip].backlog || 0;
-						var cell = connsDiv.querySelector('td[data-backlog-ip="'+ip+'"]');
+						var cell = connsDiv.querySelector('[data-backlog-ip="'+ip+'"]');
 						if (!cell) return;
 						while (cell.firstChild) cell.removeChild(cell.firstChild);
 						if (bl > 0) {
@@ -1868,6 +1883,7 @@ return view.extend({
 						delete self._fullHistory[ip];
 						delete self._speedMap[ip];
 						delete self._speedEwma[ip];
+						delete self._speedEwmaUp[ip];
 						delete self._bytesHistory[ip];
 					}
 				});
@@ -1898,27 +1914,42 @@ return view.extend({
 							var prevEwma = self._speedEwma[d.ip] || 0;
 							var ewma = alpha * speed + (1 - alpha) * prevEwma;
 							self._speedEwma[d.ip] = ewma;
+							var prevEwmaUp = self._speedEwmaUp[d.ip] || 0;
+							var ewmaUp = alpha * speedUp + (1 - alpha) * prevEwmaUp;
+							self._speedEwmaUp[d.ip] = ewmaUp;
 							if (!self._speedHistory[d.ip]) self._speedHistory[d.ip] = [];
-							self._speedHistory[d.ip].push({speed: speed, time: now});
+							self._speedHistory[d.ip].push({speed: speed, up: speedUp, time: now});
 							if (self._speedHistory[d.ip].length > maxSamples) self._speedHistory[d.ip].shift();
-							var max = 0;
-							self._speedHistory[d.ip].forEach(function(h){ if (h.speed > max) max = h.speed; });
+							var max = 0, maxUp = 0;
+							self._speedHistory[d.ip].forEach(function(h){
+								if (h.speed > max) max = h.speed;
+								if ((h.up || 0) > maxUp) maxUp = h.up;
+							});
 							self._speedMap[d.ip] = {
 								current: speed,
 								avg: ewma,
-								max: max
+								max: max,
+								current_up: speedUp,
+								avg_up: ewmaUp,
+								max_up: maxUp
 							};
 						} else {
 							if (!self._speedHistory[d.ip]) self._speedHistory[d.ip] = [];
-							self._speedHistory[d.ip].push({speed: speed, time: now});
+							self._speedHistory[d.ip].push({speed: speed, up: speedUp, time: now});
 							if (self._speedHistory[d.ip].length > maxSamples) self._speedHistory[d.ip].shift();
 							var hist = self._speedHistory[d.ip];
-							var sum = 0, sMax = 0;
-							hist.forEach(function(h){ sum += h.speed; if (h.speed > sMax) sMax = h.speed; });
+							var sum = 0, sMax = 0, sumUp = 0, sMaxUp = 0;
+							hist.forEach(function(h){
+								sum += h.speed; if (h.speed > sMax) sMax = h.speed;
+								sumUp += (h.up || 0); if ((h.up || 0) > sMaxUp) sMaxUp = h.up;
+							});
 							self._speedMap[d.ip] = {
 								current: speed,
 								avg: sum / hist.length,
-								max: sMax
+								max: sMax,
+								current_up: speedUp,
+								avg_up: sumUp / hist.length,
+								max_up: sMaxUp
 							};
 						}
 					}
@@ -2304,7 +2335,8 @@ return view.extend({
 
 		var colChipDefs = [
 			{key:'name', label:_('Device')}, {key:'ip', label:'IP'}, {key:'mac', label:'MAC'},
-			{key:'_speed', label:_('Speed')}, {key:'_spark', label:_('Graph')},
+			{key:'_speed', label:_('DL Speed')}, {key:'_speed_up', label:_('UL Speed')},
+			{key:'_spark', label:_('Graph')},
 			{key:'conns', label:_('Conns')}, {key:'total', label:_('Bytes')},
 			{key:'tcp', label:'TCP'}, {key:'udp', label:'UDP'},
 			{key:'blocked', label:_('Inet')}, {key:'conn_type', label:_('Link')},
