@@ -10,24 +10,7 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
-### Download
-
-| File | OpenWrt version | Install command |
-|------|----------------|-----------------|
-| `luci-app-trafficctl.ipk` | 21.02 — 24.10 | `opkg install <file>` |
-| `luci-app-trafficctl.apk` | 25.12+ | `apk add --allow-untrusted <file>` |
-
-Stable URL (always points to the latest release):
-```
-wget https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk
-wget https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.apk
-```
-
-Other filenames (`_all.ipk`, `_noarch.apk`, versioned) are the same file.
-
----
-
-## [Unreleased]
+## [1.13.0] — 2026-08-24
 
 ### Features
 
@@ -35,7 +18,16 @@ Other filenames (`_all.ipk`, `_noarch.apk`, versioned) are the same file.
 - **Port Forwards tab** — view and manage DNAT rules from the app. ([#27](https://github.com/YusDyr/luci-app-trafficctl/pull/27))
 - **Routed-subnet monitoring** and improved device naming. ([#27](https://github.com/YusDyr/luci-app-trafficctl/pull/27))
 - **Optional netifyd DPI labels** — per-device application names when the Netify agent is installed. Entirely optional: not a package dependency, and inert when the agent or its socket is absent. ([#27](https://github.com/YusDyr/luci-app-trafficctl/pull/27))
+- **Subnet and whole-network limits** — rate-limit an entire subnet or the whole LAN from the UI, either per-device or as an aggregate. ([#27](https://github.com/YusDyr/luci-app-trafficctl/pull/27))
+- **Download and upload speed shown separately per device**, each in its own sortable column.
 - **Prometheus metrics endpoint** — `/cgi-bin/trafficctl-metrics`, disabled by default, with an optional shared token. ([#27](https://github.com/YusDyr/luci-app-trafficctl/pull/27))
+
+### Bug Fixes
+
+- Per-device speed monitoring no longer stops on kernels where dynamic nftables counter maps are unsupported.
+- The custom rate field no longer closes itself a few seconds after being opened.
+- Netify telemetry is read from the socket sink rather than the agent API socket, and the sample window now covers the aggregator's report interval.
+- Client-controlled device names are escaped in the summary JSON.
 
 Thanks to [@adeelahmad](https://github.com/adeelahmad) for this contribution.
 
