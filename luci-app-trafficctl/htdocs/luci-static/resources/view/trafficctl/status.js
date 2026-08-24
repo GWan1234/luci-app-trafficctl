@@ -1264,6 +1264,8 @@ return view.extend({
 	_shapeMap:     {},
 	_speedEwma:    {},
 	_speedEwmaUp:  {},
+	_deviceTimer:  null,
+	_pollMode:     null,
 	_rdnsCache:    {},
 	_sortCol:    'bytes',
 	_sortDir:    'desc',
@@ -1865,7 +1867,9 @@ return view.extend({
 
 		function pollBytes() {
 			if (document.hidden) return;
-			if (!isAllMode()) return;
+			// Runs in BOTH modes: byte counters are per-device, and the device
+			// view's speed graph is fed from this history. Only the summary-table
+			// repaint below is all-devices-specific.
 			callBytes().then(function(data) {
 				if (!Array.isArray(data)) return;
 				var now = Date.now();
@@ -1959,10 +1963,12 @@ return view.extend({
 						time: now
 					};
 				});
-				if (self._sumCol === '_speed') {
-					runAll();
-				} else {
-					updateSpeedCells();
+				if (isAllMode()) {
+					if (self._sumCol === '_speed') {
+						runAll();
+					} else {
+						updateSpeedCells();
+					}
 				}
 				updateDeviceGraph();
 			}).catch(function(){});
@@ -2258,13 +2264,20 @@ return view.extend({
 			var o = loadOpts(); o.lastIp = ip; saveOpts(o);
 			updateUrlParams(o);
 			updateModeUI();
+			// Switching between all-devices and a single device changes which
+			// timers should be running, so tear them down and let the branch
+			// below start the right set.
+			var mode = (ip === '__all__') ? 'all' : 'device';
+			if (self._pollMode !== mode) {
+				self._pollMode = mode;
+				self._stopBytesPoll();
+			}
 			if (ip === '__all__') {
 				deviceGraphDiv.classList.add('tc-hidden');
 				runAll();
 			} else {
-				self._stopBytesPoll();
-				pollDrops();
 				runSingle(ip);
+				self._startBytesPoll();
 			}
 			updateExtendedStats();
 		}
@@ -2316,15 +2329,26 @@ return view.extend({
 			self._dropTimer = setInterval(pollDrops, 5000);
 			pollShapeStats();
 			self._shapeTimer = setInterval(pollShapeStats, 5000);
+			// Device view: keep the connection table live as well, instead of
+			// freezing until the user manually refreshes. Floored at 3s because
+			// this re-reads conntrack for the device on every tick.
+			if (!isAllMode()) {
+				self._deviceTimer = setInterval(function() {
+					if (document.hidden) return;
+					var ip = searchSelect.getValue();
+					if (ip && ip !== '__all__') runSingle(ip);
+				}, Math.max(pollMs, 3000));
+			}
 		};
 		this._stopBytesPoll = function() {
-			if (self._bytesTimer) { clearInterval(self._bytesTimer); self._bytesTimer = null; }
-			if (self._dropTimer)  { clearInterval(self._dropTimer);  self._dropTimer  = null; }
-			if (self._shapeTimer) { clearInterval(self._shapeTimer); self._shapeTimer = null; }
+			if (self._bytesTimer)  { clearInterval(self._bytesTimer);  self._bytesTimer  = null; }
+			if (self._dropTimer)   { clearInterval(self._dropTimer);   self._dropTimer   = null; }
+			if (self._shapeTimer)  { clearInterval(self._shapeTimer);  self._shapeTimer  = null; }
+			if (self._deviceTimer) { clearInterval(self._deviceTimer); self._deviceTimer = null; }
 		};
 		this._restartBytesPoll = function() {
 			self._stopBytesPoll();
-			if (isAllMode()) self._startBytesPoll();
+			self._startBytesPoll();
 		};
 
 		this._setupTimer();
@@ -2892,7 +2916,7 @@ return view.extend({
 		]);
 		var tableSection = mkCollapsible(_('Table & Speed'), E('div', {'class':'tc-table-speed-inner'}, [
 			E('div', {'class':'tc-table-speed-row'}, [
-				E('span', {'data-tip':_('Polling interval for per-device speed graph')}, [mkLabel(_('Poll')+':'), pollIntervalPick.el]),
+				E('span', {'data-tip':_('How often live data is polled: speeds, graphs, drop/backlog counters, and the connection table in device view')}, [mkLabel(_('Poll')+':'), pollIntervalPick.el]),
 				sep(),
 				E('span', {'data-tip':_('Time window for speed averaging')}, [mkLabel(_('Window')+':'), avgWindowPick.el]),
 				sep(),
