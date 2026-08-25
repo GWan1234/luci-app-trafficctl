@@ -24,6 +24,8 @@ var netifyMap = {};
 var STORAGE_KEY = 'trafficctl_opts';
 var RECENT_KEY = 'trafficctl_recent';
 var MAX_RECENT = 6;
+var FULL_HISTORY_MAX = 1800;
+var _fgGraphIdSeq = 0;
 
 function getRecentDevices() {
 	try {
@@ -380,6 +382,7 @@ function renderFullGraph(history, limitKbit, width, height) {
 	var w = width || 440, h = height || 200;
 	var pad = {top:22, right:14, bottom:32, left:56};
 	var gw = w - pad.left - pad.right, gh = h - pad.top - pad.bottom;
+	var gradIdSuffix = '-' + (++_fgGraphIdSeq);
 	var ns = 'http://www.w3.org/2000/svg';
 
 	var maxSpeed = 0, maxUp = 0;
@@ -434,7 +437,7 @@ function renderFullGraph(history, limitKbit, width, height) {
 	// Gradient definition for download area
 	var defs = document.createElementNS(ns, 'defs');
 	var grad = document.createElementNS(ns, 'linearGradient');
-	grad.setAttribute('id', 'fg-dl-grad'); grad.setAttribute('x1', '0'); grad.setAttribute('y1', '0');
+	grad.setAttribute('id', 'fg-dl-grad'+gradIdSuffix); grad.setAttribute('x1', '0'); grad.setAttribute('y1', '0');
 	grad.setAttribute('x2', '0'); grad.setAttribute('y2', '1');
 	var stop1 = document.createElementNS(ns, 'stop');
 	stop1.setAttribute('offset', '0%'); stop1.setAttribute('stop-color', 'var(--tc-speed)'); stop1.setAttribute('stop-opacity', '0.35');
@@ -444,7 +447,7 @@ function renderFullGraph(history, limitKbit, width, height) {
 
 	// Gradient for upload area
 	var gradUp = document.createElementNS(ns, 'linearGradient');
-	gradUp.setAttribute('id', 'fg-ul-grad'); gradUp.setAttribute('x1', '0'); gradUp.setAttribute('y1', '0');
+	gradUp.setAttribute('id', 'fg-ul-grad'+gradIdSuffix); gradUp.setAttribute('x1', '0'); gradUp.setAttribute('y1', '0');
 	gradUp.setAttribute('x2', '0'); gradUp.setAttribute('y2', '1');
 	var stopU1 = document.createElementNS(ns, 'stop');
 	stopU1.setAttribute('offset', '0%'); stopU1.setAttribute('stop-color', 'var(--tc-ok)'); stopU1.setAttribute('stop-opacity', '0.25');
@@ -522,7 +525,7 @@ function renderFullGraph(history, limitKbit, width, height) {
 	history.forEach(function(p) { dlPoints.push(xScale(p.time).toFixed(1) + ',' + yScale(p.speed).toFixed(1)); });
 	var dlArea = document.createElementNS(ns, 'polyline');
 	dlArea.setAttribute('points', xScale(startTime).toFixed(1)+','+(pad.top+gh)+' '+dlPoints.join(' ')+' '+xScale(endTime).toFixed(1)+','+(pad.top+gh));
-	dlArea.setAttribute('fill', 'url(#fg-dl-grad)'); dlArea.setAttribute('stroke', 'none');
+	dlArea.setAttribute('fill', 'url(#fg-dl-grad'+gradIdSuffix+')'); dlArea.setAttribute('stroke', 'none');
 	svg.appendChild(dlArea);
 
 	// Download line
@@ -538,7 +541,7 @@ function renderFullGraph(history, limitKbit, width, height) {
 		history.forEach(function(p) { ulPoints.push(xScale(p.time).toFixed(1) + ',' + yScale(p.up || 0).toFixed(1)); });
 		var ulArea = document.createElementNS(ns, 'polyline');
 		ulArea.setAttribute('points', xScale(startTime).toFixed(1)+','+(pad.top+gh)+' '+ulPoints.join(' ')+' '+xScale(endTime).toFixed(1)+','+(pad.top+gh));
-		ulArea.setAttribute('fill', 'url(#fg-ul-grad)'); ulArea.setAttribute('stroke', 'none');
+		ulArea.setAttribute('fill', 'url(#fg-ul-grad'+gradIdSuffix+')'); ulArea.setAttribute('stroke', 'none');
 		svg.appendChild(ulArea);
 		var ulLine = document.createElementNS(ns, 'polyline');
 		ulLine.setAttribute('points', ulPoints.join(' '));
@@ -1005,7 +1008,7 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		return row;
 	});
 
-	return E('div', { 'class': 'table tc-table' }, [titleRow].concat(tableRows));
+	return E('div', { 'class': 'table tc-table tc-table--rows-clickable' }, [titleRow].concat(tableRows));
 }
 
 function setStatus(el, type, msg) {
@@ -1640,6 +1643,7 @@ return view.extend({
 		// Speed graph popup on spark cell hover
 		var graphPopup = E('div', {'class':'tc-graph-popup tc-hidden'});
 		document.body.appendChild(graphPopup);
+		self._graphPopup = graphPopup;
 		var graphPopupIp = null;
 		var graphPopupTimer = null;
 
@@ -1654,6 +1658,7 @@ return view.extend({
 			graphPopup.classList.remove('tc-hidden');
 			if (!graphPopupTimer) {
 				graphPopupTimer = setInterval(updateGraphPopup, 2000);
+				self._graphPopupTimer = graphPopupTimer;
 			}
 		}
 		function updateGraphPopup() {
@@ -1681,7 +1686,7 @@ return view.extend({
 		function hideGraphPopup() {
 			graphPopup.classList.add('tc-hidden');
 			graphPopupIp = null;
-			if (graphPopupTimer) { clearInterval(graphPopupTimer); graphPopupTimer = null; }
+			if (graphPopupTimer) { clearInterval(graphPopupTimer); graphPopupTimer = null; self._graphPopupTimer = null; }
 		}
 
 		graphPopup.addEventListener('mouseleave', hideGraphPopup);
@@ -2120,9 +2125,10 @@ return view.extend({
 						if (speed > MAX_BPS) speed = 0;
 						if (speedUp > MAX_BPS) speedUp = 0;
 
-						// Full history (never trimmed) — for the popup graph
 						if (!self._fullHistory[d.ip]) self._fullHistory[d.ip] = [];
-						self._fullHistory[d.ip].push({speed: speed, up: speedUp, time: now});
+						var fh = self._fullHistory[d.ip];
+						fh.push({speed: speed, up: speedUp, time: now});
+						if (fh.length > FULL_HISTORY_MAX) fh.splice(0, fh.length - FULL_HISTORY_MAX);
 
 						if (avgMethod === 'ewma') {
 							var alpha = 2 / (maxSamples + 1);
@@ -2220,14 +2226,17 @@ return view.extend({
 				}
 
 				if (opts.showStats !== false) {
-					var connCount = (data.protocols.tcp||0) + (data.protocols.udp||0) + (data.protocols.other||0);
+					var protoTcp = Number(data.protocols.tcp) || 0;
+					var protoUdp = Number(data.protocols.udp) || 0;
+					var protoOther = Number(data.protocols.other) || 0;
+					var connCount = protoTcp + protoUdp + protoOther;
 					var parts = [_('Connections') + ': <b>'+connCount+'</b>'];
 					if (connCount > 0) {
-						parts.push('TCP: <b>'+(data.protocols.tcp||0)+'</b>');
-						parts.push('UDP: <b>'+(data.protocols.udp||0)+'</b>');
+						parts.push('TCP: <b>'+protoTcp+'</b>');
+						parts.push('UDP: <b>'+protoUdp+'</b>');
 						if (data.tcp_states) {
 							Object.keys(data.tcp_states).forEach(function(s) {
-								parts.push(escHtml(s)+': <b>'+data.tcp_states[s]+'</b>');
+								parts.push(escHtml(s)+': <b>'+(Number(data.tcp_states[s]) || 0)+'</b>');
 							});
 						}
 					}
@@ -2240,7 +2249,7 @@ return view.extend({
 						parts.push(_('Speed limit') + ': <b style="color:var(--tc-warn)">⚡ '+fmtRate(data.rate_limit_kbit)+'</b>');
 						var dm = self._dropMap[data.ip || searchSelect.getValue()] || {};
 						if ((dm.packets||0) > 0) {
-							parts.push(_('Dropped') + ': <b style="color:var(--tc-err)">🚫 '+dm.packets+' pkts / '+fmtBytes(dm.bytes||0)+'</b>');
+							parts.push(_('Dropped') + ': <b style="color:var(--tc-err)">🚫 '+(Number(dm.packets) || 0)+' pkts / '+fmtBytes(dm.bytes||0)+'</b>');
 						}
 					}
 					var wifiPart = data.wifi_blocked
@@ -2248,7 +2257,7 @@ return view.extend({
 						: (data.mac ? ' &nbsp;|&nbsp; <span style="color:var(--tc-faint)">MAC: '+escHtml(data.mac)+'</span>' : '');
 					statsDiv.className = 'alert-message ' + (data.blocked ? 'error' : 'info');
 					statsDiv.innerHTML = (data.blocked
-						? '<b>⛔ ' + _('BLOCKED') + '</b> — '+data.block_packets+' pkts, '+fmtBytes(data.block_bytes)+' ' + _('dropped') + ' &nbsp;|&nbsp; '
+						? '<b>⛔ ' + _('BLOCKED') + '</b> — '+(Number(data.block_packets) || 0)+' pkts, '+fmtBytes(Number(data.block_bytes) || 0)+' ' + _('dropped') + ' &nbsp;|&nbsp; '
 						: '') + parts.join(' &nbsp;|&nbsp; ') + wifiPart;
 				}
 
@@ -2522,6 +2531,10 @@ return view.extend({
 			fn(ip).then(function(res) {
 				setStatus(statusDiv, (res && res.ok) ? (action==='block'?'action':'ok') : 'error', (res && res.msg) || '?');
 				runQuery();
+			}).catch(function(e) {
+				setStatus(statusDiv, 'error', '✗ '+e.message);
+			}).then(function() {
+				wifiBtn.disabled = false;
 			});
 		});
 
@@ -3181,7 +3194,9 @@ return view.extend({
 				var logArea = E('div', {'class':'tc-log-area'});
 				var lines = res.lines.slice().reverse();
 				lines.forEach(function(line) {
-					logArea.appendChild(E('div', {'class':'tc-log-line'}, line));
+					var lineEl = E('div', {'class':'tc-log-line'});
+					lineEl.textContent = line;
+					logArea.appendChild(lineEl);
 				});
 				var refreshBtn = E('button', {
 					'class': 'cbi-button',
@@ -3363,5 +3378,7 @@ return view.extend({
 		if (this._timer) { clearInterval(this._timer); this._timer = null; }
 		this._stopBytesPoll && this._stopBytesPoll();
 		if (this._onPopState) { window.removeEventListener('popstate', this._onPopState); this._onPopState = null; }
+		if (this._graphPopupTimer) { clearInterval(this._graphPopupTimer); this._graphPopupTimer = null; }
+		if (this._graphPopup && this._graphPopup.parentNode) { this._graphPopup.parentNode.removeChild(this._graphPopup); this._graphPopup = null; }
 	}
 });
