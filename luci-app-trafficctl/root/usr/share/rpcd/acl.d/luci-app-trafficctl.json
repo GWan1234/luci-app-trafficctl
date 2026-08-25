@@ -8,8 +8,9 @@
 					"summary", "device", "bytes",
 					"ratelimit_stats", "shape_stats", "rdns",
 					"portfw_list", "names_list", "netify_status", "netify_list",
+					"shape_status",
 					"config_get", "telegram_config_get",
-					"logging_config_get", "activity_log"
+					"logging_config_get"
 				],
 				"file": [ "read" ]
 			},
@@ -23,12 +24,11 @@
 				"luci.trafficctl": [
 					"block", "unblock",
 					"macfilter_add", "macfilter_remove",
-					"ratelimit", "shape_add", "shape_remove", "shape_status",
+					"ratelimit", "shape_add", "shape_remove",
 					"portfw_ctl", "name_set", "name_clear", "netify_collect",
 					"config_set",
 					"telegram_config_set", "telegram_test",
-					"logging_config_set",
-					"config_set"
+					"logging_config_set", "activity_log"
 				]
 			},
 			"uci": [ "trafficctl" ]
