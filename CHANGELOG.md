@@ -4,32 +4,19 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
-## [1.13.2] - 2026-08-25
+## [Unreleased]
 
-### Other
-- serialise release jobs so they stop racing on git push ([b024f09](https://github.com/YusDyr/luci-app-trafficctl/commit/b024f0966b108b72d850be0dec84bf4154ccb8a5))
-  Merging #40 and #41 four seconds apart started two Auto Release jobs at
-  once. Both computed the same next version and both tried to push main plus
-  the new tag; one won and the other died with "failed to push some refs" —
-  after it had already tagged. The result was a v1.13.1 tag with no GitHub
-  Release and no artifacts behind it.
-- pin the signing action and fix the release state machine ([afbac56](https://github.com/YusDyr/luci-app-trafficctl/commit/afbac56f381b408289ac5b3897c8d767e17dc118))
-  The two release workflows and the compat build all used
-  openwrt/gh-action-sdk@main — a mutable branch in a repository we do not
-  control — and the release paths hand it APK_PRIVATE_KEY and USIGN_PRIVATE_KEY.
-  Anyone able to push there could have added one line to the entrypoint and
-  walked away with the usign key whose public half ships in keys/, then signed
-  packages every existing installation trusts. All three are pinned to the v11
-- anchor the breaking-change footer search to the start of a line ([11edb5f](https://github.com/YusDyr/luci-app-trafficctl/commit/11edb5f59d535cd3dfe279fcbca6adab8052233e))
-  The major-bump condition searched the full commit message for the footer name
-  as free text, unanchored. Conventional Commits defines it as a footer — start
-  of line, followed by ":" or " #" — so any prose that merely named it counted.
+### Bug Fixes
 
-**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.13.1...v1.13.2
+- **Release notes silently dropped every scoped commit.** `format_section()` passed its match pattern to awk with `-v`, where awk expands escape sequences in the value: `\(` became a plain `(`, turning the optional scope group into a mandatory literal one. Scoped types like `fix(shaper):` then matched nothing while `fixup:`/`fixes:` matched, so v1.13.2 shipped with no Bug Fixes section at all despite seven `fix(scope):` commits. The pattern now reaches awk through the environment, which is passed through verbatim. Only gawk is affected — the GitHub runners symlink `awk` to it — so the fault is invisible on a machine using mawk or BSD awk.
 
 ---
 
-## [Unreleased]
+## [1.13.2] - 2026-08-25
+
+The release notes published for this version were incomplete: their Bug Fixes,
+Security, Documentation and Tests sections were lost to the generator bug
+recorded under Unreleased above. The full contents of the release follow.
 
 ### Security
 
@@ -61,6 +48,8 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 ### Tests
 
 - Tests that redefined local copies of the functions they claimed to check now exercise the real scripts, and the previously untested rpcd backend, block/unblock, macfilter and metrics CGI are covered. Each bug above has a regression test verified to fail against the old behaviour.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.13.1...v1.13.2
 
 ---
 
