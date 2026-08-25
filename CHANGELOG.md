@@ -4,6 +4,21 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.13.3] - 2026-08-25
+
+### Bug Fixes
+- pass the section regex to awk through the environment ([53c7d8e](https://github.com/YusDyr/luci-app-trafficctl/commit/53c7d8e5044f00428df45ef9a25ef4a0279a1d79))
+  The release-notes generator matched commits with a pattern built as
+  "^${type_regex}(\\([^)]*\\))?:" and handed it to awk via -v. awk expands
+  escape sequences in a -v value, and \( is not one it recognises, so it stored
+  a plain ( and warned about both parens. The optional scope group
+  (\(...\))? thereby became a mandatory literal one, inverting the match in
+  both directions: every fix(scope): subject stopped matching, and fixup: and
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.13.2...v1.13.3
+
+---
+
 ## [Unreleased]
 
 ### Bug Fixes
