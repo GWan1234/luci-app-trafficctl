@@ -18,51 +18,19 @@ if ! tc qdisc show dev "$LAN_DEV" 2>/dev/null | grep -q "htb 1:"; then
     echo '[]'; exit 0
 fi
 
-# Get LAN subnet prefix (first 2 octets)
-SUBNET=$(ip -4 addr show dev "$LAN_DEV" 2>/dev/null | grep -oE 'inet [0-9.]+' | head -1 | awk '{print $2}')
-if [ -n "$SUBNET" ]; then
-    PREFIX=$(echo "$SUBNET" | cut -d. -f1-2)
-else
-    PREFIX="192.168"
-fi
-
-# Map classid → real IP from persisted shapes. Routed/downstream IPs (e.g.
-# 10.0.0.x behind a second router) don't share the LAN prefix, so
-# reconstructing the address from the classid alone would mislabel them.
-CLASSMAP=$(grep -oE '\{"ip":"[^"]+","rate_kbit":[0-9]+\}' /etc/trafficctl/shapes.json 2>/dev/null | \
-    sed 's/{"ip":"\([^"]*\)".*/\1/' | while read -r sip; do
-        s3=$(echo "$sip" | cut -d. -f3)
-        s4=$(echo "$sip" | cut -d. -f4)
-        printf "1:%x %s\n" "$((s3 * 256 + s4))" "$sip"
-    done)
+# Map classid → real IP from persisted shapes. Minors are allocated, not derived
+# from the address, so this map is the only way back to an IP; classes missing
+# from it belong to another tc user and are skipped rather than mislabelled.
+CLASSMAP=$(grep -oE '\{"ip":"[^"]+","rate_kbit":[0-9]+,"classid":"1:[0-9a-f]+"\}' \
+    /etc/trafficctl/shapes.json 2>/dev/null | \
+    sed -n 's/{"ip":"\([^"]*\)","rate_kbit":[0-9]*,"classid":"\(1:[0-9a-f]*\)"}/\2 \1/p')
 
 # Collect class stats into a temp file so we can merge with qdisc stats
 CLASS_DATA=$(tc -s class show dev "$LAN_DEV" 2>/dev/null)
 QDISC_DATA=$(tc -s qdisc show dev "$LAN_DEV" 2>/dev/null)
 
 # Parse class stats: emit lines "classid ip rate bytes pkts backlog drops overlimits requeues lended borrowed"
-CLASS_PARSED=$(echo "$CLASS_DATA" | awk -v prefix="$PREFIX" -v classmap="$CLASSMAP" '
-function hex2dec(hex,    i, c, dec, len) {
-    dec = 0
-    len = length(hex)
-    for (i = 1; i <= len; i++) {
-        c = substr(hex, i, 1)
-        if (c ~ /[0-9]/) dec = dec * 16 + (c + 0)
-        else if (c == "a" || c == "A") dec = dec * 16 + 10
-        else if (c == "b" || c == "B") dec = dec * 16 + 11
-        else if (c == "c" || c == "C") dec = dec * 16 + 12
-        else if (c == "d" || c == "D") dec = dec * 16 + 13
-        else if (c == "e" || c == "E") dec = dec * 16 + 14
-        else if (c == "f" || c == "F") dec = dec * 16 + 15
-    }
-    return dec
-}
-
-function class_ip(cid, o3, o4) {
-    if (cid in ipmap) return ipmap[cid]
-    return sprintf("%s.%d.%d", prefix, o3, o4)
-}
-
+CLASS_PARSED=$(echo "$CLASS_DATA" | awk -v classmap="$CLASSMAP" '
 BEGIN {
     n = split(classmap, cml, "\n")
     for (ci = 1; ci <= n; ci++) {
@@ -74,9 +42,9 @@ BEGIN {
 /class fq_codel/ { skip = 1; next }
 /^class htb 1:/ {
     # emit previous record if valid
-    if (have_record && current_rate > 0 && current_rate < 1000000) {
+    if (have_record && current_rate > 0 && current_rate < 1000000 && (classid in ipmap)) {
         printf "%s %s %d %d %d %d %d %d %d %d %d\n", \
-            classid, class_ip(classid, current_o3, current_o4), current_rate, \
+            classid, ipmap[classid], current_rate, \
             bytes, pkts, backlog, drops, overlimits, requeues, lended, borrowed
     }
     minor = $3
@@ -84,9 +52,6 @@ BEGIN {
     if (minor == "1" || minor == "fffe") { skip = 1; next }
     skip = 0
     classid = "1:" minor
-    dec_val = hex2dec(minor)
-    current_o3 = int(dec_val / 256)
-    current_o4 = dec_val % 256
     current_rate = 0
     for (i = 1; i <= NF; i++) {
         if ($i == "rate") {
@@ -134,9 +99,9 @@ BEGIN {
     }
 }
 END {
-    if (have_record && current_rate > 0 && current_rate < 1000000) {
+    if (have_record && current_rate > 0 && current_rate < 1000000 && (classid in ipmap)) {
         printf "%s %s %d %d %d %d %d %d %d %d %d\n", \
-            classid, class_ip(classid, current_o3, current_o4), current_rate, \
+            classid, ipmap[classid], current_rate, \
             bytes, pkts, backlog, drops, overlimits, requeues, lended, borrowed
     }
 }
