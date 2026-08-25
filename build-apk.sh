@@ -28,6 +28,7 @@ cp "$SRC/htdocs/luci-static/resources/view/trafficctl/"* "$DATA/www/luci-static/
 chmod +x "$DATA/usr/local/bin/trafficctl-"*.sh
 chmod +x "$DATA/usr/libexec/rpcd/luci.trafficctl"
 [ -d "$DATA/etc/init.d" ] && chmod +x "$DATA/etc/init.d/"*
+[ -d "$DATA/etc/hotplug.d" ] && find "$DATA/etc/hotplug.d" -type f -exec chmod +x {} +
 
 # --- Conffiles (embedded in lib/apk/packages for APK protected-paths) ---
 # Only list files that ship in the package; shapes.json / telegram_known.json
@@ -43,6 +44,9 @@ mkdir -p "$SCRIPTS"
 
 cat > "$SCRIPTS/post-install" <<'SCRIPT'
 #!/bin/sh
+# The config holds the Telegram bot token and the metrics token, so it must not
+# be world-readable before the first save from the UI applies the same mode.
+chmod 0600 "${IPKG_INSTROOT}/etc/config/trafficctl" 2>/dev/null || true
 [ -n "${IPKG_INSTROOT}" ] || /etc/init.d/rpcd restart 2>/dev/null || true
 exit 0
 SCRIPT
@@ -93,7 +97,7 @@ if command -v apk >/dev/null 2>&1 && apk mkpkg --help >/dev/null 2>&1; then
         --info "origin:https://github.com/YusDyr/luci-app-trafficctl" \
         --info "url:https://github.com/YusDyr/luci-app-trafficctl" \
         --info "maintainer:Denis Iusupov <yusdyr@gmail.com>" \
-        --info "depends:conntrack luci-base rpcd" \
+        --info "depends:conntrack luci-base rpcd curl tc iw hostapd-utils" \
         --info "provides:${PKG_NAME}=${PKG_VERSION}-r${PKG_RELEASE}" \
         --info "tags:openwrt:section=luci" \
         --script "post-install:$SCRIPTS/post-install" \
@@ -119,6 +123,10 @@ maintainer = Denis Iusupov <yusdyr@gmail.com>
 depend = conntrack
 depend = luci-base
 depend = rpcd
+depend = curl
+depend = tc
+depend = iw
+depend = hostapd-utils
 PKGINFO
 
     cp "$SCRIPTS/post-install" "$CTRL/.post-install"

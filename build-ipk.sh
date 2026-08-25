@@ -27,8 +27,16 @@ cp "$SRC/htdocs/luci-static/resources/view/trafficctl/"* "$DATA/www/luci-static/
 chmod +x "$DATA/usr/local/bin/trafficctl-"*.sh
 chmod +x "$DATA/usr/libexec/rpcd/luci.trafficctl"
 [ -d "$DATA/etc/init.d" ] && chmod +x "$DATA/etc/init.d/"*
+[ -d "$DATA/etc/hotplug.d" ] && find "$DATA/etc/hotplug.d" -type f -exec chmod +x {} +
 
-(cd "$DATA" && COPYFILE_DISABLE=1 tar --format ustar --exclude='._*' -cf - . | gzip -9 > "$WORKDIR/data.tar.gz")
+# Reproducible tar: fixed mtime, numeric owner, sorted entry order. --sort and
+# --mtime are GNU-tar-only, so entries are normalized on disk and fed to tar
+# pre-sorted via -T - instead, which both GNU tar and BSD tar accept.
+TAR_REPRO="--owner=0 --group=0 --numeric-owner"
+find "$DATA" -exec touch -t 200001010000 {} +
+(cd "$DATA" && find . ! -name '._*' | LC_ALL=C sort | \
+    COPYFILE_DISABLE=1 tar --format ustar --no-recursion $TAR_REPRO -cf - -T - | \
+    gzip -9n > "$WORKDIR/data.tar.gz")
 
 # Build control.tar.gz — package metadata
 CTRL="$WORKDIR/control"
@@ -37,7 +45,7 @@ mkdir -p "$CTRL"
 cat > "$CTRL/control" <<EOF
 Package: $PKG_NAME
 Version: ${PKG_VERSION}-${PKG_RELEASE}
-Depends: conntrack, luci-base, rpcd, curl
+Depends: conntrack, luci-base, rpcd, curl, tc, iw, hostapd-utils
 Source: https://github.com/YusDyr/luci-app-trafficctl
 License: Apache-2.0
 Section: luci
@@ -67,6 +75,9 @@ chmod +x "$CTRL/preinst"
 
 cat > "$CTRL/postinst" <<'EOF'
 #!/bin/sh
+# The config holds the Telegram bot token and the metrics token, so it must not
+# be world-readable before the first save from the UI applies the same mode.
+chmod 0600 "${IPKG_INSTROOT}/etc/config/trafficctl" 2>/dev/null || true
 if [ -z "${IPKG_INSTROOT}" ]; then
     /etc/init.d/rpcd restart 2>/dev/null || true
     if [ -x /etc/init.d/trafficctl-telegram ]; then
@@ -87,7 +98,10 @@ exit 0
 EOF
 chmod +x "$CTRL/prerm"
 
-(cd "$CTRL" && COPYFILE_DISABLE=1 tar --format ustar --exclude='._*' -cf - . | gzip -9 > "$WORKDIR/control.tar.gz")
+find "$CTRL" -exec touch -t 200001010000 {} +
+(cd "$CTRL" && find . ! -name '._*' | LC_ALL=C sort | \
+    COPYFILE_DISABLE=1 tar --format ustar --no-recursion $TAR_REPRO -cf - -T - | \
+    gzip -9n > "$WORKDIR/control.tar.gz")
 
 # Assemble ipk: gzip-compressed tar archive (OpenWrt opkg format, NOT Debian ar)
 echo "2.0" > "$WORKDIR/debian-binary"
@@ -95,6 +109,9 @@ echo "2.0" > "$WORKDIR/debian-binary"
 mkdir -p "$OUTDIR"
 IPK_FILE="$OUTDIR/${PKG_NAME}_${PKG_VERSION}-${PKG_RELEASE}_${PKG_ARCH}.ipk"
 
-(cd "$WORKDIR" && COPYFILE_DISABLE=1 tar --format ustar --exclude='._*' -cf - ./debian-binary ./control.tar.gz ./data.tar.gz | gzip -9 > "$OLDPWD/$IPK_FILE")
+touch -t 200001010000 "$WORKDIR/debian-binary" "$WORKDIR/control.tar.gz" "$WORKDIR/data.tar.gz"
+(cd "$WORKDIR" && printf '%s\n' ./debian-binary ./control.tar.gz ./data.tar.gz | \
+    COPYFILE_DISABLE=1 tar --format ustar --no-recursion $TAR_REPRO -cf - -T - | \
+    gzip -9n > "$OLDPWD/$IPK_FILE")
 
 echo "$IPK_FILE"
