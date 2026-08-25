@@ -115,13 +115,22 @@ jobs:
           # Print one Markdown bullet per commit matching $TYPE_REGEX.
           # Format:  - <subject without prefix> ([short-sha](commit-url))
           #          <up to the first body paragraph, indented> (optional)
+          # The regex reaches awk through the ENVIRONMENT, not -v. awk processes
+          # escape sequences in a -v value, and `\(` is not one it knows, so it
+          # substituted a plain `(` and warned — turning the optional scope group
+          # `(\(...\))?` into a mandatory literal one. Every `fix(scope):` commit
+          # then failed to match while `fixup:`/`fixes:` started matching, so
+          # v1.13.2's notes lost their whole Bug Fixes section. ENVIRON values are
+          # passed through verbatim. (The fault only shows on gawk, which the
+          # GitHub runners use; mawk accepts the -v form, so this cannot be
+          # reproduced on a machine where /usr/bin/awk is mawk or BSD awk.)
           format_section() {
             type_regex="$1"
             git log "$RANGE" --reverse --pretty=format:'%H%x09%s%x09%b%x1e' |
               tr -d '\r' |
-              awk -v type_re="^${type_regex}(\\([^)]*\\))?:" \
-                  -v repo="$REPO" '
-                BEGIN { RS = "\x1e"; FS = "\t" }
+              TYPE_RE="^${type_regex}(\\([^)]*\\))?:" \
+              awk -v repo="$REPO" '
+                BEGIN { RS = "\x1e"; FS = "\t"; type_re = ENVIRON["TYPE_RE"] }
                 {
                   sha=$1; subj=$2; body=$3
                   # Strip whitespace/newlines that creep in between records.

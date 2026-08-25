@@ -50,6 +50,8 @@ jobs:
         run: bash tests/test_regressions.sh
       - name: Release version-bump tests
         run: bash tests/test_release_bump.sh
+      - name: Release notes generator tests
+        run: bash tests/test_changelog_gen.sh
       - name: IPK build test
         run: bash tests/test_build_ipk.sh
 
