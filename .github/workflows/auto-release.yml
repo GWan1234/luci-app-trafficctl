@@ -57,12 +57,19 @@ jobs:
           # detection runs against SUBJECTS only, while the free-text
           # BREAKING CHANGE footer search runs against the full message
           # (subject+body) via FULL_MSGS.
+          #
+          # That footer search is anchored too. Conventional Commits defines
+          # BREAKING CHANGE as a footer — start of line, followed by ":" or
+          # " #" — so an unanchored match turns any prose *mentioning* the
+          # footer into a major release. This very workflow's own commit
+          # message described the footer in a sentence and would have shipped
+          # v2.0.0 off a patch-only branch.
           SUBJECTS=$(git log "${LATEST_TAG}..HEAD" --pretty=format:"%s" 2>/dev/null || git log --pretty=format:"%s")
           FULL_MSGS=$(git log "${LATEST_TAG}..HEAD" --pretty=format:"%s%n%b" 2>/dev/null || git log --pretty=format:"%s%n%b")
 
           # Determine bump type
           BUMP="none"
-          if echo "$SUBJECTS" | grep -qE '^feat(\(.+\))?!:|^fix(\(.+\))?!:' || echo "$FULL_MSGS" | grep -qE 'BREAKING CHANGE'; then
+          if echo "$SUBJECTS" | grep -qE '^feat(\(.+\))?!:|^fix(\(.+\))?!:' || echo "$FULL_MSGS" | grep -qE '^BREAKING[ -]CHANGE(:| #)'; then
             BUMP="major"
           elif echo "$SUBJECTS" | grep -qE '^feat(\(.+\))?:'; then
             BUMP="minor"

@@ -81,9 +81,15 @@ These run as root with parameters that came from a browser, so:
 Conventional Commits, because the release is automatic: `feat:` bumps the minor
 version, `fix:`/`perf:`/`refactor:`/`ci:` the patch, a `!` (e.g. `feat(rpcd)!:`)
 or a `BREAKING CHANGE:` footer the major. `docs:`/`chore:`/`style:` do not
-release. Merging to `main` tags, builds and publishes on its own, so a commit
-message with a stray `;` or `)` is not merely untidy — the message is baked into
-a generated shell script by the bundle pipeline.
+release.
+
+The footer is recognised only at the start of a line, followed by `:` or ` #`
+(`BREAKING-CHANGE:` also works, per the spec). So you can discuss the footer in
+a commit body — as this sentence does — without triggering a major release.
+
+Merging to `main` tags, builds and publishes on its own, so a commit message
+with a stray `;` or `)` is not merely untidy — the message is baked into a
+generated shell script by the bundle pipeline.
 
 Update `CHANGELOG.md` and the relevant file under `docs/` in the same PR as the
 change.

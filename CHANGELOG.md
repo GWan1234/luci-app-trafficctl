@@ -27,6 +27,7 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 - Hotplug scripts now ship executable.
 - Frontend: the graph popup and its 2-second timer are removed on view teardown instead of accumulating one per visit; per-device speed history is capped; activity-log lines are rendered as text; SVG gradient IDs are unique per graph; a failed WiFi block no longer leaves the button permanently disabled.
 - Releases: a scoped breaking change (`feat(scope)!:`) and a `BREAKING CHANGE:` footer are now detected, `refactor:`/`ci:` bump the patch version as documented, the tag is created after the rebase so it cannot be orphaned, the release is gated on the compatibility matrix, and a known-broken unsigned `.apk` is no longer published.
+- **A commit body merely mentioning `BREAKING CHANGE` no longer forces a major release.** The footer search was unanchored, so prose describing the footer counted as one; this branch's own history would have published v2.0.0 from `fix:`/`ci:`/`docs:`/`test:` commits. The footer is now recognised only at the start of a line followed by `:` or ` #`.
 
 ### Documentation
 
