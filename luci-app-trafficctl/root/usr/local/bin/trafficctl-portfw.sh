@@ -23,6 +23,27 @@ PFW_PRIO="-190"
 
 # ── validation helpers ──────────────────────────────────────────────────────
 
+# iptables spells a port range lo:hi. Truncating to the low port (as this did)
+# left every other port in the range open while reporting the whole range paused.
+iptables_dport() {
+    case "$1" in
+        *-*) echo "${1%%-*}:${1##*-}" ;;
+        *) echo "$1" ;;
+    esac
+}
+
+# hashlimit names are capped at 15 characters, so a range cannot be spelled out
+# in full: 8000-8100 as "pfw_8000_8100_tcp" would be silently truncated into a
+# collision with a neighbouring range.
+hashlimit_name() {
+    local proto="$1" port="$2" lo
+    lo="${port%%-*}"
+    case "$port" in
+        *-*) echo "pfwr${lo}_${proto}" ;;
+        *) echo "pfw${lo}_${proto}" ;;
+    esac
+}
+
 valid_port() {
     case "$1" in
         [0-9]*-[0-9]*)
@@ -105,10 +126,10 @@ pfw_add_pause() {
         fi
     else
         if [ "$scope" = "input" ]; then
-            iptables -I INPUT -p "$proto" --dport "${port%-*}" -j DROP \
+            iptables -I INPUT -p "$proto" --dport "$(iptables_dport "$port")" -j DROP \
                 -m comment --comment "$cmt" 2>/dev/null
         else
-            iptables -I FORWARD -d "$ip" -p "$proto" --dport "${port%-*}" -j DROP \
+            iptables -I FORWARD -d "$ip" -p "$proto" --dport "$(iptables_dport "$port")" -j DROP \
                 -m comment --comment "$cmt" 2>/dev/null
         fi
     fi
@@ -134,14 +155,14 @@ pfw_add_limit() {
         fi
     else
         if [ "$scope" = "input" ]; then
-            iptables -I INPUT -p "$proto" --dport "${port%-*}" -m hashlimit \
+            iptables -I INPUT -p "$proto" --dport "$(iptables_dport "$port")" -m hashlimit \
                 --hashlimit-above "${kbit}kbit/sec" --hashlimit-burst "$kbit" \
-                --hashlimit-mode dstport --hashlimit-name "pfw_${port%-*}_${proto}" \
+                --hashlimit-mode dstport --hashlimit-name "$(hashlimit_name "$proto" "$port")" \
                 -j DROP -m comment --comment "$cmt" 2>/dev/null
         else
-            iptables -I FORWARD -d "$ip" -p "$proto" --dport "${port%-*}" -m hashlimit \
+            iptables -I FORWARD -d "$ip" -p "$proto" --dport "$(iptables_dport "$port")" -m hashlimit \
                 --hashlimit-above "${kbit}kbit/sec" --hashlimit-burst "$kbit" \
-                --hashlimit-mode dstip --hashlimit-name "pfw_${port%-*}_${proto}" \
+                --hashlimit-mode dstip --hashlimit-name "$(hashlimit_name "$proto" "$port")" \
                 -j DROP -m comment --comment "$cmt" 2>/dev/null
         fi
     fi
@@ -150,13 +171,25 @@ pfw_add_limit() {
 # Flush established conntrack entries so a pause takes effect immediately,
 # even for flows already offloaded to the flowtable. Best effort.
 pfw_flush_conntrack() {
-    local proto="$1" ip="$2" port="$3"
+    local proto="$1" ip="$2" port="$3" lo hi p
     command -v conntrack >/dev/null 2>&1 || return 0
     if [ -n "$ip" ] && [ "$ip" != "-" ]; then
         conntrack -D -p "$proto" --reply-src "$ip" 2>/dev/null
-    else
-        conntrack -D -p "$proto" --dport "${port%-*}" 2>/dev/null
+        return 0
     fi
+    # conntrack takes one port at a time, so a range is walked. Wide ranges are
+    # left to expire on their own rather than spending thousands of calls here.
+    lo="${port%%-*}"
+    hi="${port##*-}"
+    if [ "$lo" = "$hi" ] || [ "$((hi - lo))" -gt 64 ] 2>/dev/null; then
+        conntrack -D -p "$proto" --dport "$lo" 2>/dev/null
+        return 0
+    fi
+    p="$lo"
+    while [ "$p" -le "$hi" ]; do
+        conntrack -D -p "$proto" --dport "$p" 2>/dev/null
+        p=$((p + 1))
+    done
     return 0
 }
 
