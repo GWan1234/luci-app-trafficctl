@@ -1,10 +1,10 @@
 {
   "env": {
     "browser": true,
-    "es2017": true
+    "es6": true
   },
   "parserOptions": {
-    "ecmaVersion": 2020,
+    "ecmaVersion": 5,
     "sourceType": "script",
     "ecmaFeatures": {
       "globalReturn": true
@@ -37,6 +37,21 @@
     "no-var": "off",
     "prefer-const": "off",
     "semi": ["error", "always"],
-    "curly": ["error", "multi-line"]
+    "curly": ["error", "multi-line"],
+    "no-restricted-syntax": [
+      "error",
+      { "selector": "ArrowFunctionExpression", "message": "ES5 only: use the function keyword, not arrow functions." },
+      { "selector": "TemplateLiteral", "message": "ES5 only: use string concatenation, not template literals." },
+      { "selector": "VariableDeclaration[kind='let']", "message": "ES5 only: use var, not let." },
+      { "selector": "VariableDeclaration[kind='const']", "message": "ES5 only: use var, not const." },
+      { "selector": "ClassDeclaration", "message": "ES5 only: no class syntax." },
+      { "selector": "ClassExpression", "message": "ES5 only: no class syntax." },
+      { "selector": "SpreadElement", "message": "ES5 only: no spread syntax." },
+      { "selector": "RestElement", "message": "ES5 only: no rest parameters/destructuring." },
+      { "selector": "ObjectPattern", "message": "ES5 only: no destructuring." },
+      { "selector": "ArrayPattern", "message": "ES5 only: no destructuring." },
+      { "selector": "CallExpression[callee.property.name='includes']", "message": "ES5 only: use indexOf(...) !== -1, not .includes()." },
+      { "selector": "CallExpression[callee.object.name='Object'][callee.property.name='assign']", "message": "ES5 only: no Object.assign()." }
+    ]
   }
 }

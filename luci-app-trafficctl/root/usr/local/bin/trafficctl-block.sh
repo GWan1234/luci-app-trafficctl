@@ -24,7 +24,7 @@ if [ "$IP" = "$ROUTER_IP" ]; then
     exit 1
 fi
 
-COMMENT="tctl_block_${LABEL}"
+COMMENT=$(tctl_block_comment "$IP")
 SELF_BLOCK=false
 if [ -n "$TCTL_SRC" ] && [ "$TCTL_SRC" = "$IP" ]; then
     SELF_BLOCK=true

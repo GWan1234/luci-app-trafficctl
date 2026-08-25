@@ -21,10 +21,14 @@ jobs:
     name: CI checks
     uses: ./.github/workflows/ci.yml
 
+  compat:
+    name: Compatibility checks
+    uses: ./.github/workflows/compat.yml
+
   release:
     name: Tag, release & build
     runs-on: ubuntu-latest
-    needs: ci
+    needs: [ci, compat]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -44,16 +48,32 @@ jobs:
           fi
           echo "latest_tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
 
-          # Get commits since last tag
-          COMMITS=$(git log "${LATEST_TAG}..HEAD" --pretty=format:"%s" 2>/dev/null || git log --pretty=format:"%s")
+          # Get commits since last tag. Keep subjects and full messages (with
+          # body) separate: the type-prefix regexes below are subject-anchored
+          # (^feat:, ^fix!:, ...) and must only match the subject line, but
+          # `grep` matches per input line, so if a BREAKING CHANGE footer were
+          # folded into the same variable a body line starting with e.g.
+          # "feat:" would also satisfy a subject regex. So subject-prefix
+          # detection runs against SUBJECTS only, while the free-text
+          # BREAKING CHANGE footer search runs against the full message
+          # (subject+body) via FULL_MSGS.
+          #
+          # That footer search is anchored too. Conventional Commits defines
+          # BREAKING CHANGE as a footer — start of line, followed by ":" or
+          # " #" — so an unanchored match turns any prose *mentioning* the
+          # footer into a major release. This very workflow's own commit
+          # message described the footer in a sentence and would have shipped
+          # v2.0.0 off a patch-only branch.
+          SUBJECTS=$(git log "${LATEST_TAG}..HEAD" --pretty=format:"%s" 2>/dev/null || git log --pretty=format:"%s")
+          FULL_MSGS=$(git log "${LATEST_TAG}..HEAD" --pretty=format:"%s%n%b" 2>/dev/null || git log --pretty=format:"%s%n%b")
 
           # Determine bump type
           BUMP="none"
-          if echo "$COMMITS" | grep -qE '^feat!:|^fix!:|BREAKING CHANGE'; then
+          if echo "$SUBJECTS" | grep -qE '^feat(\(.+\))?!:|^fix(\(.+\))?!:' || echo "$FULL_MSGS" | grep -qE '^BREAKING[ -]CHANGE(:| #)'; then
             BUMP="major"
-          elif echo "$COMMITS" | grep -qE '^feat(\(.+\))?:'; then
+          elif echo "$SUBJECTS" | grep -qE '^feat(\(.+\))?:'; then
             BUMP="minor"
-          elif echo "$COMMITS" | grep -qE '^fix(\(.+\))?:|^perf(\(.+\))?:'; then
+          elif echo "$SUBJECTS" | grep -qE '^fix(\(.+\))?:|^perf(\(.+\))?:|^refactor(\(.+\))?:|^ci(\(.+\))?:'; then
             BUMP="patch"
           fi
           echo "bump=$BUMP" >> "$GITHUB_OUTPUT"
@@ -266,9 +286,11 @@ jobs:
           PYEOF
           git add luci-app-trafficctl/Makefile CHANGELOG.md
           git commit -m "chore: bump version to ${{ steps.bump.outputs.new_version }}"
-          git tag "${{ steps.bump.outputs.new_tag }}"
-          # main may have advanced while CI ran; rebase rather than fail.
+          # main may have advanced while CI ran; rebase rather than fail. The
+          # rebase rewrites the bump commit, so the tag must be created AFTER
+          # it — otherwise the tag points at an object no branch contains.
           git pull --rebase origin main
+          git tag "${{ steps.bump.outputs.new_tag }}"
           git push origin main "${{ steps.bump.outputs.new_tag }}"
 
       - name: Build .ipk (standalone)
@@ -297,7 +319,7 @@ jobs:
 
       - name: Build .apk (via OpenWrt SDK, signed)
         if: steps.bump.outputs.bump != 'none' && steps.apk_secrets.outputs.have == '1'
-        uses: openwrt/gh-action-sdk@main
+        uses: openwrt/gh-action-sdk@7fc2640243284ecc44f4a9c3f749a61746ee02cb # v11
         env:
           ARCH: x86_64-25.12.4
           FEEDNAME: trafficctl
@@ -325,10 +347,14 @@ jobs:
       - name: Build .apk (standalone, unsigned fallback)
         if: steps.bump.outputs.bump != 'none' && steps.apk_secrets.outputs.have != '1'
         run: |
+          # build-apk.sh's fallback layout is NOT installable by apk-tools 3
+          # (see build-apk.sh) — it is a known-broken artifact, so it must not
+          # be uploaded as a release asset. Build it only to keep this path
+          # exercised, then deliberately drop it instead of copying it into
+          # dist/ where the release step's `dist/*.apk` glob would pick it up.
           APK_FILE=$(sh build-apk.sh "${{ steps.bump.outputs.new_version }}" 1 | tail -1)
           if [ -f "$APK_FILE" ]; then
-            ln -f "$APK_FILE" dist/luci-app-trafficctl_noarch.apk
-            ln -f "$APK_FILE" dist/luci-app-trafficctl.apk
+            echo "::warning::APK signing secrets not configured — built APK is unsigned and not installable by apk-tools 3, omitting it from the release (IPK only)"
           else
             echo "::warning::build-apk.sh produced no APK — releasing IPK only"
           fi

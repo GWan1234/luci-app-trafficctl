@@ -295,6 +295,12 @@ setup_curl_responses() {
 RESPONSES
 
     # curl mock
+    #
+    # tg_api() now feeds the URL (which carries the bot token) to curl via a
+    # --config file on stdin instead of argv, so the token never appears in
+    # `ps`/`/proc`. That means the method name is no longer extractable from
+    # "$@" — it has to be read from stdin, same as the real curl would read
+    # it from the config file.
     cat > "$MOCKBIN/curl" <<MOCK
 #!/bin/bash
 # Log the call
@@ -302,9 +308,10 @@ NUM=\$(cat "$CURL_CALL_NUM")
 NUM=\$((NUM + 1))
 echo "\$NUM" > "$CURL_CALL_NUM"
 
-# Extract method from URL (compatible with macOS and Linux grep)
-METHOD=\$(echo "\$@" | sed -n 's|.*bot[^/]*/\([^" ]*\).*|\1|p')
-# Extract -d body
+# --config - passes the url on stdin as: url = "https://.../bot<token>/<method>"
+CONFIG_INPUT=\$(cat)
+METHOD=\$(printf '%s' "\$CONFIG_INPUT" | sed -n 's|.*bot[^/]*/\([^"]*\)".*|\1|p')
+# Extract -d body (still passed via argv — only the token-bearing URL moved to stdin)
 BODY=""
 CAPTURE=0
 for arg in "\$@"; do

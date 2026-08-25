@@ -41,9 +41,12 @@ case "$MODE" in
 esac
 
 LABEL="${3:-rl_$(tctl_target_slug "$IP")}"
-COMMENT="rl_ratelimit_${LABEL}"
+COMMENT=$(tctl_ratelimit_comment "$IP")
 
 if [ "$RATE" = "0" ]; then
+    # Limits written before comments were derived from the target carry the
+    # caller's label, so one set from LuCI could not be removed from Telegram.
+    tctl_ratelimit_remove "$IP" "rl_ratelimit_${LABEL}" 2>/dev/null
     if tctl_ratelimit_remove "$IP" "$COMMENT"; then
         tctl_persist_enabled && tctl_persist_remove "ratelimit" "$IP"
         tctl_log "ratelimit_remove" "$IP" "" "${TCTL_VIA:-cli}" "${TCTL_SRC:-local}"

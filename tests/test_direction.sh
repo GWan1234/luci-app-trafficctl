@@ -18,6 +18,16 @@ mkdir -p "$MOCKBIN"
 NFT_LOG="$TMPDIR/nft.log"
 TC_LOG="$TMPDIR/tc.log"
 
+assert_eq() {
+    local desc="$1" expected="$2" actual="$3"
+    if [ "$expected" = "$actual" ]; then
+        PASS=$((PASS + 1))
+    else
+        FAIL=$((FAIL + 1))
+        printf "FAIL: %s\n  expected: '%s'\n  actual:   '%s'\n" "$desc" "$expected" "$actual"
+    fi
+}
+
 assert_contains() {
     local desc="$1" needle="$2" haystack="$3"
     if printf '%s' "$haystack" | grep -qF -- "$needle"; then
@@ -199,9 +209,13 @@ TC=$(cat "$TC_LOG")
 assert_contains "shaper: add reports success" '"ok":true' "$OUT"
 assert_contains "shaper: says both directions" 'both directions' "$OUT"
 
-# 192.168.1.50 -> o3=1, o4=50 -> 1*256+50 = 306 -> 0x132
+# Minors are allocated, not derived from the address: deriving them put
+# 192.168.0.1 on the reserved root class 1:1 and collided across subnets.
+# The first shape on an empty router therefore gets the lowest free minor, 1:2.
+CID=$(sed -n 's/.*"ip":"192.168.1.50","rate_kbit":5000,"classid":"\(1:[0-9a-f]*\)".*/\1/p' "$TMPDIR/shapes.json")
+assert_eq "shaper: allocates the lowest free minor" "1:2" "$CID"
 assert_contains "shaper: download class on LAN device" \
-    "class add dev br-lan parent 1:1 classid 1:132 htb rate 5000kbit" "$TC"
+    "class add dev br-lan parent 1:1 classid $CID htb rate 5000kbit" "$TC"
 assert_contains "shaper: download filter matches dst" \
     "filter add dev br-lan parent 1:0 prio 10 protocol ip u32 match ip dst 192.168.1.50/32" "$TC"
 
@@ -209,7 +223,7 @@ assert_contains "shaper: download filter matches dst" \
 # the source is already masqueraded to the router's WAN address, so a per-client
 # src filter there would match nothing.
 assert_contains "shaper: upload class on the IFB device" \
-    "class add dev tctl-ifb0 parent 1:1 classid 1:132 htb rate 5000kbit" "$TC"
+    "class add dev tctl-ifb0 parent 1:1 classid $CID htb rate 5000kbit" "$TC"
 assert_contains "shaper: upload filter matches src on IFB" \
     "filter add dev tctl-ifb0 parent 1:0 prio 10 protocol ip u32 match ip src 192.168.1.50/32" "$TC"
 
@@ -233,8 +247,8 @@ fi
 : > "$TC_LOG"
 PATH="$MOCKBIN:$PATH" sh "$SHAPE" remove 192.168.1.50 >/dev/null 2>&1
 TC=$(cat "$TC_LOG")
-assert_contains "shaper: removes LAN class" "class del dev br-lan classid 1:132" "$TC"
-assert_contains "shaper: removes IFB class" "class del dev tctl-ifb0 classid 1:132" "$TC"
+assert_contains "shaper: removes LAN class" "class del dev br-lan classid $CID" "$TC"
+assert_contains "shaper: removes IFB class" "class del dev tctl-ifb0 classid $CID" "$TC"
 assert_contains "shaper: removes upload filter" \
     "filter del dev tctl-ifb0 parent 1:0 prio 10 protocol ip u32 match ip src 192.168.1.50/32" "$TC"
 

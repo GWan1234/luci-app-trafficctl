@@ -38,6 +38,18 @@ jobs:
         run: bash tests/test_telegram_e2e.sh
       - name: Security tests
         run: bash tests/test_security.sh
+      - name: rpcd backend tests
+        run: bash tests/test_rpcd.sh
+      - name: Block/unblock tests
+        run: bash tests/test_block.sh
+      - name: WiFi MAC filter tests
+        run: bash tests/test_macfilter.sh
+      - name: Metrics CGI endpoint tests
+        run: bash tests/test_metrics_cgi.sh
+      - name: Regression tests
+        run: bash tests/test_regressions.sh
+      - name: Release version-bump tests
+        run: bash tests/test_release_bump.sh
       - name: IPK build test
         run: bash tests/test_build_ipk.sh
 

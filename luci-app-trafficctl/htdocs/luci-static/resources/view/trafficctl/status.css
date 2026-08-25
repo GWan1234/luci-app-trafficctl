@@ -86,7 +86,7 @@
 .table.tc-table .th { cursor: pointer; user-select: none; white-space: nowrap; font-size: 12px; }
 .table.tc-table .th:hover { opacity: 0.75; }
 .table.tc-table .td { font-size: 12px; vertical-align: middle; }
-.table.tc-table .tr:not(.cbi-section-table-titles):hover .td {
+.table.tc-table--rows-clickable .tr:not(.cbi-section-table-titles):hover .td {
     background: var(--tc-hover);
     cursor: pointer;
 }
@@ -643,7 +643,7 @@
 	color: var(--tc-muted);
 	transition: opacity .15s ease, color .15s ease;
 }
-.table.tc-table .tr:hover .tc-rename { opacity: .6; }
+.table.tc-table--rows-clickable .tr:hover .tc-rename { opacity: .6; }
 .tc-rename:hover { opacity: 1 !important; color: var(--tc-speed); }
 
 /* DPI application label (netifyd). Muted pill so it reads as metadata rather

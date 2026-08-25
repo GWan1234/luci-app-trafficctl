@@ -44,9 +44,12 @@ jobs:
     steps:
       - name: Resolve build ref
         id: resolve
+        env:
+          INPUT_REF: ${{ inputs.ref }}
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          REF="${{ inputs.ref }}"
-          [ -z "$REF" ] && REF="v${{ inputs.version }}"
+          REF="$INPUT_REF"
+          [ -z "$REF" ] && REF="v$INPUT_VERSION"
           echo "ref=$REF" >> "$GITHUB_OUTPUT"
           echo "Building from: $REF"
 
@@ -56,8 +59,10 @@ jobs:
           fetch-depth: 0
 
       - name: Verify target release exists
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          TAG="v${{ inputs.version }}"
+          TAG="v$INPUT_VERSION"
           # This workflow REBUILDS an existing release; the later
           # `gh release upload --clobber` cannot create a missing one and would
           # fail after a full build. Fail fast and clearly instead.
@@ -65,6 +70,9 @@ jobs:
             || { echo "::error::Release $TAG does not exist — nothing to rebuild"; exit 1; }
 
       - name: Locate and patch Makefile
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_RELEASE_NUM: ${{ inputs.release_num }}
         run: |
           # Handle both layouts: legacy (Makefile at root) and current
           # (luci-app-trafficctl/Makefile) so we can rebuild any historical tag.
@@ -76,14 +84,17 @@ jobs:
             echo "::error::No Makefile found at known locations"
             exit 1
           fi
-          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=${{ inputs.version }}/" "$MAKEFILE"
-          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=${{ inputs.release_num }}/" "$MAKEFILE"
+          sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=$INPUT_VERSION/" "$MAKEFILE"
+          sed -i "s/^PKG_RELEASE:=.*/PKG_RELEASE:=$INPUT_RELEASE_NUM/" "$MAKEFILE"
           echo "Patched $MAKEFILE:"
           grep -E '^PKG_(VERSION|RELEASE)' "$MAKEFILE"
 
       - name: Build .ipk (standalone)
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_RELEASE_NUM: ${{ inputs.release_num }}
         run: |
-          ./build-ipk.sh "${{ inputs.version }}" "${{ inputs.release_num }}"
+          ./build-ipk.sh "$INPUT_VERSION" "$INPUT_RELEASE_NUM"
           ln -f dist/luci-app-trafficctl_*_all.ipk dist/luci-app-trafficctl_all.ipk
           ln -f dist/luci-app-trafficctl_*_all.ipk dist/luci-app-trafficctl.ipk
           ls -la dist/
@@ -93,7 +104,7 @@ jobs:
         run: sh tests/test_build_ipk.sh
 
       - name: Build .apk via OpenWrt SDK
-        uses: openwrt/gh-action-sdk@main
+        uses: openwrt/gh-action-sdk@7fc2640243284ecc44f4a9c3f749a61746ee02cb # v11
         env:
           ARCH: x86_64-25.12.4
           FEEDNAME: trafficctl
@@ -103,6 +114,9 @@ jobs:
           KEY_BUILD: ${{ secrets.USIGN_PRIVATE_KEY }}
 
       - name: Collect APK
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_RELEASE_NUM: ${{ inputs.release_num }}
         run: |
           APK=$(find bin/ -name "luci-app-trafficctl*.apk" 2>/dev/null | head -1)
           if [ -z "$APK" ]; then
@@ -112,7 +126,7 @@ jobs:
           fi
           mkdir -p dist
           cp /tmp/luci-app-trafficctl*.ipk dist/ 2>/dev/null || true
-          DEST="dist/luci-app-trafficctl_${{ inputs.version }}-r${{ inputs.release_num }}_noarch.apk"
+          DEST="dist/luci-app-trafficctl_${INPUT_VERSION}-r${INPUT_RELEASE_NUM}_noarch.apk"
           cp "$APK" "$DEST"
           ln -f "$DEST" dist/luci-app-trafficctl_noarch.apk
           ln -f "$DEST" dist/luci-app-trafficctl.apk
@@ -129,8 +143,10 @@ jobs:
           done
 
       - name: Upload artifacts to release v${{ inputs.version }}
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          TAG="v${{ inputs.version }}"
+          TAG="v$INPUT_VERSION"
           gh release upload "$TAG" dist/*.ipk dist/*.apk --clobber
           echo "Uploaded artifacts to $TAG"
           gh release view "$TAG" --json assets --jq '.assets[].name'

@@ -6,7 +6,21 @@
 set -e
 
 if [ -z "$TEST_TELEGRAM_TOKEN" ] || [ -z "$TEST_TELEGRAM_CHAT_ID" ]; then
-    echo "SKIP: TEST_TELEGRAM_TOKEN or TEST_TELEGRAM_CHAT_ID not set"
+    # A bare "SKIP: ..." line followed by exit 0 is indistinguishable in CI
+    # output from a normal green run — both are exit 0 with SOME text on
+    # stdout. A human (or a script) scanning job logs for "N passed, M
+    # failed" would see nothing here and could easily mistake silence for
+    # "ran clean." Emit the same "N passed, N failed" trailer format every
+    # other test file uses, with an explicit SKIPPED marker in front of it,
+    # so a log/grep pass over all test files can't confuse this with a real
+    # 0-failure run — and repeat the reason loudly, framed, top and bottom.
+    echo "=================================================================="
+    echo "SKIPPED — NOT RUN: TEST_TELEGRAM_TOKEN or TEST_TELEGRAM_CHAT_ID not set"
+    echo "This file's 186 lines of Telegram API integration checks did NOT execute."
+    echo "This is expected for fork PRs (CI withholds the secrets) — see .github/workflows/tests.yml."
+    echo "=================================================================="
+    echo ""
+    echo "0 passed, 0 failed (SKIPPED)"
     exit 0
 fi
 

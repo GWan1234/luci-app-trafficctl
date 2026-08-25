@@ -10,6 +10,14 @@ SCRIPTS="/usr/local/bin"
 # Strip unsafe chars from label (allow alphanumeric, dash, underscore, dot)
 sanitize_label() { echo "$1" | tr -cd 'a-zA-Z0-9_.-'; }
 
+# The config holds the Telegram bot token and the metrics token. uci rewrites the
+# file at the default mode on every commit, so the restriction is re-applied here
+# rather than at the one call site that first set it.
+tctl_commit() {
+	uci commit trafficctl
+	chmod 0600 /etc/config/trafficctl 2>/dev/null
+}
+
 # Detect LuCI session peer IP
 get_peer_ip() {
 	local sid
@@ -272,7 +280,7 @@ call)
 		hw=$(echo "$input" | jsonfilter -e '@.hw' 2>/dev/null)
 		[ -n "$enabled" ] && uci set trafficctl.main.enabled="$([ "$enabled" = "true" ] && echo 1 || echo 0)"
 		[ -n "$mode" ] && uci set trafficctl.main.default_mode="$mode"
-		uci commit trafficctl
+		tctl_commit
 		if [ -n "$sw" ] || [ -n "$hw" ]; then
 			[ -n "$sw" ] && uci set "firewall.@defaults[0].flow_offloading=$([ "$sw" = "true" ] && echo 1 || echo 0)"
 			[ -n "$hw" ] && uci set "firewall.@defaults[0].flow_offloading_hw=$([ "$hw" = "true" ] && echo 1 || echo 0)"
@@ -342,8 +350,7 @@ call)
 			val=$(echo "$input" | jsonfilter -e "@.$opt" 2>/dev/null)
 			[ -n "$val" ] && uci set "trafficctl.telegram.$opt=$([ "$val" = "true" ] && echo 1 || echo 0)"
 		done
-		uci commit trafficctl
-		chmod 0600 /etc/config/trafficctl 2>/dev/null
+		tctl_commit
 		tctl_log "telegram_config_change" "" "" "luci" "${TCTL_SRC:-local}"
 		/etc/init.d/trafficctl-telegram reload 2>/dev/null &
 		echo '{"ok":true}'
@@ -359,7 +366,7 @@ call)
 		if [ -z "$token" ] || [ -z "$chat_id" ]; then
 			echo '{"ok":false,"msg":"token and chat_id required"}'
 		else
-			"$SCRIPTS/trafficctl-telegram-test.sh" "$token" "$chat_id" "$msg"
+			TCTL_TG_TOKEN="$token" "$SCRIPTS/trafficctl-telegram-test.sh" - "$chat_id" "$msg"
 		fi
 		;;
 	logging_config_get)
@@ -393,12 +400,27 @@ call)
 			[ -n "$val" ] && uci set "trafficctl.logging.$opt=$([ "$val" = "true" ] && echo 1 || echo 0)"
 		done
 		val=$(echo "$input" | jsonfilter -e '@.log_file' 2>/dev/null)
-		[ -n "$val" ] && uci set trafficctl.logging.log_file="$val"
+		if [ -n "$val" ]; then
+			if ! tctl_validate_log_file "$val"; then
+				echo '{"ok":false,"msg":"log_file must be under /tmp/trafficctl/ or /var/log/"}'
+				exit 0
+			fi
+			uci set trafficctl.logging.log_file="$val"
+		fi
 		val=$(echo "$input" | jsonfilter -e '@.max_lines' 2>/dev/null)
-		[ -n "$val" ] && uci set trafficctl.logging.max_lines="$val"
+		if [ -n "$val" ]; then
+			case "$val" in
+				''|*[!0-9]*) echo '{"ok":false,"msg":"max_lines must be a number"}'; exit 0 ;;
+			esac
+			if [ "$val" -lt 20 ] || [ "$val" -gt 100000 ]; then
+				echo '{"ok":false,"msg":"max_lines must be between 20 and 100000"}'
+				exit 0
+			fi
+			uci set trafficctl.logging.max_lines="$val"
+		fi
 		val=$(echo "$input" | jsonfilter -e '@.persist_rules' 2>/dev/null)
 		[ -n "$val" ] && uci set "trafficctl.main.persist_rules=$([ "$val" = "true" ] && echo 1 || echo 0)"
-		uci commit trafficctl
+		tctl_commit
 		tctl_log "config_change" "logging" "" "luci" "${TCTL_SRC:-local}"
 		echo '{"ok":true}'
 		;;
@@ -406,8 +428,11 @@ call)
 		read -r input
 		lines=$(echo "$input" | jsonfilter -e '@.lines' 2>/dev/null)
 		lines="${lines:-50}"
-		log_file=$(uci -q get trafficctl.logging.log_file)
-		log_file="${log_file:-/tmp/trafficctl/activity.log}"
+		case "$lines" in
+			''|*[!0-9]*) lines=50 ;;
+		esac
+		[ "$lines" -gt 1000 ] && lines=1000
+		log_file=$(tctl_log_file)
 		if [ -f "$log_file" ]; then
 			printf '{"ok":true,"lines":['
 			tail -n "$lines" "$log_file" | awk '

@@ -29,20 +29,50 @@ assert_ok() {
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-# ── Syntax check with dash (closest to ash) ───────────────────────────────
+# ── Syntax check with a REAL POSIX shell (dash or busybox ash) ─────────────
+#
+# The whole point of this check is that ash/dash reject bashisms ([[, arrays,
+# `function` keyword) that a plain `sh -n` on a system where /bin/sh IS bash
+# (renamed/invoked as sh — true on macOS, and on some Linux distros) will
+# silently accept: bash-as-sh still parses `[[ ... ]]` and `arr=(1 2 3)` fine.
+# Falling back to plain "sh" on such a host makes every "no bashisms"
+# assertion below a false positive that verifies nothing (confirmed: `arr=(1
+# 2 3)` + `[[ a == a ]]` syntax-checks CLEAN under macOS /bin/sh -n, and FAILS
+# under dash -n as it must). So: only accept dash or ash as SHELL_CMD, and
+# make the absence of either LOUD (a visible SKIP, not a silent, wrong pass).
+SHELL_CMD=""
+for candidate in dash ash busybox; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+        if [ "$candidate" = "busybox" ]; then
+            # only useful if this busybox actually provides an ash applet
+            busybox ash -c 'exit 0' >/dev/null 2>&1 && SHELL_CMD="busybox ash"
+        else
+            SHELL_CMD="$candidate"
+        fi
+        [ -n "$SHELL_CMD" ] && break
+    fi
+done
 
-SHELL_CMD="dash"
-if ! command -v dash >/dev/null 2>&1; then
-    SHELL_CMD="sh"
+if [ -z "$SHELL_CMD" ]; then
+    echo "SKIP: no real dash/ash on this host — refusing to fall back to plain 'sh'" >&2
+    echo "SKIP: (on macOS, sh IS bash-renamed and silently accepts [[ / arrays / bashisms — that fallback previously made every 'no bashisms' check here a no-op false pass)" >&2
+    echo ""
+    echo "0 passed, 0 failed (SKIPPED — install dash: brew install dash / apt-get install dash)"
+    exit 0
 fi
+echo "Using POSIX shell for syntax/bashism checks: $SHELL_CMD"
 
 for script in "$REPO_ROOT"/luci-app-trafficctl/root/usr/local/bin/trafficctl-*.sh; do
     name=$(basename "$script")
+    # shellcheck disable=SC2086 # SHELL_CMD may be "busybox ash", intentionally split
     assert_ok "syntax: $name" $SHELL_CMD -n "$script"
 done
 
+# shellcheck disable=SC2086
 assert_ok "syntax: rpcd/trafficctl" $SHELL_CMD -n "$REPO_ROOT/luci-app-trafficctl/root/usr/libexec/rpcd/luci.trafficctl"
+# shellcheck disable=SC2086
 assert_ok "syntax: hotplug" $SHELL_CMD -n "$REPO_ROOT/luci-app-trafficctl/root/etc/hotplug.d/iface/99-trafficctl-shapes"
+# shellcheck disable=SC2086
 assert_ok "syntax: init.d/trafficctl-telegram" $SHELL_CMD -n "$REPO_ROOT/luci-app-trafficctl/root/etc/init.d/trafficctl-telegram"
 
 # ── No bashisms (check common ones) ───────────────────────────────────────

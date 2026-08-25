@@ -4,6 +4,41 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [Unreleased]
+
+### Security
+
+- **The activity-log path could be pointed at any file.** `log_file` was written to UCI unvalidated and then used both as an append target and as a `tail`+`mv` rotation target, so a caller with the write ACL could read any root-owned file back through `activity_log` (which was in the **read** ACL) or empty one — `max_lines=1` rounded the rotation keep-count to zero. The path is now confined to `/tmp/trafficctl/` or `/var/log/`, `max_lines` to 20–100000, and `activity_log` is a write method.
+- **Private signing keys were exposed to a mutable third-party action.** All three workflows passed `APK_PRIVATE_KEY`/`USIGN_PRIVATE_KEY` into `openwrt/gh-action-sdk@main`; the action is now pinned to a commit SHA.
+- The Telegram bot token no longer appears in a command line (visible via `ps` to any local account) — the API URL is fed to curl on stdin, and `telegram_test` receives the token through the environment.
+- `/etc/config/trafficctl` holds the bot token and the metrics token and is now kept at mode 0600 after every commit, not only after saving Telegram settings.
+- `workflow_dispatch` inputs are no longer interpolated into `run:` blocks.
+
+### Bug Fixes
+
+- **Shaping a device could tear down every other device's shape.** The HTB classid was derived from the last two octets of the address, so `192.168.0.1` mapped onto the reserved root class `1:1` and shaping it deleted the root; `x.x.255.254` mapped onto the default class; and addresses from different subnets sharing their last two octets collided. Minors are now allocated and persisted, with pre-upgrade shapes still removable.
+- **The shaper destroyed a pre-existing QoS setup.** The first shape unconditionally replaced the root qdisc, wiping an SQM/cake configuration. A root qdisc that is not a recognised default is now left alone and shaping declines instead.
+- **Unblocking one device could unblock another.** Rule removal matched the comment as a substring, so `192.168.1.1` also matched `192.168.1.10`; the iptables state check had the same flaw and made `block` report "already blocked" without installing a rule. Comments are now matched in full and addresses as whole fields.
+- **Controls created in LuCI could not be removed from the Telegram bot** (and vice versa) while still reporting success: the rule comment was built from the caller's label. Comments are now derived from the target.
+- **Paused port ranges were only partly paused.** On the iptables path a range was truncated to its low port — `8000-8100` blocked only 8000 — while the UI showed the whole range as paused. Ranges are now passed as `lo:hi`.
+- Concurrent shape writes no longer lose an entry: the lock is an atomic `mkdir` rather than a test-then-create file, and a waiter no longer deletes a lock still held by another writer.
+- **Device aliases and shaping rules are no longer lost on a firmware upgrade** — `/etc/trafficctl` is now listed in `/lib/upgrade/keep.d/`, which default sysupgrade otherwise skips.
+- Undeclared runtime dependencies (`tc`, `iw`, `hostapd_cli`) are now declared, so shaping and WiFi deauthentication no longer fail silently on a clean install.
+- Hotplug scripts now ship executable.
+- Frontend: the graph popup and its 2-second timer are removed on view teardown instead of accumulating one per visit; per-device speed history is capped; activity-log lines are rendered as text; SVG gradient IDs are unique per graph; a failed WiFi block no longer leaves the button permanently disabled.
+- Releases: a scoped breaking change (`feat(scope)!:`) and a `BREAKING CHANGE:` footer are now detected, `refactor:`/`ci:` bump the patch version as documented, the tag is created after the rebase so it cannot be orphaned, the release is gated on the compatibility matrix, and a known-broken unsigned `.apk` is no longer published.
+- **A commit body merely mentioning `BREAKING CHANGE` no longer forces a major release.** The footer search was unanchored, so prose describing the footer counted as one; this branch's own history would have published v2.0.0 from `fix:`/`ci:`/`docs:`/`test:` commits. The footer is now recognised only at the start of a line followed by `:` or ` #`.
+
+### Documentation
+
+- `docs/API.md` documents all 31 rpcd methods (13 were missing) with their ACL level; added `CONTRIBUTING.md`, issue and PR templates.
+
+### Tests
+
+- Tests that redefined local copies of the functions they claimed to check now exercise the real scripts, and the previously untested rpcd backend, block/unblock, macfilter and metrics CGI are covered. Each bug above has a regression test verified to fail against the old behaviour.
+
+---
+
 ## [1.13.1] - 2026-08-24
 
 **Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.13.0...v1.13.1

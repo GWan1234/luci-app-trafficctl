@@ -327,8 +327,16 @@ apk add conntrack luci-base rpcd
 # For traffic shaping
 apk add tc-full kmod-sched-core kmod-sched-htb
 
+# For upload shaping — without it the shaper applies download only and says so
+# (upload is redirected into an IFB device via act_mirred, which ships with the
+# sched core package above)
+apk add kmod-ifb
+
 # For interface detection (WiFi band + LAN port)
 apk add iw-full bridge-utils
+
+# For WiFi MAC deny / deauthenticate
+apk add hostapd-utils
 
 # rpcd-mod-rrdns is included with rpcd (no extra install needed)
 
@@ -348,8 +356,16 @@ opkg install conntrack luci-base rpcd
 # For traffic shaping
 opkg install tc-full kmod-sched-core kmod-sched-htb
 
+# For upload shaping — without it the shaper applies download only and says so
+# (upload is redirected into an IFB device via act_mirred, which ships with the
+# sched core package above)
+opkg install kmod-ifb
+
 # For interface detection (WiFi band + LAN port)
 opkg install iw-full bridge-utils
+
+# For WiFi MAC deny / deauthenticate
+opkg install hostapd-utils
 
 # rpcd-mod-rrdns is included with rpcd (no extra install needed)
 
