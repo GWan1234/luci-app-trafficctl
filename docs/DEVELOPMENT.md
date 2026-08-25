@@ -197,16 +197,46 @@ npx eslint luci-app-trafficctl/htdocs/luci-static/resources/view/trafficctl/stat
 
 ### Automated Tests
 
-Run all tests locally:
+Run all tests locally. These run on the host with fake `nft`/`tc`/`ip`/`uci`/
+`curl` binaries on `PATH`, so they need no router:
 
 ```sh
-bash tests/test_fw.sh              # Shell unit tests (firewall scripts)
-bash tests/test_telegram.sh        # Telegram bot unit tests
-bash tests/test_telegram_mock.sh   # Telegram bot with mocked API responses
-bash tests/test_telegram_e2e.sh    # End-to-end bot tests (61 tests)
-bash tests/test_security.sh        # Security tests (injection, path traversal)
-bash tests/test_build_ipk.sh       # IPK package build verification
+bash tests/test_fw.sh                 # Firewall helper library
+bash tests/test_direction.sh          # Bidirectional limit/shape, classid allocation
+bash tests/test_portfw.sh             # Port-forward control, port ranges
+bash tests/test_names.sh              # Device aliases + reverse-DNS cache
+bash tests/test_netify.sh             # Netify (DPI) integration
+bash tests/test_metrics.sh            # Prometheus exporter
+bash tests/test_bytes_nft.sh          # nftables byte-counter parsing
+bash tests/test_openwrt_compat.sh     # BusyBox ash compatibility / no bashisms
+bash tests/test_security.sh           # Input validation and injection resistance
+bash tests/test_rpcd.sh               # rpcd/ubus backend — every method, dispatch, ACL
+bash tests/test_block.sh              # Internet block/unblock
+bash tests/test_macfilter.sh          # WiFi MAC deny/allow
+bash tests/test_metrics_cgi.sh        # Metrics CGI gate and token check
+bash tests/test_regressions.sh        # Regressions for previously fixed bugs
+bash tests/test_telegram.sh           # Telegram bot units
+bash tests/test_telegram_mock.sh      # Telegram bot with mocked API responses
+bash tests/test_telegram_e2e.sh       # End-to-end bot tests
+bash tests/test_build_ipk.sh          # IPK package build verification
 ```
+
+Four further tests only run inside the OpenWrt rootfs containers that
+`compat.yml` builds, because they install a real package — they fail on a
+developer machine by design:
+
+```
+tests/test_dependencies.sh  tests/test_install.sh
+tests/test_upgrade.sh       tests/test_feed_install.sh
+```
+
+`tests/test_telegram_integration.sh` talks to the real Telegram API and skips
+unless `TEST_TELEGRAM_TOKEN` and `TEST_TELEGRAM_CHAT_ID` are set. In CI it also
+skips for pull requests from forks, which cannot see repository secrets.
+
+A test must exercise the real script rather than a local copy of the function it
+names — see the "Writing tests" section of `CONTRIBUTING.md` for why, and use
+`tests/test_direction.sh` as the template.
 
 **E2E tests** (`test_telegram_e2e.sh`) run the real bot script with mocked externals (curl, uci, iw, ip, jsonfilter) and verify:
 - Command processing (`/devices`, `/status`, `/help`)
@@ -226,10 +256,16 @@ GitHub Actions (`.github/workflows/`) runs on every push and PR:
 | Workflow | What it checks |
 |----------|----------------|
 | `tests.yml` | Unit, mock, E2E, security, and build tests |
-| `shellcheck.yml` | ShellCheck on all `.sh` files |
-| `eslint.yml` | ESLint on `status.js` (ES5 mode) |
-| `compat.yml` | OpenWrt rootfs compatibility (52 version/arch combos) |
-| `auto-release.yml` | CI + build IPK/APK + create GitHub release (on main only) |
+| `shellcheck.yml` | ShellCheck (`-S warning`) on every script with a shell shebang |
+| `eslint.yml` | ESLint on the frontend — `ecmaVersion: 5` plus `no-restricted-syntax`, so ES6 syntax fails the build |
+| `compat.yml` | OpenWrt rootfs compatibility (52 version/arch combos); installs the built package and tests upgrades |
+| `auto-release.yml` | Waits for `ci.yml` **and** `compat.yml`, then bumps the version, tags, builds and publishes (on main only) |
+
+The release depends on the compatibility matrix as well as the fast checks —
+otherwise a tag and the `releases/latest/download` URL could publish an
+uninstallable package minutes before `compat` went red. Note that `main` has no
+branch protection at the time of writing, so none of these are *required* checks:
+a red PR can still be merged, and the release will then publish it.
 
 ---
 

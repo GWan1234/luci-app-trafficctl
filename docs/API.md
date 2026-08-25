@@ -6,12 +6,14 @@ All backend functionality is exposed through shell scripts in `/usr/local/bin/tr
 
 ## Common Conventions
 
-- **Input validation**: Every script validates IPs with regex + octet range (0–255) via `tctl_validate_ip`.
+- **Input validation**: scripts that take an address validate it with regex + octet range (0–255) via `tctl_validate_ip`; `tctl_validate_target` additionally accepts a CIDR or `all`.
 - **Error format**: `{"ok":false,"msg":"Human-readable error message"}`
 - **Success format (actions)**: `{"ok":true,"msg":"Human-readable success message"}`
 - **Rate units**: All rate values are in **kbit/s** (kilobits per second).
 - **Exit codes**: 0 on success, 1 on input validation failure.
-- **Label sanitization**: All label parameters are stripped to `[a-zA-Z0-9_.-]`.
+- **Label sanitization**: `block`, `unblock`, `ratelimit` and `shape_add` strip their label to `[a-zA-Z0-9_.-]`.
+- **Labels do not identify rules.** A label is recorded in the activity log only. Firewall rule comments are derived from the target (`tctl_block_<slug>`, `rl_ratelimit_<slug>`), so a control created from one surface can be removed from another — a label-derived comment made a block placed in LuCI un-removable from the Telegram bot.
+- **`log_file` is constrained** to `/tmp/trafficctl/*` or `/var/log/*`, and `max_lines` to 20–100000. The path is both an append target and a `tail`/rewrite target, so an unconstrained value was an arbitrary root read and truncate.
 
 ---
 
@@ -19,26 +21,48 @@ All backend functionality is exposed through shell scripts in `/usr/local/bin/tr
 
 The frontend calls these via `rpc.declare()`:
 
-| Method | Script | Params |
-|--------|--------|--------|
-| `summary` | `trafficctl-summary.sh` | (none) |
-| `device` | `trafficctl-device.sh` | `ip`, `proto` |
-| `bytes` | `trafficctl-bytes.sh` | (none) |
-| `block` | `trafficctl-block.sh` | `ip`, `label` |
-| `unblock` | `trafficctl-unblock.sh` | `ip`, `label` |
-| `ratelimit` | `trafficctl-ratelimit.sh` | `ip`, `rate_kbit`, `label` |
-| `ratelimit_stats` | `trafficctl-ratelimit-stats.sh` | (none) |
-| `shape_add` | `trafficctl-shape.sh add` | `ip`, `rate_kbit`, `label` |
-| `shape_remove` | `trafficctl-shape.sh remove` | `ip`, `label` |
-| `shape_stats` | `trafficctl-shape-stats.sh` | (none) |
-| `macfilter_add` | `trafficctl-macfilter-add.sh` | `ip` |
-| `macfilter_remove` | `trafficctl-macfilter-remove.sh` | `ip` |
-| `rdns` | `trafficctl-rdns.sh` | `ip` |
-| `config_get` | (inline) | (none) — returns `enabled`, `default_mode`, `offload_mode`, `sw`, `hw` |
-| `config_set` | (inline) | `enabled`, `default_mode`, `sw`, `hw` (all optional) |
-| `telegram_config_get` | (inline) | (none) |
-| `telegram_config_set` | (inline) | `enabled`, `bot_token`, `chat_id`, `poll_interval`, `notify_new_device`, `notify_known_device`, `btn_block_inet`, `btn_block_wifi`, `btn_limiter`, `btn_shaper` |
-| `telegram_test` | `trafficctl-telegram-test.sh` | `bot_token`, `chat_id` |
+Every method is listed here. The ACL group is `luci-app-trafficctl`
+(`/usr/share/rpcd/acl.d/luci-app-trafficctl.json`): read-only methods sit under
+`read`, everything that changes state under `write`. `activity_log` is a **write**
+method because it returns the contents of the configured log file.
+
+| Method | Script | Params | ACL |
+|--------|--------|--------|-----|
+| `summary` | `trafficctl-summary.sh` | (none) | read |
+| `device` | `trafficctl-device.sh` | `ip`, `proto` | read |
+| `bytes` | `trafficctl-bytes.sh` | (none) | read |
+| `rdns` | `trafficctl-rdns.sh` | `ip` | read |
+| `ratelimit_stats` | `trafficctl-ratelimit-stats.sh` | (none) | read |
+| `shape_stats` | `trafficctl-shape-stats.sh` | (none) | read |
+| `shape_status` | `trafficctl-shape.sh status` | `ip` | read |
+| `names_list` | `trafficctl-names.sh list` | (none) | read |
+| `portfw_list` | `trafficctl-portfw.sh list` | (none) | read |
+| `netify_status` | `trafficctl-netify.sh status` | (none) | read |
+| `netify_list` | `trafficctl-netify.sh list` | (none) | read |
+| `config_get` | (inline) | (none) — returns `enabled`, `default_mode`, `offload_mode`, `sw`, `hw` | read |
+| `telegram_config_get` | (inline) | (none) — `bot_token` is masked as `***` | read |
+| `logging_config_get` | (inline) | (none) | read |
+| `version` | (inline) | (none) | read |
+| `block` | `trafficctl-block.sh` | `ip`, `label` | write |
+| `unblock` | `trafficctl-unblock.sh` | `ip`, `label` | write |
+| `ratelimit` | `trafficctl-ratelimit.sh` | `ip`, `rate_kbit`, `label`, `mode` (`each`\|`shared`) | write |
+| `shape_add` | `trafficctl-shape.sh add` | `ip`, `rate_kbit`, `label` | write |
+| `shape_remove` | `trafficctl-shape.sh remove` | `ip`, `label` | write |
+| `macfilter_add` | `trafficctl-macfilter-add.sh` | `ip` | write |
+| `macfilter_remove` | `trafficctl-macfilter-remove.sh` | `ip` | write |
+| `name_set` | `trafficctl-names.sh set` | `ip`, `name` (empty `name` clears the alias) | write |
+| `name_clear` | `trafficctl-names.sh remove` | `ip` | write |
+| `portfw_ctl` | `trafficctl-portfw.sh` | `action`, `scope`, `proto`, `ip`, `port`, `rate_kbit` | write |
+| `netify_collect` | `trafficctl-netify.sh collect` | `secs` | write |
+| `config_set` | (inline) | `enabled`, `default_mode`, `sw`, `hw` (all optional) | write |
+| `telegram_config_set` | (inline) | `enabled`, `bot_token`, `chat_id`, `poll_interval`, `notify_new_device`, `notify_known_device`, `control_enabled`, `notify_template`, `btn_block_inet`, `btn_block_wifi`, `btn_limiter`, `btn_shaper` | write |
+| `telegram_test` | `trafficctl-telegram-test.sh` | `bot_token`, `chat_id`, `message` | write |
+| `logging_config_set` | (inline) | `enabled`, `log_file`, `max_lines`, `syslog`, `log_blocks`, `log_ratelimits`, `log_shapes`, `log_telegram`, `log_config` | write |
+| `activity_log` | (inline) | `lines` (default 50, capped at 1000) | write |
+
+`port` accepts a single port or a `lo-hi` range. On the iptables path a range is
+passed through as `lo:hi`; it used to be truncated to the low port, which left the
+rest of the range open while the UI reported the whole range paused.
 
 ---
 
