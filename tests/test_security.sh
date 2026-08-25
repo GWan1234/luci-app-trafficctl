@@ -1,8 +1,25 @@
 #!/bin/bash
-# Security tests: validate input sanitization and injection resistance.
+# Security tests: validate input sanitization and injection resistance
+# against the REAL functions, not local redefinitions.
+#
+# The previous version of this file defined its own sanitize_mac,
+# sanitize_name, validate_cb_ip, validate_cb_param and json_escape and
+# asserted against those copies. None of those names exist in trafficctl-fw.sh
+# or trafficctl-telegram.sh — the real MAC/name sanitizer is add_known_mac()'s
+# inline `tr -cd`, the real callback validation is inline in handle_callback(),
+# and the real JSON escaping is tg_json_escape() — so a reviewer deleting the
+# actual validation left this file 30/0 green. Everything below now sources
+# or invokes the production scripts.
 
 PASS=0
 FAIL=0
+
+BIN="$(cd "$(dirname "$0")/.." && pwd)/luci-app-trafficctl/root/usr/local/bin"
+
+TMPDIR=$(mktemp -d)
+trap 'rm -rf "$TMPDIR"' EXIT
+MOCKBIN="$TMPDIR/bin"
+mkdir -p "$MOCKBIN"
 
 assert_eq() {
     local desc="$1" expected="$2" actual="$3"
@@ -24,14 +41,24 @@ assert_not_contains() {
     fi
 }
 
-# ── IP validation (from trafficctl-fw.sh) ──────────────────────────────────
+assert_contains() {
+    local desc="$1" haystack="$2" needle="$3"
+    if echo "$haystack" | grep -qF "$needle"; then
+        PASS=$((PASS + 1))
+    else
+        FAIL=$((FAIL + 1))
+        printf "FAIL: %s\n  expected to find: '%s'\n  in: '%s'\n" "$desc" "$needle" "$haystack"
+    fi
+}
+
+# ── IP validation (real tctl_validate_ip from trafficctl-fw.sh) ────────────
 
 uci() { echo ""; }
 nft() { return 1; }
 command() { return 1; }
 export -f uci nft command
 
-. "$(dirname "$0")/../luci-app-trafficctl/root/usr/local/bin/trafficctl-fw.sh"
+. "$BIN/trafficctl-fw.sh"
 
 # Command injection attempts via IP
 assert_eq "injection: semicolon" 1 "$(tctl_validate_ip '192.168.1.1; rm -rf /' && echo 0 || echo 1)"
@@ -41,65 +68,152 @@ assert_eq "injection: newline" 1 "$(tctl_validate_ip "192.168.1.1
 rm -rf /" && echo 0 || echo 1)"
 assert_eq "injection: ampersand" 1 "$(tctl_validate_ip '192.168.1.1&& cat /etc/shadow' && echo 0 || echo 1)"
 assert_eq "injection: redirect" 1 "$(tctl_validate_ip '192.168.1.1>/tmp/hacked' && echo 0 || echo 1)"
-assert_eq "injection: null byte" 1 "$(printf '192.168.1.1\x00rm' | xargs -0 -I{} sh -c 'echo "{}" | grep -qE "^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$"' && echo 0 || echo 1)"
 
-# ── MAC sanitization (from telegram bot) ───────────────────────────────────
+# ── MAC / name sanitization (real add_known_mac from the telegram bot) ────
+# add_known_mac is the only place production code sanitizes a MAC/name pair
+# before writing it to disk (`tr -cd 'a-fA-F0-9:'` / `tr -cd 'a-zA-Z0-9 _.-'`
+# inline in trafficctl-telegram.sh). Drive it through the real function by
+# sourcing a neutered copy of the daemon (main() suppressed) rather than
+# re-typing the same tr expression here.
 
-sanitize_mac() { printf '%s' "$1" | tr -cd 'a-fA-F0-9:'; }
-sanitize_name() { printf '%s' "$1" | tr -cd 'a-zA-Z0-9 _.-'; }
+mkdir -p "$TMPDIR/lib"
+cat > "$TMPDIR/lib/functions.sh" <<'MOCK'
+config_load() { :; }
+config_get() { eval "$2=\"\${4:-}\""; }
+MOCK
 
-assert_eq "mac sanitize: normal" "aa:bb:cc:dd:ee:ff" "$(sanitize_mac 'aa:bb:cc:dd:ee:ff')"
-# Sanitize keeps hex + colon only — dangerous chars are stripped
-INJECTED_MAC=$(sanitize_mac 'aa:bb:cc:dd:ee:ff"; rm -rf /')
-assert_not_contains "mac sanitize: no semicolons" "$INJECTED_MAC" ";"
-assert_not_contains "mac sanitize: no quotes" "$INJECTED_MAC" '"'
-assert_not_contains "mac sanitize: no slash" "$INJECTED_MAC" "/"
-
-assert_eq "name sanitize: normal" "MyPhone" "$(sanitize_name 'MyPhone')"
-assert_eq "name sanitize: with spaces" "My Phone" "$(sanitize_name 'My Phone')"
-# Sanitize strips everything that's not [a-zA-Z0-9 _.-]
-INJECTED_NAME=$(sanitize_name 'evil"};$(rm -rf /);{"')
-assert_not_contains "name sanitize: no quotes" "$INJECTED_NAME" '"'
-assert_not_contains "name sanitize: no dollar" "$INJECTED_NAME" '$'
-assert_not_contains "name sanitize: no parens" "$INJECTED_NAME" '('
-assert_not_contains "name sanitize: no semicolons" "$INJECTED_NAME" ';'
-assert_not_contains "name sanitize: no braces" "$INJECTED_NAME" '{'
-
-# ── Callback data validation ───────────────────────────────────────────────
-
-validate_cb_ip() {
-    echo "$1" | grep -qE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$' && echo 0 || echo 1
+NEUTERED="$TMPDIR/telegram_neutered.sh"
+sed -e "s|\. /lib/functions\.sh|. $TMPDIR/lib/functions.sh|" \
+    -e '$s|^main$|:|' \
+    "$BIN/trafficctl-telegram.sh" > "$NEUTERED"
+tail -1 "$NEUTERED" | grep -q '^main$' && {
+    echo "FAIL: harness bug — could not neuter main(), refusing to run"
+    exit 1
 }
 
-validate_cb_param() {
-    case "$1" in *[!0-9]*) echo 1 ;; *) echo 0 ;; esac
+KNOWN_TEST="$TMPDIR/known.json"
+echo '[]' > "$KNOWN_TEST"
+
+sh -c "
+. '$NEUTERED'
+KNOWN_FILE='$KNOWN_TEST'
+add_known_mac 'aa:bb:cc:dd:ee:ff' 'MyPhone' '192.168.0.1'
+"
+STORED=$(cat "$KNOWN_TEST")
+assert_contains "mac/name sanitize: normal mac preserved" "$STORED" "aa:bb:cc:dd:ee:ff"
+assert_contains "mac/name sanitize: normal name preserved" "$STORED" "MyPhone"
+
+: > "$KNOWN_TEST"; echo '[]' > "$KNOWN_TEST"
+sh -c "
+. '$NEUTERED'
+KNOWN_FILE='$KNOWN_TEST'
+add_known_mac 'aa:bb:cc:dd:ee:ff\"; rm -rf /' 'evil\"};\$(rm -rf /);{\"' '192.168.0.1'
+"
+STORED=$(cat "$KNOWN_TEST")
+# The stored record is itself JSON, so a naive `sed 's/.*"mac":"\([^"]*\)".*'`
+# field-extraction would stop at the FIRST embedded quote in an unsanitized
+# value and silently "pass" no matter what — which is exactly the injected
+# payload here (the mac/name sanitizers strip quotes too, along with
+# semicolons/parens/dollar-signs, so a correctly sanitized entry never
+# contains those characters anywhere; an unsanitized one does). So check the
+# raw stored document for characters that are never legitimate in this file's
+# structure (only "{}":,. and alphanumerics ever appear in a clean entry).
+assert_not_contains "sanitize: no semicolon reaches disk" "$STORED" ";"
+assert_not_contains "sanitize: no dollar-paren reaches disk" "$STORED" '$('
+assert_not_contains "sanitize: no closing-paren reaches disk" "$STORED" ")"
+assert_not_contains "sanitize: no raw slash (from injected path) reaches disk" "$STORED" "/"
+
+: > "$KNOWN_TEST"; echo '[]' > "$KNOWN_TEST"
+sh -c "
+. '$NEUTERED'
+KNOWN_FILE='$KNOWN_TEST'
+add_known_mac 'aa:bb:cc:dd:ee:ff' 'My Phone' '192.168.0.1'
+"
+STORED=$(cat "$KNOWN_TEST")
+assert_contains "name sanitize: spaces preserved (allowed charset)" "$STORED" "My Phone"
+
+# ── Callback data validation (real handle_callback in the telegram bot) ────
+# Route through an unknown verb ("noop") so validation runs but no real
+# sub-script is dispatched to.
+
+cat > "$MOCKBIN/curl" <<MOCK
+#!/bin/sh
+echo "\$*" >> "$TMPDIR/curl.log"
+cat > /dev/null
+echo '{"ok":true}'
+MOCK
+chmod +x "$MOCKBIN/curl"
+
+# handle_callback dispatches unknown sub-scripts by path when the verb
+# matches a real action (block/unblock/etc); "noop"/"limit" never reach that,
+# so no stub scripts are needed for these validation-only assertions.
+cb_test() {
+    : > "$TMPDIR/curl.log"
+    PATH="$MOCKBIN:$PATH" sh -c "
+    . '$NEUTERED'
+    handle_callback 'cbid1' '$1' 'msg1'
+    " >/dev/null 2>&1
+    cat "$TMPDIR/curl.log"
 }
 
-assert_eq "cb ip: valid" "0" "$(validate_cb_ip '192.168.0.1')"
-assert_eq "cb ip: injection semicolon" "1" "$(validate_cb_ip '192.168.0.1;whoami')"
-assert_eq "cb ip: injection pipe" "1" "$(validate_cb_ip '1.1.1.1|cat')"
-assert_eq "cb ip: letters" "1" "$(validate_cb_ip 'abc.def.ghi.jkl')"
+OUT=$(cb_test 'act:noop:192.168.0.1')
+assert_not_contains "cb ip: valid" "$OUT" "invalid IP"
 
-assert_eq "cb param: valid rate" "0" "$(validate_cb_param '10000')"
-assert_eq "cb param: injection" "1" "$(validate_cb_param '10000;rm')"
-assert_eq "cb param: letters" "1" "$(validate_cb_param 'abc')"
-assert_eq "cb param: empty is valid" "0" "$(validate_cb_param '')"
+OUT=$(cb_test 'act:noop:192.168.0.1;whoami')
+assert_contains "cb ip: injection semicolon" "$OUT" "invalid IP"
 
-# ── JSON escaping ──────────────────────────────────────────────────────────
+OUT=$(cb_test 'act:noop:1.1.1.1|cat')
+assert_contains "cb ip: injection pipe" "$OUT" "invalid IP"
 
-json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g;s/"/\\"/g'; }
+OUT=$(cb_test 'act:noop:abc.def.ghi.jkl')
+assert_contains "cb ip: letters" "$OUT" "invalid IP"
 
-ESCAPED=$(json_escape 'he said "hi"')
+OUT=$(cb_test 'act:limit:192.168.0.1:10000')
+assert_not_contains "cb param: valid rate" "$OUT" "invalid param"
+
+OUT=$(cb_test 'act:limit:192.168.0.1:10000;rm')
+assert_contains "cb param: injection" "$OUT" "invalid param"
+
+OUT=$(cb_test 'act:limit:192.168.0.1:abc')
+assert_contains "cb param: letters" "$OUT" "invalid param"
+
+# ── JSON escaping (real tg_json_escape) ─────────────────────────────────────
+
+ESCAPED=$(sh -c ". '$NEUTERED'; tg_json_escape 'he said \"hi\"'")
 assert_not_contains "json escape: no raw quotes" "$ESCAPED" '"hi"'
-assert_eq "json escape: normal preserved" "hello world" "$(json_escape 'hello world')"
+assert_contains "json escape: quote is escaped" "$ESCAPED" '\"hi\"'
 
-# ── No secrets in output ───────────────────────────────────────────────────
+ESCAPED=$(sh -c ". '$NEUTERED'; tg_json_escape 'hello world'")
+assert_eq "json escape: normal preserved" "hello world" "$ESCAPED"
 
-SCRIPTS_DIR="$(dirname "$0")/../luci-app-trafficctl/root/usr/local/bin"
-assert_not_contains "no hardcoded tokens in scripts" "$(cat "$SCRIPTS_DIR"/trafficctl-telegram.sh)" "BOT_TOKEN_VALUE"
-assert_not_contains "no test credentials" "$(cat "$SCRIPTS_DIR"/trafficctl-telegram.sh)" "123456:ABC"
+# ── No secrets in output ────────────────────────────────────────────────────
 
-# ── Results ────────────────────────────────────────────────────────────────
+assert_not_contains "no hardcoded tokens in scripts" "$(cat "$BIN"/trafficctl-telegram.sh)" "BOT_TOKEN_VALUE"
+assert_not_contains "no test credentials" "$(cat "$BIN"/trafficctl-telegram.sh)" "123456:ABC"
+
+# The bot token must reach curl via stdin (a --config file), never argv,
+# because argv is world-readable via ps/proc. Verify against the real tg_api.
+: > "$TMPDIR/curl.log"
+CURL_ARGV_LOG="$TMPDIR/curl_argv.log"
+cat > "$MOCKBIN/curl" <<MOCK
+#!/bin/sh
+echo "\$*" >> "$CURL_ARGV_LOG"
+cat >> "$TMPDIR/curl.log"
+echo '{"ok":true}'
+MOCK
+chmod +x "$MOCKBIN/curl"
+
+PATH="$MOCKBIN:$PATH" sh -c "
+. '$NEUTERED'
+TG_TOKEN='123456:SUPERSECRETTOKEN'
+TG_CHAT_ID='999'
+tg_send 'hello'
+" >/dev/null 2>&1
+
+assert_not_contains "bot token never appears in curl argv" "$(cat "$CURL_ARGV_LOG")" "SUPERSECRETTOKEN"
+assert_contains "bot token reaches curl via stdin instead" "$(cat "$TMPDIR/curl.log")" "SUPERSECRETTOKEN"
+
+# ── Results ─────────────────────────────────────────────────────────────────
 
 printf "\n%d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
