@@ -147,8 +147,13 @@ tctl_block_remove() {
     local ip="$1" comment="$2"
 
     if [ "$TCTL_FW" = "nft" ]; then
+        # Match the quoted comment in full: comments end in the address, so a
+        # substring match on 192.168.1.1 also deletes the rule for 192.168.1.10.
         for h in $(nft -a list chain inet fw4 forward 2>/dev/null \
-                   | grep "$comment" | grep -o 'handle [0-9]*' | awk '{print $2}'); do
+                   | awk -v cmt="$comment" 'index($0, "\"" cmt "\"") {
+                          for (i = 1; i < NF; i++)
+                              if ($i == "handle") { print $(i+1); break }
+                      }'); do
             nft delete rule inet fw4 forward handle "$h"
         done
     else
@@ -161,7 +166,15 @@ tctl_is_blocked() {
     if [ "$TCTL_FW" = "nft" ]; then
         nft list chain inet fw4 forward 2>/dev/null | grep -q "ip saddr $ip .*drop"
     else
-        iptables -L FORWARD -n 2>/dev/null | grep -q "DROP.*$ip"
+        # The source renders as its own column, "ip" or "ip/32"; an unanchored
+        # match would report 192.168.1.10's rule as belonging to 192.168.1.1.
+        iptables -L FORWARD -n 2>/dev/null | awk -v ip="$ip" '
+            $1 == "DROP" {
+                src = $4
+                sub(/\/32$/, "", src)
+                if (src == ip) { found = 1; exit }
+            }
+            END { exit(found ? 0 : 1) }'
     fi
 }
 
@@ -380,6 +393,19 @@ tctl_target_slug() {
     printf '%s' "$1" | tr './' '__'
 }
 
+# Rule comments identify the target, not the caller. They used to be built from
+# a caller-supplied label, so a block placed from LuCI (label "block_<ip>") and
+# the same block seen from the Telegram bot (label "tg") produced different
+# comments — removal grepped for the wrong one, found nothing, and still
+# reported success.
+tctl_block_comment() {
+    echo "tctl_block_$(tctl_target_slug "$1")"
+}
+
+tctl_ratelimit_comment() {
+    echo "rl_ratelimit_$(tctl_target_slug "$1")"
+}
+
 tctl_validate_ip() {
     echo "$1" | grep -qE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$' || return 1
     local IFS='.'
@@ -523,6 +549,51 @@ tctl_log_category_enabled() {
     [ "$(uci -q get "trafficctl.logging.log_${cat}" 2>/dev/null)" != "0" ]
 }
 
+TCTL_LOG_DEFAULT="/tmp/trafficctl/activity.log"
+
+# The log path is writable through the LuCI write ACL and is used both as an
+# append target and as a tail/rewrite target, so an unconstrained value is an
+# arbitrary root read and truncate. Only dedicated log locations are accepted.
+tctl_validate_log_file() {
+    local f="$1"
+    case "$f" in
+        /tmp/trafficctl/*|/var/log/*) ;;
+        *) return 1 ;;
+    esac
+    case "$f" in
+        */../*|*/..|*/) return 1 ;;
+    esac
+    # Path characters are restricted rather than blacklisted so no shell or glob
+    # metacharacter can reach the redirect, tail or mv below.
+    case "$f" in
+        *[!A-Za-z0-9._/-]*) return 1 ;;
+    esac
+    return 0
+}
+
+tctl_log_file() {
+    local f
+    f=$(uci -q get trafficctl.logging.log_file 2>/dev/null)
+    if [ -n "$f" ] && tctl_validate_log_file "$f"; then
+        echo "$f"
+    else
+        echo "$TCTL_LOG_DEFAULT"
+    fi
+}
+
+# Rotation keeps 3/5 of the cap, so a cap below 5 would round to zero lines and
+# empty the file on the next write.
+tctl_log_max_lines() {
+    local n
+    n=$(uci -q get trafficctl.logging.max_lines 2>/dev/null)
+    case "$n" in
+        ''|*[!0-9]*) echo 500; return 0 ;;
+    esac
+    [ "$n" -ge 20 ] 2>/dev/null || { echo 20; return 0; }
+    [ "$n" -le 100000 ] 2>/dev/null || { echo 100000; return 0; }
+    echo "$n"
+}
+
 tctl_log() {
     local action="$1" target="$2" detail="$3" via="${4:-cli}" src="${5:-local}"
     tctl_log_enabled || return 0
@@ -541,10 +612,8 @@ tctl_log() {
     local ts user log_file max_lines
     ts=$(date '+%Y-%m-%d %H:%M:%S')
     user="${TCTL_USER:-$(id -un 2>/dev/null || echo unknown)}"
-    log_file=$(uci -q get trafficctl.logging.log_file 2>/dev/null)
-    log_file="${log_file:-/tmp/trafficctl/activity.log}"
-    max_lines=$(uci -q get trafficctl.logging.max_lines 2>/dev/null)
-    max_lines="${max_lines:-500}"
+    log_file=$(tctl_log_file)
+    max_lines=$(tctl_log_max_lines)
 
     local entry="[$TCTL_LOG_TAG] $ts src=$src user=$user via=$via action=$action target=$target${detail:+ detail=$detail}"
 

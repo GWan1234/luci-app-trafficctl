@@ -298,21 +298,38 @@ lookup_mac() {
     echo "$mac" | tr 'A-F' 'a-f'
 }
 
+# Addresses are matched as whole fields throughout: an unanchored match reports
+# 192.168.1.10's block as belonging to 192.168.1.1.
 lookup_blocked() {
     local ip="$1"
     if [ "$TCTL_FW" = "nft" ]; then
         echo "$FWD_DUMP" | grep -q "ip saddr $ip .*drop" && echo 1 || echo 0
     else
-        echo "$FWD_DUMP" | grep "$ip" | grep -q "DROP" && echo 1 || echo 0
+        echo "$FWD_DUMP" | awk -v ip="$ip" '
+            $3 == "DROP" {
+                for (i = 4; i <= NF; i++) {
+                    src = $i
+                    sub(/\/32$/, "", src)
+                    if (src == ip) { found = 1; exit }
+                }
+            }
+            END { print (found ? 1 : 0) }'
     fi
 }
 
 lookup_block_bytes() {
     local ip="$1" b
     if [ "$TCTL_FW" = "nft" ]; then
-        b=$(echo "$FWD_DUMP" | grep "ip saddr $ip" | grep -oE 'bytes [0-9]+' | awk '{print $2}' | head -1)
+        b=$(echo "$FWD_DUMP" | grep "ip saddr $ip " | grep -oE 'bytes [0-9]+' | awk '{print $2}' | head -1)
     else
-        b=$(echo "$FWD_DUMP" | grep "DROP" | grep "$ip" | awk '{print $2}' | head -1)
+        b=$(echo "$FWD_DUMP" | awk -v ip="$ip" '
+            $3 == "DROP" {
+                for (i = 4; i <= NF; i++) {
+                    src = $i
+                    sub(/\/32$/, "", src)
+                    if (src == ip) { print $2; exit }
+                }
+            }' | head -1)
     fi
     echo "${b:-0}"
 }
