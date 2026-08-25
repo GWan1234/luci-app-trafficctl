@@ -62,12 +62,15 @@ validate_config() {
 
 # ── telegram API ────────────────────────────────────────────────────────────
 
+# The URL carries the bot token, so it is fed through a curl config file on stdin
+# instead of argv — a command line is world-readable via ps and /proc.
 tg_api() {
 	local method="$1" body="$2"
-	curl -s -m 30 -X POST \
-		"https://api.telegram.org/bot${TG_TOKEN}/${method}" \
-		-H "Content-Type: application/json" \
-		-d "$body" 2>/dev/null
+	printf 'url = "https://api.telegram.org/bot%s/%s"\n' "$TG_TOKEN" "$method" | \
+		curl -s -m 30 -X POST \
+			-H "Content-Type: application/json" \
+			-d "$body" \
+			--config - 2>/dev/null
 }
 
 # Escape a string for embedding in a JSON body: backslashes, quotes, tabs,
