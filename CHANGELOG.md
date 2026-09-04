@@ -70,6 +70,13 @@ recorded under Unreleased above. The full contents of the release follow.
 
 ## [1.13.1] - 2026-08-24
 
+### Bug Fixes
+- split speed into separate sortable DL and UL columns ([ecea06b](https://github.com/YusDyr/luci-app-trafficctl/commit/ecea06bc89420a457a56ad75960ab227c6032887))
+  After #27 merged, upload speed was shown twice: the DL Speed cell rendered a
+  combined "↓ x / ↑ y" pair, and the separate UL Speed column added in #34
+  rendered it again. Beyond the duplication, packing both into one cell means
+  neither direction can be sorted on its own — the column sorts by _speed only.
+
 **Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.13.0...v1.13.1
 
 ---
@@ -231,6 +238,97 @@ Thanks to [@adeelahmad](https://github.com/adeelahmad) for this contribution.
 
 ---
 
+## [1.6.5] - 2026-05-28
+
+### Bug Fixes
+- move IPK preservation into build step itself ([ee93b8b](https://github.com/YusDyr/luci-app-trafficctl/commit/ee93b8b0d113ef9c7772f3fd261b78e7667511e7))
+  Separate step failed despite build-ipk succeeding (possible workspace
+  isolation between steps). Move cp to /tmp/ into the same run block.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.6.4...v1.6.5
+
+---
+
+## [1.6.4] - 2026-05-28
+
+> **Broken artifacts.** This release had install issues (missing `status.css`, invalid APK format, or a signing-key mismatch) and its assets have been deleted from GitHub. Use v1.6.5 or later. The entry is kept for history.
+
+### Bug Fixes
+- preserve IPK files across SDK Docker step ([fdfbc55](https://github.com/YusDyr/luci-app-trafficctl/commit/fdfbc55bb4d5fcdfde17c103675222da93fbe504))
+  SDK action may wipe the workspace dist/ directory. Save IPK files
+  to /tmp/ before SDK runs, restore them when collecting APK.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.6.3...v1.6.4
+
+---
+
+## [1.6.3] - 2026-05-28
+
+> **Broken artifacts.** This release had install issues (missing `status.css`, invalid APK format, or a signing-key mismatch) and its assets have been deleted from GitHub. Use v1.6.5 or later. The entry is kept for history.
+
+### Bug Fixes
+- mkdir dist before collecting APK in manual-release ([4853bac](https://github.com/YusDyr/luci-app-trafficctl/commit/4853bac041969a51c662501e462bb189a4b4fc98))
+  SDK action runs in Docker and may remove the dist/ directory
+  created by the earlier ipk build step. Ensure it exists.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.6.2...v1.6.3
+
+---
+
+## [1.6.2] - 2026-05-28
+
+> **Broken artifacts.** This release had install issues (missing `status.css`, invalid APK format, or a signing-key mismatch) and its assets have been deleted from GitHub. Use v1.6.5 or later. The entry is kept for history.
+
+### Bug Fixes
+- remove duplicate luci EXTRA_FEEDS from manual-release ([0b2653b](https://github.com/YusDyr/luci-app-trafficctl/commit/0b2653bdbe6b2f250355272e8ebf3b44b1198d30))
+  SDK 25.12.4 already includes luci in its default feeds.conf.
+  Adding it again via EXTRA_FEEDS causes "Duplicate feed name 'luci'"
+  error and exits with code 25 during feeds update.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.6.1...v1.6.2
+
+---
+
+## [1.6.1] - 2026-05-28
+
+> **Broken artifacts.** This release had install issues (missing `status.css`, invalid APK format, or a signing-key mismatch) and its assets have been deleted from GitHub. Use v1.6.5 or later. The entry is kept for history.
+
+### Bug Fixes
+- remove NO_DEFAULT_FEEDS from manual-release on main ([4212fdb](https://github.com/YusDyr/luci-app-trafficctl/commit/4212fdbf5077f4a00dfd39aa6a655699224ff69c))
+  workflow_dispatch always uses the YAML from the default branch,
+  regardless of the ref input. NO_DEFAULT_FEEDS: 1 excluded the
+  packages feed (lua.h headers), breaking SDK builds of luci deps.
+
+### Other
+- V=sc verbose for SDK in manual-release + asset hardlinks ([d96aa51](https://github.com/YusDyr/luci-app-trafficctl/commit/d96aa519c517d0591f48c85ebaa5c56316600e8c))
+  Brings the verbose-SDK and generic-named asset hardlink logic from
+  fix/install-and-feed-testing-v2 to main so workflow_dispatch can run
+  with the improvements while pull_request workflows are stuck.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.6.0...v1.6.1
+
+---
+
+## [1.6.0] - 2026-05-28
+
+> **Tagged but never released.** The v1.6.0 tag exists in git, but no GitHub Release was ever published for it and no artifacts were built.
+
+### Features
+- add manual-release workflow for rebuilding existing releases ([172fbc1](https://github.com/YusDyr/luci-app-trafficctl/commit/172fbc1cbb6d6167bc251b01ece9b6a759bfc938))
+  Cherry-picked early from #8 so we can rebuild v1.5.0's broken
+  artifacts without waiting for the full PR to merge — workflow_dispatch
+  requires the workflow file to exist on the default branch.
+
+### Other
+- remove generic-named asset symlinks from releases ([69924c4](https://github.com/YusDyr/luci-app-trafficctl/commit/69924c4dc610cbe54ad89488edad7998e189d076))
+  Only publish versioned filenames (e.g. _1.5.0-1_all.ipk).
+  GitHub's /releases/latest/download/ already resolves the latest
+  release, making _latest_ and unversioned copies redundant.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.5.0...v1.6.0
+
+---
+
 ## [1.5.0] — 2026-05-27
 
 ### Features
@@ -272,6 +370,23 @@ Thanks to [@adeelahmad](https://github.com/adeelahmad) for this contribution.
 - **Full compatibility matrix** — 52 combinations spanning OpenWrt 21.02 / 22.03 / 23.05 / 24.10.1 / 24.10.6 / 25.12.0 / 25.12.4 / snapshot × x86-64 / x86-generic / armsr / arm_a9 / arm_a15 / armvirt32 / mips_24kc / aarch64_cortex-a53.
 - Releases are now produced only by `feat:` / `fix:` / `perf:` commits — `ci:`, `refactor:`, `docs:` no longer trigger a version bump.
 - APK builds via `openwrt/gh-action-sdk` instead of a hand-rolled apk-tools wrapper.
+
+---
+
+## [1.3.1] - 2026-05-26
+
+> **Broken artifacts.** This release had install issues (missing `status.css`, invalid APK format, or a signing-key mismatch) and its assets have been deleted from GitHub. Use v1.6.5 or later. The entry is kept for history.
+
+### Other
+- replace release-please with auto-release on every merge ([52ffcf4](https://github.com/YusDyr/luci-app-trafficctl/commit/52ffcf4e0d190f550e31423b5cef21751c767183))
+  - Remove release-please workflow, config, and manifest
+  - Add auto-release.yml: on push to main, detect version bump from
+  conventional commits, create tag + GitHub Release + build IPK
+  - No manual steps needed — merge feat:/fix: to main = instant release
+  - Keep workflow_dispatch as manual fallback
+  - Update CLAUDE.md release documentation
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.3.0...v1.3.1
 
 ---
 
