@@ -141,10 +141,19 @@ jobs:
                   # Strip "type(scope): " prefix.
                   sub(type_re " *", "", subj)
                   # Auto-link bare "#NN" refs to PR/issue.
-                  while (match(subj, /#[0-9]+/)) {
-                    n = substr(subj, RSTART+1, RLENGTH-1)
-                    subj = substr(subj,1,RSTART-1) "[#" n "](https://github.com/" repo "/issues/" n ")" substr(subj, RSTART+RLENGTH)
+                  # Consume the subject left to right, appending to `out`, so a
+                  # replacement is never rescanned. Rewriting `subj` in place and
+                  # re-matching from the start loops forever: the substitution
+                  # itself contains "#NN" (inside "[#NN](...)"), so match() keeps
+                  # finding it and the string grows without bound. Any commit
+                  # subject carrying an issue ref would hang the release job.
+                  out = ""; rest = subj
+                  while (match(rest, /#[0-9]+/)) {
+                    n = substr(rest, RSTART+1, RLENGTH-1)
+                    out = out substr(rest,1,RSTART-1) "[#" n "](https://github.com/" repo "/issues/" n ")"
+                    rest = substr(rest, RSTART+RLENGTH)
                   }
+                  subj = out rest
                   printf "- %s ([%s](https://github.com/%s/commit/%s))\n", subj, short, repo, sha
 
                   # Emit body lines, stopping at first blank line (lead
