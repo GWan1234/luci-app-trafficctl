@@ -253,21 +253,22 @@ The "stable URL" links below always download from the latest release — the fil
 2. In LuCI: **System → Software → Upload Package...**
 3. Select the downloaded file and click **OK**
 
-**Option B — SSH (with signature verification):**
-
-```sh
-# Add the signing key (one-time):
-wget -O /etc/apk/keys/luci-app-trafficctl.pub https://raw.githubusercontent.com/YusDyr/luci-app-trafficctl/main/keys/apk-signing.pub
-# Install:
-cd /tmp && wget -O luci-app-trafficctl.apk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.apk && apk add luci-app-trafficctl.apk
-# If you get "modified conffile" on upgrade, add `--force-maintainer` to override
-```
-
-**Option C — SSH (without key, quick install):**
+**Option B — SSH (recommended):**
 
 ```sh
 cd /tmp && wget -O luci-app-trafficctl.apk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.apk && apk add --allow-untrusted luci-app-trafficctl.apk
+# If you get "modified conffile" on upgrade, add `--force-maintainer` to override
 ```
+
+> **Why `--allow-untrusted`?** OpenWrt does not sign individual `.apk` files —
+> package signatures apply to a repository *index*, not to a standalone file
+> downloaded from a GitHub release. Upstream removed per-package apk signing
+> outright in October 2025. `--allow-untrusted` is therefore the normal way to
+> install a single package file, not a security workaround being suggested
+> lightly. If you want to pin what you install, download the version-stamped
+> asset (`luci-app-trafficctl_X.Y.Z-r1_noarch.apk`) rather than the floating
+> `latest` URL, so the file cannot change under you between download and
+> install.
 
 ### OpenWrt 21.02 — 24.10 (.ipk)
 
