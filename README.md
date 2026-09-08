@@ -259,14 +259,14 @@ The "stable URL" links below always download from the latest release — the fil
 # Add the signing key (one-time):
 wget -O /etc/apk/keys/luci-app-trafficctl.pub https://raw.githubusercontent.com/YusDyr/luci-app-trafficctl/main/keys/apk-signing.pub
 # Install:
-cd /tmp && wget https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.apk && apk add luci-app-trafficctl.apk
+cd /tmp && wget -O luci-app-trafficctl.apk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.apk && apk add luci-app-trafficctl.apk
 # If you get "modified conffile" on upgrade, add `--force-maintainer` to override
 ```
 
 **Option C — SSH (without key, quick install):**
 
 ```sh
-cd /tmp && wget https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.apk && apk add --allow-untrusted luci-app-trafficctl.apk
+cd /tmp && wget -O luci-app-trafficctl.apk https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.apk && apk add --allow-untrusted luci-app-trafficctl.apk
 ```
 
 ### OpenWrt 21.02 — 24.10 (.ipk)
@@ -286,6 +286,39 @@ opkg install https://github.com/YusDyr/luci-app-trafficctl/releases/latest/downl
 
 ```sh
 ssh root@router 'opkg install https://github.com/YusDyr/luci-app-trafficctl/releases/latest/download/luci-app-trafficctl.ipk'
+```
+
+### Uninstalling
+
+```sh
+# OpenWrt 25.12+ (apk)
+apk del luci-app-trafficctl
+
+# OpenWrt 21.02 - 24.10 (opkg)
+opkg remove luci-app-trafficctl
+
+# either way, reload the LuCI backend afterwards
+/etc/init.d/rpcd restart
+```
+
+Removing the package deletes its scripts and the LuCI page but leaves
+`/etc/config/trafficctl` in place, so your settings survive a reinstall. Delete
+it yourself if you want a clean slate:
+
+```sh
+rm -f /etc/config/trafficctl
+```
+
+Any blocks, rate limits or shapers that were active are **not** persistent
+firewall/tc state — they disappear on the next reboot. To clear them
+immediately before removing the package, unblock/unlimit the affected devices
+from the dashboard first, or reboot the router after uninstalling.
+
+If you also enabled the Telegram bot, stop it before removing:
+
+```sh
+/etc/init.d/trafficctl-telegram stop
+/etc/init.d/trafficctl-telegram disable
 ```
 
 ### From source (OpenWrt build system)
