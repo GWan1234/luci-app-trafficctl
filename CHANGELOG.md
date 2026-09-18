@@ -4,6 +4,19 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.13.5] - 2026-09-18
+
+### Bug Fixes
+- nft byte counters reported download and upload swapped ([#54](https://github.com/YusDyr/luci-app-trafficctl/issues/54)) ([2a2aa86](https://github.com/YusDyr/luci-app-trafficctl/commit/2a2aa8618b7bb28a4fab5e4381b3b59abdb33d98))
+  The nft counter backend keyed bytes_in by `ip saddr` and bytes_out by
+  `ip daddr`. In the forward hook, packets whose source is a LAN device are
+  that device's UPLOAD — so bytes_in accumulated upload and bytes_out
+  accumulated download, the exact opposite of every consumer:
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.13.4...v1.13.5
+
+---
+
 ## [1.13.4] - 2026-09-09
 
 ### Bug Fixes
