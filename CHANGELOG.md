@@ -4,6 +4,19 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.13.6] - 2026-09-18
+
+### Bug Fixes
+- byte counters truncated at 2 GiB by awk's 32-bit %d ([#56](https://github.com/YusDyr/luci-app-trafficctl/issues/56)) ([2a21938](https://github.com/YusDyr/luci-app-trafficctl/commit/2a219386ede2f733b1c4a8a5e156e268c6424c5c))
+  busybox awk formats %d through a 32-bit int, and what it does with a larger
+  value is undefined: OpenWrt's build saturates at 2147483647, Alpine's wraps to
+  -2147483648. Either way a device past 2 GiB stops reporting real numbers, and
+  on the saturating builds it does so silently -- the counter just stops moving.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.13.5...v1.13.6
+
+---
+
 ## [1.13.5] - 2026-09-18
 
 ### Bug Fixes
