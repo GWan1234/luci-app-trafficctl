@@ -4,6 +4,18 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.14.0] - 2026-09-18
+
+### Features
+- optional default limit for devices seen for the first time ([#57](https://github.com/YusDyr/luci-app-trafficctl/issues/57)) ([12517f7](https://github.com/YusDyr/luci-app-trafficctl/commit/12517f70770ebba15d462896095847e5515d191c))
+  Closes the second half of #28. A new Settings section ("New Device
+  Defaults") applies a rate limit or a shape the first time a device
+  appears on the network. Off by default, and a rate of 0 makes it inert.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.13.6...v1.14.0
+
+---
+
 ## [1.13.6] - 2026-09-18
 
 ### Bug Fixes
