@@ -258,6 +258,51 @@ function fmtBytes(b) {
 	if (b < 1073741824) return (b/1048576).toFixed(2) + ' MB';
 	return (b/1073741824).toFixed(2) + ' GB';
 }
+// The Bytes / TCP / UDP columns show a LIFETIME total accumulated on the
+// router by trafficctl-totals.sh, not the live conntrack sums they used to
+// show. conntrack only accounts for flows that still exist, so the old numbers
+// collapsed to absurdities like "2 bytes" the moment a device went briefly
+// idle — that is issue #26.
+//
+// A negative total means the router cannot answer, which is not the same as
+// zero: under flow offload the byte source becomes nftables counter maps keyed
+// by address alone, which cannot split TCP from UDP. Printing 0 there would be
+// a confident wrong answer, i.e. the very failure this change removes.
+function renderTotalCell(cell, total, liveVal, since, pending, degraded) {
+	while (cell.firstChild) {
+		cell.removeChild(cell.firstChild);
+	}
+	if (pending) {
+		cell.appendChild(E('span', { 'class': 'tc-c-faint' }, '…'));
+		cell.title = _('Waiting for the first byte sample.');
+		return;
+	}
+	// The router told us these counters are frozen for offloaded flows, so the
+	// total is a lower bound that stalls while traffic continues. Refused
+	// rather than shown: a plausible number that quietly stops growing reads as
+	// stale statistics, not as a broken counter, and is far harder to notice
+	// than the implausibly small live values that prompted issue #26.
+	if (degraded) {
+		cell.appendChild(E('span', { 'class': 'tc-c-err tc-fw-bold' }, '⚠'));
+		cell.title = _('Not counted: flow offload is active and this router cannot provide the nftables counters trafficctl uses in that mode, so the kernel byte counters stop updating for offloaded connections. Any total here would be far too low. See Settings → Flow Offload.');
+		return;
+	}
+	if (total == null || total < 0) {
+		cell.appendChild(E('span', { 'class': 'tc-c-faint' }, '—'));
+		cell.title = _('Not measurable while flow offload is active: in that mode the router counts bytes per address only, so traffic cannot be split by protocol. See Settings → Flow Offload.');
+		return;
+	}
+	cell.appendChild(document.createTextNode(fmtBytes(total)));
+	var tip = since
+		? (_('Accumulated since') + ' ' + new Date(since * 1000).toLocaleString())
+		: _('Accumulated on the router');
+	tip += '\n' + _('Resets when the router reboots.');
+	if (liveVal != null && liveVal >= 0) {
+		tip += '\n' + _('Currently tracked connections hold') + ' ' + fmtBytes(liveVal);
+	}
+	cell.title = tip;
+}
+
 function fmtSpeed(bps) {
 	if (!bps || bps < 1) return '—';
 	var bits = bps * 8;
@@ -1087,9 +1132,9 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		{ key:'_speed_up',        label: _('UL Speed'), num:true,  tip: _('Current upload speed (bytes/sec from device to router)') },
 		{ key:'_spark',           label: '',            num:false, tip: _('Speed graph. Window = avg time. Orange dashed line = speed limit') },
 		{ key:'conns',            label: _('Conns'),    num:true,  tip: _('Active connections in conntrack') },
-		{ key:'total',            label: _('Bytes'),    num:true,  tip: _('Total bytes transferred (conntrack)'), hide:true },
-		{ key:'tcp',              label:'TCP',          num:true,  tip: _('TCP bytes transferred'), hide:true },
-		{ key:'udp',              label:'UDP',          num:true,  tip: _('UDP bytes transferred'), hide:true },
+		{ key:'total',            label: _('Bytes'),    num:true,  tip: _('Total bytes transferred (download + upload), accumulated on the router. Resets on reboot; hover a cell for the start time'), hide:true },
+		{ key:'tcp',              label:'TCP',          num:true,  tip: _('TCP bytes transferred, accumulated on the router. Not measurable while flow offload is active'), hide:true },
+		{ key:'udp',              label:'UDP',          num:true,  tip: _('UDP bytes transferred, accumulated on the router. Not measurable while flow offload is active'), hide:true },
 		{ key:'blocked',          label: _('Inet'),     num:false, tip: _('Internet access status (paused = traffic blocked)') },
 		{ key:'conn_type',        label: _('Link'),     num:false, tip: _('Connection interface (WiFi band, LAN port or routed)') },
 		{ key:'app',              label: _('App'),      num:false, tip: _('Top application by traffic (needs the netifyd DPI agent)') },
@@ -1204,9 +1249,14 @@ function buildSummaryTable(rows, sortCol, sortDir, onSort, onSelect, speedMap, d
 		if (sparkSvg) cellMap._spark.appendChild(sparkSvg);
 
 		cellMap.conns = E('div', { 'class': 'td tc-right tc-fw-bold' }, String(r.conns||0));
-		cellMap.total = E('div', { 'class': 'td tc-right tc-mono tc-sm' }, fmtBytes(r.total||0));
-		cellMap.tcp   = E('div', { 'class': 'td tc-right tc-mono tc-sm tc-c-speed' }, fmtBytes(r.tcp||0));
-		cellMap.udp   = E('div', { 'class': 'td tc-right tc-mono tc-sm tc-c-warn' }, fmtBytes(r.udp||0));
+		// Filled from the byte poll rather than from this row, so the totals
+		// keep climbing between table rebuilds (see updateTotalCells).
+		cellMap.total = E('div', { 'class': 'td tc-right tc-mono tc-sm', 'data-total-ip': r.ip });
+		cellMap.tcp   = E('div', { 'class': 'td tc-right tc-mono tc-sm tc-c-speed', 'data-total-tcp-ip': r.ip });
+		cellMap.udp   = E('div', { 'class': 'td tc-right tc-mono tc-sm tc-c-warn', 'data-total-udp-ip': r.ip });
+		renderTotalCell(cellMap.total, r.total, r._live_total, r._total_since, r._total_pending, r._total_degraded);
+		renderTotalCell(cellMap.tcp,   r.tcp,   r._live_tcp,   r._total_since, r._total_pending, r._total_degraded);
+		renderTotalCell(cellMap.udp,   r.udp,   r._live_udp,   r._total_since, r._total_pending, r._total_degraded);
 
 		var inetBadge = r.blocked
 			? E('span', { 'class': 'tc-c-warn tc-fw-bold' }, '⏸ ' + _('blocked'))
@@ -1656,6 +1706,7 @@ return view.extend({
 	_speedHistory: {},
 	_fullHistory:  {},
 	_speedMap:     {},
+	_totalsMap:    {},
 	_dropMap:      {},
 	_shapeMap:     {},
 	_speedEwma:    {},
@@ -2463,6 +2514,14 @@ return view.extend({
 
 				var activeIps = {};
 				data.forEach(function(d) { activeIps[d.ip] = true; });
+				// The router keeps a device's total while it is idle, but the
+				// table only lists devices with live flows, so the browser-side
+				// copy is dropped with the rest of that device's state.
+				Object.keys(self._totalsMap).forEach(function(ip) {
+					if (!activeIps[ip]) {
+						delete self._totalsMap[ip];
+					}
+				});
 				Object.keys(self._speedHistory).forEach(function(ip) {
 					if (!activeIps[ip]) {
 						delete self._speedHistory[ip];
@@ -2547,12 +2606,33 @@ return view.extend({
 						bytes_out: d.bytes_out,
 						time: now
 					};
+
+					// Lifetime totals, accumulated by trafficctl-totals.sh.
+					// The proto fields arrive as -1 when the router cannot
+					// measure them (nft counters under flow offload), and that
+					// -1 is carried through untouched so the cell can say so
+					// instead of printing a zero nobody can explain.
+					var tcpT = (d.bytes_tcp_total == null) ? -1 : Number(d.bytes_tcp_total);
+					var udpT = (d.bytes_udp_total == null) ? -1 : Number(d.bytes_udp_total);
+					var liveTcp = (d.bytes_tcp == null) ? -1 : Number(d.bytes_tcp);
+					var liveUdp = (d.bytes_udp == null) ? -1 : Number(d.bytes_udp);
+					self._totalsMap[d.ip] = {
+						total: (Number(d.bytes_in_total) || 0) + (Number(d.bytes_out_total) || 0),
+						tcp: tcpT,
+						udp: udpT,
+						liveTotal: (Number(d.bytes_in) || 0) + (Number(d.bytes_out) || 0),
+						liveTcp: liveTcp,
+						liveUdp: liveUdp,
+						since: Number(d.total_since) || 0,
+						degraded: (d.degraded === true)
+					};
 				});
 				if (isAllMode()) {
 					if (self._sumCol === '_speed') {
 						runAll();
 					} else {
 						updateSpeedCells();
+						updateTotalCells();
 					}
 				}
 				updateDeviceGraph();
@@ -2746,8 +2826,56 @@ return view.extend({
 			renderSummary(self._lastRows);
 		}
 
+		// The summary's own total/tcp/udp fields are live conntrack sums, which
+		// collapse when flows expire (#26). Replace them with the lifetime
+		// totals the byte poll carries, keeping the live values for the cell
+		// tooltips. Done on the row objects rather than inside the table
+		// builder so that sorting by Bytes sorts by the number on screen.
+		function mergeTotals(rows) {
+			rows.forEach(function(r) {
+				var t = self._totalsMap[r.ip];
+				r._total_pending = !t;
+				if (!t) {
+					r.total = -1; r.tcp = -1; r.udp = -1;
+					r._total_degraded = false;
+					return;
+				}
+				r.total = t.total;
+				r.tcp = t.tcp;
+				r.udp = t.udp;
+				r._live_total = t.liveTotal;
+				r._live_tcp = t.liveTcp;
+				r._live_udp = t.liveUdp;
+				r._total_since = t.since;
+				r._total_degraded = t.degraded;
+			});
+		}
+
+		// Repaints the cumulative cells in place on every byte poll, so the
+		// totals climb at the poll interval instead of freezing until the next
+		// full table rebuild — a counter that only moves every few seconds
+		// looks broken in exactly the way this change is meant to fix.
+		function updateTotalCells() {
+			var specs = [
+				['data-total-ip',     'total',    'liveTotal'],
+				['data-total-tcp-ip', 'tcp',      'liveTcp'],
+				['data-total-udp-ip', 'udp',      'liveUdp']
+			];
+			Object.keys(self._totalsMap).forEach(function(ip) {
+				var t = self._totalsMap[ip];
+				specs.forEach(function(spec) {
+					var cell = connsDiv.querySelector('[' + spec[0] + '="' + ip + '"]');
+					if (!cell) {
+						return;
+					}
+					renderTotalCell(cell, t[spec[1]], t[spec[2]], t.since, false, t.degraded);
+				});
+			});
+		}
+
 		function renderSummary(rows) {
 			self._lastRows = rows;
+			mergeTotals(rows);
 			var limited = rows.filter(function(r){return (r.rate_limit_kbit||0) > 0;}).length;
 			var shaped  = rows.filter(function(r){return (r.shape_kbit||0) > 0;}).length;
 			var blocked = rows.filter(function(r){return r.blocked;}).length;
@@ -2790,6 +2918,20 @@ return view.extend({
 			if (activeFilter) {
 				statsDiv.appendChild(E('span', {'style':'margin-left:10px;cursor:pointer;color:var(--tc-muted);font-size:11px'}, '✕ ' + _('clear filter')));
 				statsDiv.lastChild.addEventListener('click', function() { self._tableFilter = null; renderSummary(rows); });
+			}
+
+			// Says once, in words, what the ⚠ in every byte cell means. The
+			// Flow Offload banner above already explains the mode, but on this
+			// hardware its reassurance — that trafficctl switches to nftables
+			// counters — is exactly what does not hold.
+			if (rows.some(function(r) { return r._total_degraded; })) {
+				statsDiv.appendChild(E('div', {
+					'style': 'margin-top:8px;padding:6px 8px;border-left:3px solid var(--tc-err);' +
+						'background:rgba(211,84,0,0.10);font-size:11px'
+				}, [
+					E('strong', {}, '⚠ ' + _('Byte totals unavailable on this router.')),
+					document.createTextNode(' ' + _('Flow offload is active and the kernel does not support the nftables counter maps trafficctl uses in that mode, so byte counters stop updating for offloaded connections. Speeds and totals would be far too low, so they are not shown. Disabling hardware offload in Settings → Flow Offload restores them.'))
+				]));
 			}
 
 			var filtered = applyTableFilter(rows);
