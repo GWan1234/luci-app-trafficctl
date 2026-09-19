@@ -4,6 +4,16 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.16.0] - 2026-09-19
+
+### Features
+- cumulative Bytes/TCP/UDP columns ([#26](https://github.com/YusDyr/luci-app-trafficctl/issues/26)) ([#60](https://github.com/YusDyr/luci-app-trafficctl/issues/60)) ([d26cc2c](https://github.com/YusDyr/luci-app-trafficctl/commit/d26cc2c637fad9e3d22f958a77efec4795c8a060))
+  The Bytes / TCP / UDP columns came straight from live conntrack, so they showed what CURRENTLY TRACKED flows had carried and collapsed the moment those flows aged out — the "2 bytes" in the report. They are now accumulated from deltas and persisted.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.15.0...v1.16.0
+
+---
+
 ## [1.15.0] - 2026-09-19
 
 ### Features
