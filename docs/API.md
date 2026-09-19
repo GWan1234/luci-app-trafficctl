@@ -31,6 +31,7 @@ method because it returns the contents of the configured log file.
 | `summary` | `trafficctl-summary.sh` | (none) | read |
 | `device` | `trafficctl-device.sh` | `ip`, `proto` | read |
 | `bytes` | `trafficctl-bytes.sh` | (none) | read |
+| `ifaces` | `trafficctl-ifaces.sh` | (none) | read |
 | `rdns` | `trafficctl-rdns.sh` | `ip` | read |
 | `ratelimit_stats` | `trafficctl-ratelimit-stats.sh` | (none) | read |
 | `shape_stats` | `trafficctl-shape-stats.sh` | (none) | read |
@@ -198,6 +199,77 @@ Returns raw byte counters from conntrack for bandwidth speed calculation.
 | `ip` | string | Device IP |
 | `bytes_in` | number | Total bytes received (download = conntrack reply direction) |
 | `bytes_out` | number | Total bytes sent (upload = conntrack original direction) |
+
+---
+
+### trafficctl-ifaces.sh
+
+Returns per-interface byte counters from `/proc/net/dev`, with a role map, for
+the global (bmon-style) overview. Rates are **not** computed here — the frontend
+diffs two samples the same way it does for `trafficctl-bytes.sh`, so the script
+is stateless and one sample is cheap.
+
+**Arguments:** None
+
+**Output:**
+
+```json
+[
+  {"dev":"eth1","label":"wan","role":"wan","tunnel":false,"primary":true,
+   "defroute":false,"enslaved":false,"up":true,"rx_bytes":5368709120,"tx_bytes":1234567890}
+]
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `dev` | string | Kernel device name |
+| `label` | string | uci/ubus interface name for that L3 device, or `dev` if it has none. Several interfaces routinely share one `l3_device` (`wan`, `wan6` and `wan6_alias0` on a dual-stack uplink); the plain name wins over a v6 or alias name, ties breaking on length then lexically, so the choice never depends on ubus dump order |
+| `role` | string | `wan`, `lan`, `vpn` or `other` |
+| `tunnel` | bool | Device name matches a tunnel pattern (WireGuard, AmneziaWG, GRE, …). `ppp*` is deliberately excluded — `pppoe-wan` is an uplink, not a VPN |
+| `primary` | bool | The one interface the overview graphs. Exactly one per response |
+| `defroute` | bool | Currently carries a v4 or v6 default route |
+| `enslaved` | bool | Device is a bridge port (`/sys/class/net/<dev>/master` exists). Its bytes are also counted by its bridge, so it is forced to role `other` and the UI collapses it |
+| `up` | bool | `operstate` is `up` or `unknown` |
+| `rx_bytes` | number | Bytes received **by the interface** since boot |
+| `tx_bytes` | number | Bytes sent **by the interface** since boot |
+
+`rx`/`tx` are interface-relative, not client-relative: on the WAN `rx` is your
+download, on `br-lan` `rx` is what the LAN sent upstream. Counters are 64-bit
+and routinely exceed 2 GiB, so they are formatted with `%.0f` — never `%d`,
+which busybox awk evaluates through a 32-bit int (see `tests/test_byte_overflow.sh`).
+
+**Role rules**, in priority order — the ordering is what keeps a full-tunnel
+router correct:
+
+0. A bridge port is `other`, whatever else it looks like. `lan2`, `lan3` and
+   `phy0-ap0` are ports of `br-lan` and report the very same bytes the bridge
+   reports; naming cannot tell them apart from top-level devices, so
+   enslavement is read from `/sys/class/net/<dev>/master`.
+1. A device trafficctl already monitors as a LAN (`tctl_get_lan_devices`) is `lan`.
+2. A tunnel-named device is `vpn`, **even when it holds the default route**.
+   On a WireGuard/AmneziaWG full-tunnel setup the default route is via `awg0`
+   while the physical uplink still carries every byte encapsulated; calling the
+   tunnel "the WAN" would hide the real uplink under `other` and count the same
+   traffic twice in any WAN total. `defroute` records who actually holds the route.
+3. The uci network named `wan`/`wan6`, or any other default-route device, is `wan`.
+4. Everything else is `other` (bridge ports, ifb mirrors, dummy devices).
+5. If that leaves no `wan` at all — a router whose only default route is a
+   tunnel and which has no uci `wan` — the route holder is promoted, so the
+   overview always has something to graph.
+
+`primary` picks the uci `wan` first, then a default-route WAN, then the first
+WAN. Multi-WAN responses are **not** summed by the frontend: on a failover pair
+that double-counts, and on two independent uplinks the sum describes neither
+link (see issue #28).
+
+**Caching:** the role map is the expensive part (sourcing `trafficctl-fw.sh`
+runs `nft list tables`; `tctl_lan_subnets` forks ubus and jsonfilter per
+network), so it is memoized in `/tmp/trafficctl_ifroles` with a 60 s TTL and the
+poll path reads only `/proc/net/dev` plus that file. An interface missing from a
+still-fresh cache triggers one rebuild and a re-emit inside the same invocation,
+so a tunnel coming up is classified on the next poll rather than up to a minute
+later. Overridable for testing via `TCTL_IFROLE_CACHE`, `TCTL_IFROLE_TTL`,
+`TCTL_PROC_NET_DEV` and `TCTL_SYSFS_NET`.
 
 ---
 
