@@ -4,6 +4,16 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.15.0] - 2026-09-19
+
+### Features
+- global bmon-style traffic overview ([#26](https://github.com/YusDyr/luci-app-trafficctl/issues/26) item 7) ([#58](https://github.com/YusDyr/luci-app-trafficctl/issues/58)) ([77bb925](https://github.com/YusDyr/luci-app-trafficctl/commit/77bb925d988d72a494d88331ff82bf58f8fdd11c))
+  Adds a global overview panel above the device table: an uplink throughput graph, role-badged per-interface rows with sparklines on a shared scale, and top talkers read from the speed map pollBytes() already maintains. No new collection — kernel counters plus data already on the page — and no timer of its own, so it inherits the Poll chip, document.hidden and the existing teardown.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.14.0...v1.15.0
+
+---
+
 ## [1.14.0] - 2026-09-18
 
 ### Features
