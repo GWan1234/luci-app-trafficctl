@@ -4,6 +4,20 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.18.0] - 2026-09-27
+
+### Features
+- cut all internet access while keeping the LAN working ([#55](https://github.com/YusDyr/luci-app-trafficctl/issues/55)) ([#59](https://github.com/YusDyr/luci-app-trafficctl/issues/59)) ([9a95c61](https://github.com/YusDyr/luci-app-trafficctl/commit/9a95c61b5f8cc29c4b6de3faabae1ac4f256e7f4))
+  A single control that cuts internet access for every device while LAN keeps
+  working. Off by default, indefinite until switched off, and the engaged state
+  lives in tmpfs so a reboot always restores the internet; 'keep after reboot' is
+  its own opt-in rather than the global persist_rules flag, so nobody inherits a
+  persistent lockout from an unrelated decision.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.17.0...v1.18.0
+
+---
+
 ## [1.17.0] - 2026-09-25
 
 ### Features
