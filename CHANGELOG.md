@@ -4,6 +4,18 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.18.1] - 2026-09-29
+
+### Bug Fixes
+- Block WiFi reported success while the device stayed online ([#69](https://github.com/YusDyr/luci-app-trafficctl/issues/69)) ([30137d0](https://github.com/YusDyr/luci-app-trafficctl/commit/30137d0031d60cb2820b8a1976c8ec2222dcda2e))
+  Blocking a device's WiFi from the dashboard wrote the uci maclist, reported
+  success, and left the device online. Three defects behind one symptom, all
+  found on a live router:
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.18.0...v1.18.1
+
+---
+
 ## [1.18.0] - 2026-09-27
 
 ### Features
