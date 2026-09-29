@@ -4,6 +4,21 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.18.2] - 2026-09-29
+
+### Bug Fixes
+- enforce blocks and upload limits over IPv6 via MAC-keyed rules ([#70](https://github.com/YusDyr/luci-app-trafficctl/issues/70)) ([7f6f7e9](https://github.com/YusDyr/luci-app-trafficctl/commit/7f6f7e996ea67b90e8f597619939daf5acdf1f78))
+  Reported in #67 with a clean reproduction: 9.96 Mbit/s over IPv4 against a
+  10 Mbit/s limit, 151 Mbit/s over IPv6 to the same endpoint. The gap was
+  systemic — no enforcement path in the package matched IPv6 at all — and the
+  block case mattered most: a device reported as blocked had full, unmetered
+  IPv6 access, which unlike a limit that under-delivers is invisible until it
+  matters.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.18.1...v1.18.2
+
+---
+
 ## [1.18.1] - 2026-09-29
 
 ### Bug Fixes
