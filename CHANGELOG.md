@@ -4,6 +4,20 @@ All notable changes to luci-app-trafficctl since v1.0.0.
 
 ---
 
+## [1.19.0] - 2026-09-30
+
+### Features
+- aggregate rate limits per subnet / VLAN ([#71](https://github.com/YusDyr/luci-app-trafficctl/issues/71)) ([bea0475](https://github.com/YusDyr/luci-app-trafficctl/commit/bea0475473cab2288aec73c7814b5cee7c2f7d85))
+  Requested in #64 for Home/IoT/Guest VLANs. The engine already supported an
+  aggregate cap — trafficctl-ratelimit.sh takes a CIDR and a 'shared' mode that
+  puts the whole target in one bucket — but nothing in the dashboard exposed it
+  and neither README nor docs/API.md mentioned CIDR targets or the mode at all.
+  That omission is why the issue existed.
+
+**Full Changelog**: https://github.com/YusDyr/luci-app-trafficctl/compare/v1.18.2...v1.19.0
+
+---
+
 ## [1.18.2] - 2026-09-29
 
 ### Bug Fixes
